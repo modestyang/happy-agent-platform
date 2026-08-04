@@ -2,13 +2,16 @@ package happy.jayden.yang.architecture;
 
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
-@AnalyzeClasses(packages = "happy.jayden.yang")
+@AnalyzeClasses(
+        packages = "happy.jayden.yang",
+        importOptions = ImportOption.DoNotIncludeTests.class)
 class ModuleBoundaryTest {
     @ArchTest
     static final ArchRule agentCoreIsApplicationAgnostic =

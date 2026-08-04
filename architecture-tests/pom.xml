@@ -14,6 +14,54 @@
     <dependencies>
         <dependency>
             <groupId>happy.jayden.yang</groupId>
+            <artifactId>fitness-common</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>fitness-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>fitness-infrastructure</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>agentbuilder-core</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>agentbuilder-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>agentbuilder-infrastructure</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>agentscope-adapter</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>spring-ai-alibaba-adapter</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
             <artifactId>starter</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
@@ -21,6 +69,11 @@
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

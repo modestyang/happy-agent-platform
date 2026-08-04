@@ -3,6 +3,9 @@ package happy.jayden.yang.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
@@ -17,19 +20,32 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.MountableFile;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 @SpringJUnitConfig(classes = {FitnessDataSourceConfig.class, AgentDataSourceConfig.class})
 class DualSchemaIntegrationTest {
 
+  private static final Path PROJECT_ROOT = projectRoot();
+
   @Container
   static final PostgreSQLContainer<?> POSTGRES =
-      new PostgreSQLContainer<>("postgres:16-alpine")
+      new PostgreSQLContainer<>("postgres:16.14-alpine3.24")
           .withDatabaseName("happy_agent")
           .withUsername("postgres")
           .withPassword("postgres")
+          .withEnv("FITNESS_DB_PASSWORD_FILE", "/run/secrets/fitness_db_password")
+          .withEnv("AGENT_DB_PASSWORD_FILE", "/run/secrets/agent_db_password")
           .withCopyFileToContainer(
-              MountableFile.forHostPath(Path.of("deploy/postgres/init.sql").toAbsolutePath()),
-              "/docker-entrypoint-initdb.d/00-init.sql");
+              MountableFile.forHostPath(PROJECT_ROOT.resolve("deploy/postgres/init.sh")),
+              "/docker-entrypoint-initdb.d/00-init.sh")
+          .withCopyFileToContainer(
+              MountableFile.forHostPath(PROJECT_ROOT.resolve("deploy/postgres/init.sql")),
+              "/docker-entrypoint-initdb.d/01-init.sql")
+          .withCopyFileToContainer(
+              MountableFile.forHostPath(testSecret("fitness_db_password", "fitness-test-password")),
+              "/run/secrets/fitness_db_password")
+          .withCopyFileToContainer(
+              MountableFile.forHostPath(testSecret("agent_db_password", "agent-test-password")),
+              "/run/secrets/agent_db_password");
 
   @Autowired
   @Qualifier("fitnessDataSource")
@@ -43,6 +59,30 @@ class DualSchemaIntegrationTest {
   static void databaseProperties(DynamicPropertyRegistry registry) {
     registry.add("happy.datasource.fitness.url", POSTGRES::getJdbcUrl);
     registry.add("happy.datasource.agent.url", POSTGRES::getJdbcUrl);
+    registry.add("happy.datasource.fitness.password", () -> "fitness-test-password");
+    registry.add("happy.datasource.agent.password", () -> "agent-test-password");
+  }
+
+  private static Path testSecret(String name, String value) {
+    try {
+      Path secret = Files.createTempFile("happy-agent-", "-" + name);
+      Files.writeString(secret, value, StandardCharsets.UTF_8);
+      secret.toFile().deleteOnExit();
+      return secret;
+    } catch (IOException exception) {
+      throw new IllegalStateException("Unable to create Testcontainers secret file", exception);
+    }
+  }
+
+  private static Path projectRoot() {
+    Path directory = Path.of("").toAbsolutePath();
+    while (directory != null) {
+      if (Files.isRegularFile(directory.resolve("deploy/docker-compose.yml"))) {
+        return directory;
+      }
+      directory = directory.getParent();
+    }
+    throw new IllegalStateException("Unable to locate the repository root");
   }
 
   @Test

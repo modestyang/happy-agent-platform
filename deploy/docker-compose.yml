@@ -1,19 +1,23 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine3.24
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-happy_agent}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      POSTGRES_DB: happy_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      FITNESS_DB_PASSWORD_FILE: /run/secrets/fitness_db_password
+      AGENT_DB_PASSWORD_FILE: /run/secrets/agent_db_password
     volumes:
       - type: bind
         source: ${POSTGRES_DATA_DIR:-/opt/happy-agent/data/postgres}
         target: /var/lib/postgresql/data
       - type: bind
+        source: ./postgres/init.sh
+        target: /docker-entrypoint-initdb.d/00-init.sh
+        read_only: true
+      - type: bind
         source: ./postgres/init.sql
-        target: /docker-entrypoint-initdb.d/00-init.sql
+        target: /docker-entrypoint-initdb.d/01-init.sql
         read_only: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -21,3 +25,15 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    secrets:
+      - postgres_password
+      - fitness_db_password
+      - agent_db_password
+
+secrets:
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_FILE:?set POSTGRES_PASSWORD_FILE to a secret file}
+  fitness_db_password:
+    file: ${FITNESS_DB_PASSWORD_FILE:?set FITNESS_DB_PASSWORD_FILE to a secret file}
+  agent_db_password:
+    file: ${AGENT_DB_PASSWORD_FILE:?set AGENT_DB_PASSWORD_FILE to a secret file}

@@ -1,19 +1,22 @@
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fitness_app') THEN
-        CREATE ROLE fitness_app LOGIN PASSWORD 'fitness_app_password' NOINHERIT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agent_app') THEN
-        CREATE ROLE agent_app LOGIN PASSWORD 'agent_app_password' NOINHERIT;
-    END IF;
-END
-$$;
+SELECT format('CREATE ROLE fitness_app LOGIN PASSWORD %L NOINHERIT', :'fitness_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fitness_app')
+\gexec
+
+SELECT format('CREATE ROLE agent_app LOGIN PASSWORD %L NOINHERIT', :'agent_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agent_app')
+\gexec
+
+SELECT format('ALTER ROLE fitness_app PASSWORD %L', :'fitness_password')
+\gexec
+
+SELECT format('ALTER ROLE agent_app PASSWORD %L', :'agent_password')
+\gexec
 
 ALTER ROLE fitness_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT;
 ALTER ROLE agent_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT;
 
 REVOKE ALL ON DATABASE happy_agent FROM PUBLIC;
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA public FROM PUBLIC, fitness_app, agent_app;
 
 CREATE SCHEMA IF NOT EXISTS fitness AUTHORIZATION fitness_app;
 CREATE SCHEMA IF NOT EXISTS agent AUTHORIZATION agent_app;

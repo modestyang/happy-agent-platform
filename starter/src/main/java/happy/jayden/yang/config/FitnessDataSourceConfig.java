@@ -20,7 +20,7 @@ public class FitnessDataSourceConfig {
       @Value("${happy.datasource.fitness.url:jdbc:postgresql://localhost:5432/happy_agent}")
           String url,
       @Value("${happy.datasource.fitness.username:fitness_app}") String username,
-      @Value("${happy.datasource.fitness.password:fitness_app_password}") String password) {
+      @Value("${happy.datasource.fitness.password}") String password) {
     return dataSource(url, username, password, "fitness");
   }
 

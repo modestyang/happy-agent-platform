@@ -7,6 +7,7 @@ import org.flywaydb.core.Flyway;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
@@ -20,7 +21,7 @@ public class AgentDataSourceConfig {
       @Value("${happy.datasource.agent.url:jdbc:postgresql://localhost:5432/happy_agent}")
           String url,
       @Value("${happy.datasource.agent.username:agent_app}") String username,
-      @Value("${happy.datasource.agent.password:agent_app_password}") String password) {
+      @Value("${happy.datasource.agent.password}") String password) {
     return dataSource(url, username, password, "agent");
   }
 
@@ -32,6 +33,7 @@ public class AgentDataSourceConfig {
   }
 
   @Bean(name = "agentFlyway", initMethod = "migrate")
+  @DependsOn("fitnessFlyway")
   Flyway agentFlyway(
       @org.springframework.beans.factory.annotation.Qualifier("agentDataSource")
           DataSource dataSource) {

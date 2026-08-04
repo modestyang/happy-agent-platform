@@ -9,7 +9,6 @@ output_file="${output_dir}/happy_agent-${timestamp}.dump"
 
 mkdir -p "${output_dir}"
 docker compose -f "${compose_file}" exec -T postgres \
-  pg_dump --username="${POSTGRES_USER:-postgres}" --format=custom --no-owner --no-privileges \
-  --dbname="${POSTGRES_DB:-happy_agent}" > "${output_file}"
+  pg_dump --username=postgres --format=custom --dbname=happy_agent > "${output_file}"
 
 printf 'Exported %s\n' "${output_file}"

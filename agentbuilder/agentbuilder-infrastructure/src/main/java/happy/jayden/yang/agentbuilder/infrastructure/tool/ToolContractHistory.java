@@ -60,6 +60,15 @@ final class ToolContractHistory {
               + " is below historical maximum version "
               + maximum);
     }
+    if (descriptor.contractVersion() > maximum + 1) {
+      throw new IllegalStateException(
+          "Tool contract "
+              + identity(descriptor)
+              + " must use next version "
+              + (maximum + 1)
+              + " after historical maximum "
+              + maximum);
+    }
     var historical = history.get(descriptor.contractVersion());
     if (historical != null && !historical.schemaChecksum().equals(descriptor.schemaChecksum())) {
       throw new IllegalStateException(

@@ -78,6 +78,18 @@ class DefaultToolRegistryTest {
   }
 
   @Test
+  void rejectsDuplicateRuntimeNamesAcrossDifferentRegistrations() {
+    var first = scanner().scanRegistration(new QueryTools());
+    var second = scanner().scanRegistration(new AlternateQueryTools());
+
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class, () -> new DefaultToolRegistry(List.of(first, second)));
+
+    assertTrue(exception.getMessage().contains("duplicate runtimeName query_workouts"));
+  }
+
+  @Test
   void rejectsOverridesThatExceedDescriptorCeilingsOrExecutionSemantics() {
     var queryRegistry =
         new DefaultToolRegistry(List.of(scanner().scanRegistration(new QueryTools())));
@@ -252,6 +264,23 @@ class DefaultToolRegistryTest {
         outputDescription = "删除结果")
     String delete() {
       return "deleted";
+    }
+  }
+
+  static final class AlternateQueryTools {
+    @AgentTool(
+        key = "fitness.alternate_query",
+        version = 1,
+        runtimeName = "query_workouts",
+        displayName = "备用训练查询",
+        description = "读取备用训练信息",
+        whenToUse = "需要备用训练查询时",
+        whenNotToUse = "修改训练时",
+        applicationKey = "fitness",
+        group = "workout",
+        outputDescription = "查询结果")
+    String query() {
+      return "alternate";
     }
   }
 }

@@ -5,14 +5,15 @@ import happy.jayden.yang.agentbuilder.core.tool.AgentToolParam;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 record ToolMethodDefinition(
     Object bean,
     Method contractMethod,
-    Method annotationSource,
     Method invocableMethod,
     AgentTool metadata,
     List<ToolMethodParameter> modelParameters,
@@ -21,23 +22,21 @@ record ToolMethodDefinition(
   ToolMethodDefinition(
       Object bean,
       Method contractMethod,
-      Method annotationSource,
       Method invocableMethod,
-      AgentTool metadata) {
+      AgentTool metadata,
+      List<Method> parameterSources) {
     this(
         bean,
         contractMethod,
-        annotationSource,
         invocableMethod,
         metadata,
-        modelParameters(contractMethod, annotationSource),
+        modelParameters(contractMethod, parameterSources),
         contextIndex(contractMethod));
   }
 
   ToolMethodDefinition {
     Objects.requireNonNull(bean, "bean");
     Objects.requireNonNull(contractMethod, "contractMethod");
-    Objects.requireNonNull(annotationSource, "annotationSource");
     Objects.requireNonNull(invocableMethod, "invocableMethod");
     Objects.requireNonNull(metadata, "metadata");
     modelParameters = List.copyOf(Objects.requireNonNull(modelParameters, "modelParameters"));
@@ -48,10 +47,19 @@ record ToolMethodDefinition(
   }
 
   private static List<ToolMethodParameter> modelParameters(
-      Method contractMethod, Method annotationSource) {
-    if (contractMethod.getParameterCount() != annotationSource.getParameterCount()) {
-      throw new IllegalArgumentException("Tool annotation source has incompatible parameters");
-    }
+      Method contractMethod, List<Method> parameterSources) {
+    Objects.requireNonNull(parameterSources, "parameterSources");
+    var sources =
+        parameterSources.stream()
+            .peek(
+                source -> {
+                  if (source.getParameterCount() != contractMethod.getParameterCount()) {
+                    throw new IllegalArgumentException(
+                        "Tool parameter metadata source has incompatible parameters");
+                  }
+                })
+            .sorted(Comparator.comparing(Method::toGenericString))
+            .toList();
     var parameters = new ArrayList<ToolMethodParameter>();
     var names = new HashSet<String>();
     for (int index = 0; index < contractMethod.getParameterCount(); index++) {
@@ -59,18 +67,7 @@ record ToolMethodDefinition(
       if (contractParameter.getType() == ToolExecutionContext.class) {
         continue;
       }
-      var metadata = contractParameter.getAnnotation(AgentToolParam.class);
-      if (metadata == null) {
-        metadata = annotationSource.getParameters()[index].getAnnotation(AgentToolParam.class);
-      }
-      if (metadata == null) {
-        throw new IllegalArgumentException(
-            "model parameter at index "
-                + index
-                + " on "
-                + contractMethod.toGenericString()
-                + " must declare @AgentToolParam");
-      }
+      var metadata = mergedParameterMetadata(sources, index, contractMethod);
       if (metadata.name().isBlank()) {
         throw new IllegalArgumentException(
             "method @AgentToolParam.name must be explicit at index "
@@ -91,6 +88,42 @@ record ToolMethodDefinition(
               metadata));
     }
     return parameters;
+  }
+
+  private static AgentToolParam mergedParameterMetadata(
+      List<Method> sources, int index, Method contractMethod) {
+    var annotated =
+        sources.stream()
+            .filter(
+                source -> source.getParameters()[index].isAnnotationPresent(AgentToolParam.class))
+            .toList();
+    if (annotated.isEmpty()) {
+      throw new IllegalArgumentException(
+          "model parameter at index "
+              + index
+              + " on "
+              + contractMethod.toGenericString()
+              + " must declare @AgentToolParam");
+    }
+    var metadata = annotated.get(0).getParameters()[index].getAnnotation(AgentToolParam.class);
+    if (annotated.stream()
+        .map(source -> source.getParameters()[index].getAnnotation(AgentToolParam.class))
+        .anyMatch(candidate -> !metadata.equals(candidate))) {
+      var locations =
+          annotated.stream()
+              .map(Method::toGenericString)
+              .distinct()
+              .sorted()
+              .collect(Collectors.joining(", "));
+      throw new IllegalArgumentException(
+          "conflicting @AgentToolParam metadata at index "
+              + index
+              + " for "
+              + contractMethod.toGenericString()
+              + " from "
+              + locations);
+    }
+    return metadata;
   }
 
   private static int contextIndex(Method method) {

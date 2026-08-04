@@ -27,6 +27,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
   public DefaultToolRegistry(Collection<ToolRegistration> registrations) {
     Objects.requireNonNull(registrations, "registrations");
     var index = new HashMap<String, ToolRegistration>();
+    var runtimeNames = new HashMap<String, ToolDescriptor>();
     for (var registration : registrations) {
       Objects.requireNonNull(registration, "registrations item");
       if (registration.descriptor().status() != ToolLifecycleStatus.AVAILABLE) {
@@ -36,6 +37,18 @@ public final class DefaultToolRegistry implements ToolRegistry {
       if (index.putIfAbsent(identity(registration.descriptor()), registration) != null) {
         throw new IllegalArgumentException(
             "duplicate Tool registration " + identity(registration.descriptor()));
+      }
+      var runtimeCollision =
+          runtimeNames.putIfAbsent(
+              registration.descriptor().runtimeName(), registration.descriptor());
+      if (runtimeCollision != null) {
+        throw new IllegalArgumentException(
+            "duplicate runtimeName "
+                + registration.descriptor().runtimeName()
+                + " for "
+                + identity(runtimeCollision)
+                + " and "
+                + identity(registration.descriptor()));
       }
     }
     this.registrations = Map.copyOf(index);

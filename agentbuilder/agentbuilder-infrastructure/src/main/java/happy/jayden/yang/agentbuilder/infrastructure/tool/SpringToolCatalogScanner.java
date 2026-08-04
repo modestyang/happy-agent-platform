@@ -1,6 +1,7 @@
 package happy.jayden.yang.agentbuilder.infrastructure.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import happy.jayden.yang.agentbuilder.core.tool.ToolBuildManifest;
 import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
 import happy.jayden.yang.agentbuilder.core.tool.ToolLifecycleStatus;
@@ -22,7 +23,7 @@ public final class SpringToolCatalogScanner {
   private final ToolContractHistory history;
   private final ToolDescriptorFactory descriptors = new ToolDescriptorFactory();
   private final SpringToolMethodDiscovery methodDiscovery = new SpringToolMethodDiscovery();
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new Jdk8Module());
   private List<ToolRegistration> currentRegistrations = List.of();
 
   public SpringToolCatalogScanner(
@@ -36,13 +37,20 @@ public final class SpringToolCatalogScanner {
   }
 
   public synchronized ToolRegistration scanRegistration(Object bean) {
-    Objects.requireNonNull(bean, "bean");
-    var registrations = scanRegistrations(List.of(bean));
-    if (registrations.size() != 1) {
-      throw new IllegalArgumentException(
-          "expected exactly one @AgentTool method but found " + registrations.size());
+    currentRegistrations = List.of();
+    try {
+      Objects.requireNonNull(bean, "bean");
+      var registrations = discoverRegistrations(List.of(bean));
+      if (registrations.size() != 1) {
+        throw new IllegalArgumentException(
+            "expected exactly one @AgentTool method but found " + registrations.size());
+      }
+      currentRegistrations = registrations;
+      return registrations.get(0);
+    } catch (RuntimeException | Error failure) {
+      currentRegistrations = List.of();
+      throw failure;
     }
-    return registrations.get(0);
   }
 
   public synchronized List<ToolDescriptor> scan(ListableBeanFactory beanFactory) {
@@ -50,12 +58,18 @@ public final class SpringToolCatalogScanner {
   }
 
   public synchronized List<ToolRegistration> scanRegistrations(ListableBeanFactory beanFactory) {
-    Objects.requireNonNull(beanFactory, "beanFactory");
-    var beans = new ArrayList<>();
-    Arrays.stream(beanFactory.getBeanDefinitionNames())
-        .sorted()
-        .forEach(name -> beans.add(beanFactory.getBean(name)));
-    return scanRegistrations(beans);
+    currentRegistrations = List.of();
+    try {
+      Objects.requireNonNull(beanFactory, "beanFactory");
+      var beans = new ArrayList<>();
+      Arrays.stream(beanFactory.getBeanDefinitionNames())
+          .sorted()
+          .forEach(name -> beans.add(beanFactory.getBean(name)));
+      return scanRegistrations(beans);
+    } catch (RuntimeException | Error failure) {
+      currentRegistrations = List.of();
+      throw failure;
+    }
   }
 
   public synchronized List<ToolDescriptor> scanAll(Collection<?> beans) {
@@ -63,8 +77,19 @@ public final class SpringToolCatalogScanner {
   }
 
   public synchronized List<ToolRegistration> scanRegistrations(Collection<?> beans) {
-    Objects.requireNonNull(beans, "beans");
     currentRegistrations = List.of();
+    try {
+      var registrations = discoverRegistrations(beans);
+      currentRegistrations = registrations;
+      return currentRegistrations;
+    } catch (RuntimeException | Error failure) {
+      currentRegistrations = List.of();
+      throw failure;
+    }
+  }
+
+  private List<ToolRegistration> discoverRegistrations(Collection<?> beans) {
+    Objects.requireNonNull(beans, "beans");
     var methods = new ArrayList<ToolMethodDefinition>();
     for (var bean : beans) {
       methods.addAll(methodDiscovery.discover(Objects.requireNonNull(bean, "beans item")));
@@ -83,34 +108,39 @@ public final class SpringToolCatalogScanner {
     }
     validateDiscoverySet(registrations);
     registrations.forEach(registration -> history.validate(registration.descriptor()));
-    currentRegistrations = List.copyOf(registrations);
-    return currentRegistrations;
+    return List.copyOf(registrations);
   }
 
   public synchronized ToolBuildManifest buildManifest() {
-    if (currentRegistrations.isEmpty()) {
-      throw new IllegalStateException("scan current executable Tool registrations before manifest");
-    }
-    var entries = new ArrayList<ToolManifestEntry>();
-    for (var registration : currentRegistrations) {
-      var descriptor = registration.descriptor();
-      if (!descriptor.registeredBuild().equals(registeredBuild)) {
-        throw new IllegalStateException("Tool registration build does not match scanner build");
-      }
-      if (descriptor.status() != ToolLifecycleStatus.AVAILABLE) {
+    try {
+      if (currentRegistrations.isEmpty()) {
         throw new IllegalStateException(
-            "only AVAILABLE Tool registrations can enter a build manifest: "
-                + identity(descriptor));
+            "scan current executable Tool registrations before manifest");
       }
-      Objects.requireNonNull(registration.handler(), "current Tool registration handler");
-      entries.add(
-          new ToolManifestEntry(
-              descriptor.toolKey(), descriptor.contractVersion(), descriptor.schemaChecksum()));
+      var entries = new ArrayList<ToolManifestEntry>();
+      for (var registration : currentRegistrations) {
+        var descriptor = registration.descriptor();
+        if (!descriptor.registeredBuild().equals(registeredBuild)) {
+          throw new IllegalStateException("Tool registration build does not match scanner build");
+        }
+        if (descriptor.status() != ToolLifecycleStatus.AVAILABLE) {
+          throw new IllegalStateException(
+              "only AVAILABLE Tool registrations can enter a build manifest: "
+                  + identity(descriptor));
+        }
+        Objects.requireNonNull(registration.handler(), "current Tool registration handler");
+        entries.add(
+            new ToolManifestEntry(
+                descriptor.toolKey(), descriptor.contractVersion(), descriptor.schemaChecksum()));
+      }
+      entries.sort(
+          Comparator.comparing(ToolManifestEntry::toolKey)
+              .thenComparingInt(ToolManifestEntry::contractVersion));
+      return new ToolBuildManifest(registeredBuild, entries);
+    } catch (RuntimeException | Error failure) {
+      currentRegistrations = List.of();
+      throw failure;
     }
-    entries.sort(
-        Comparator.comparing(ToolManifestEntry::toolKey)
-            .thenComparingInt(ToolManifestEntry::contractVersion));
-    return new ToolBuildManifest(registeredBuild, entries);
   }
 
   private static void validateDiscoverySet(List<ToolRegistration> registrations) {

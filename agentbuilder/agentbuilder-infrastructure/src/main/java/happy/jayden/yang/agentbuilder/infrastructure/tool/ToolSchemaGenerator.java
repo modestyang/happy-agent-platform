@@ -192,6 +192,7 @@ final class ToolSchemaGenerator {
         }
       } else {
         var fields = allModelFields(type);
+        validateConstructibleBean(type, fields, location);
         for (var field : fields) {
           addFieldProperty(field, properties, required, visiting, location);
         }
@@ -279,6 +280,41 @@ final class ToolSchemaGenerator {
     }
     fields.sort(Comparator.comparing(Field::getName));
     return fields;
+  }
+
+  private static void validateConstructibleBean(
+      Class<?> type, List<Field> fields, String location) {
+    for (var field : fields) {
+      if (!isWritableBeanProperty(type, field)) {
+        throw new IllegalArgumentException(
+            "field " + field.getName() + " at " + location + " must be a writable bean property");
+      }
+    }
+    try {
+      type.getConstructor();
+    } catch (NoSuchMethodException exception) {
+      throw new IllegalArgumentException(
+          "Tool DTO "
+              + type.getName()
+              + " at "
+              + location
+              + " must have a public no-argument constructor",
+          exception);
+    }
+  }
+
+  private static boolean isWritableBeanProperty(Class<?> type, Field field) {
+    if (Modifier.isPublic(field.getModifiers()) && !Modifier.isFinal(field.getModifiers())) {
+      return true;
+    }
+    var setterName =
+        "set" + Character.toUpperCase(field.getName().charAt(0)) + field.getName().substring(1);
+    return java.util.Arrays.stream(type.getMethods())
+        .anyMatch(
+            method ->
+                method.getName().equals(setterName)
+                    && method.getParameterCount() == 1
+                    && method.getGenericParameterTypes()[0].equals(field.getGenericType()));
   }
 
   private static Map<String, Object> objectSchema(

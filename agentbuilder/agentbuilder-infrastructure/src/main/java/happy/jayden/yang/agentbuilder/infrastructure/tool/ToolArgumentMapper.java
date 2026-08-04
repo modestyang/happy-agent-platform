@@ -42,6 +42,9 @@ final class ToolArgumentMapper {
     }
     if (type instanceof ParameterizedType parameterized) {
       var raw = (Class<?>) parameterized.getRawType();
+      if (raw == Optional.class) {
+        return normalize(value, parameterized.getActualTypeArguments()[0]);
+      }
       if (Collection.class.isAssignableFrom(raw)) {
         return normalizeArray(value, parameterized.getActualTypeArguments()[0]);
       }

@@ -5,8 +5,12 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.core.BridgeMethodResolver;
 import org.springframework.core.MethodIntrospector;
@@ -18,102 +22,186 @@ final class SpringToolMethodDiscovery {
   List<ToolMethodDefinition> discover(Object bean) {
     Objects.requireNonNull(bean, "bean");
     var targetType = ClassUtils.getUserClass(AopUtils.getTargetClass(bean));
-    var selected =
-        MethodIntrospector.selectMethods(
-            targetType,
-            (MethodIntrospector.MetadataLookup<AgentTool>)
-                method -> AnnotatedElementUtils.findMergedAnnotation(method, AgentTool.class));
-    var logical = new LinkedHashMap<String, Candidate>();
-    selected.forEach(
-        (candidate, foundMetadata) -> {
-          var mostSpecific = ClassUtils.getMostSpecificMethod(candidate, targetType);
-          var bridged = BridgeMethodResolver.findBridgedMethod(mostSpecific);
-          var specificMetadata =
-              AnnotatedElementUtils.findMergedAnnotation(bridged, AgentTool.class);
-          var source = specificMetadata == null ? candidate : bridged;
-          var metadata = specificMetadata == null ? foundMetadata : specificMetadata;
-          var normalized = new Candidate(bridged, source, metadata, specificMetadata != null);
-          logical.merge(logicalIdentity(bridged), normalized, SpringToolMethodDiscovery::prefer);
-        });
+    var hierarchyMethods = hierarchyMethods(targetType);
+    var groups = new LinkedHashMap<String, List<AnnotatedMethod>>();
+    for (var annotated : annotatedMethods(targetType)) {
+      var contractMethod = mostSpecificMethod(annotated.source(), targetType);
+      groups
+          .computeIfAbsent(logicalIdentity(contractMethod), ignored -> new ArrayList<>())
+          .add(annotated);
+    }
 
     var definitions = new ArrayList<ToolMethodDefinition>();
-    logical.values().stream()
-        .sorted(Comparator.comparing(value -> value.contractMethod().toGenericString()))
+    groups.entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
         .forEach(
-            candidate ->
-                definitions.add(
-                    new ToolMethodDefinition(
-                        bean,
-                        candidate.contractMethod(),
-                        candidate.annotationSource(),
-                        invocableMethod(bean, targetType, candidate),
-                        candidate.metadata())));
+            entry -> {
+              var annotated = sorted(entry.getValue());
+              var metadata = mergeMetadata(annotated, entry.getKey());
+              var contractMethod =
+                  annotated.stream()
+                      .map(value -> mostSpecificMethod(value.source(), targetType))
+                      .sorted(Comparator.comparing(Method::toGenericString))
+                      .findFirst()
+                      .orElseThrow();
+              var parameterSources =
+                  hierarchyMethods.stream()
+                      .filter(
+                          method ->
+                              logicalIdentity(mostSpecificMethod(method, targetType))
+                                  .equals(entry.getKey()))
+                      .sorted(Comparator.comparing(Method::toGenericString))
+                      .toList();
+              definitions.add(
+                  new ToolMethodDefinition(
+                      bean,
+                      contractMethod,
+                      invocableMethod(bean, targetType, contractMethod, parameterSources),
+                      metadata,
+                      parameterSources));
+            });
     return List.copyOf(definitions);
   }
 
-  private static Candidate prefer(Candidate first, Candidate second) {
-    if (first.specificAnnotation() != second.specificAnnotation()) {
-      return second.specificAnnotation() ? second : first;
+  private static List<AnnotatedMethod> annotatedMethods(Class<?> targetType) {
+    var discovered = new LinkedHashMap<Method, List<AgentTool>>();
+    for (var type : hierarchyTypes(targetType)) {
+      MethodIntrospector.selectMethods(
+              type,
+              (MethodIntrospector.MetadataLookup<AgentTool>)
+                  method -> AnnotatedElementUtils.findMergedAnnotation(method, AgentTool.class))
+          .forEach(
+              (method, metadata) -> {
+                if (!declaresToolMetadata(method)) {
+                  return;
+                }
+                var values = discovered.computeIfAbsent(method, ignored -> new ArrayList<>());
+                if (values.stream().noneMatch(metadata::equals)) {
+                  values.add(metadata);
+                }
+              });
     }
-    return first
-            .annotationSource()
-            .getDeclaringClass()
-            .isAssignableFrom(second.annotationSource().getDeclaringClass())
-        ? second
-        : first;
+    var result = new ArrayList<AnnotatedMethod>();
+    discovered.forEach(
+        (method, values) ->
+            values.forEach(metadata -> result.add(new AnnotatedMethod(method, metadata))));
+    result.sort(
+        Comparator.comparing((AnnotatedMethod value) -> value.source().toGenericString())
+            .thenComparing(value -> value.metadata().toString()));
+    return List.copyOf(result);
   }
 
-  private static Method invocableMethod(Object bean, Class<?> targetType, Candidate candidate) {
-    try {
-      return AopUtils.selectInvocableMethod(candidate.contractMethod(), bean.getClass());
-    } catch (IllegalStateException ignored) {
+  private static boolean declaresToolMetadata(Method method) {
+    return java.util.Arrays.stream(method.getDeclaredAnnotations())
+        .anyMatch(
+            annotation ->
+                annotation.annotationType() == AgentTool.class
+                    || AnnotatedElementUtils.findMergedAnnotation(
+                            annotation.annotationType(), AgentTool.class)
+                        != null);
+  }
+
+  private static List<Class<?>> hierarchyTypes(Class<?> targetType) {
+    var result = new LinkedHashSet<Class<?>>();
+    collectHierarchy(targetType, result);
+    return result.stream().sorted(Comparator.comparing(Class::getName)).toList();
+  }
+
+  private static void collectHierarchy(Class<?> type, Set<Class<?>> result) {
+    if (type == null || type == Object.class || !result.add(type)) {
+      return;
+    }
+    java.util.Arrays.stream(type.getInterfaces())
+        .sorted(Comparator.comparing(Class::getName))
+        .forEach(value -> collectHierarchy(value, result));
+    collectHierarchy(type.getSuperclass(), result);
+  }
+
+  private static List<Method> hierarchyMethods(Class<?> targetType) {
+    return hierarchyTypes(targetType).stream()
+        .flatMap(type -> java.util.Arrays.stream(type.getDeclaredMethods()))
+        .filter(method -> !method.isSynthetic())
+        .distinct()
+        .sorted(Comparator.comparing(Method::toGenericString))
+        .toList();
+  }
+
+  private static AgentTool mergeMetadata(List<AnnotatedMethod> methods, String logicalIdentity) {
+    var metadata = methods.get(0).metadata();
+    if (methods.stream().anyMatch(method -> !metadata.equals(method.metadata()))) {
+      var sources =
+          methods.stream()
+              .map(method -> method.source().getDeclaringClass().getName())
+              .distinct()
+              .sorted()
+              .collect(Collectors.joining(", "));
+      throw new IllegalArgumentException(
+          "conflicting @AgentTool metadata for " + logicalIdentity + " from " + sources);
+    }
+    return metadata;
+  }
+
+  private static List<AnnotatedMethod> sorted(List<AnnotatedMethod> methods) {
+    return methods.stream()
+        .sorted(
+            Comparator.comparing((AnnotatedMethod value) -> value.source().toGenericString())
+                .thenComparing(value -> value.metadata().toString()))
+        .toList();
+  }
+
+  private static Method mostSpecificMethod(Method method, Class<?> targetType) {
+    return BridgeMethodResolver.findBridgedMethod(
+        ClassUtils.getMostSpecificMethod(method, targetType));
+  }
+
+  private static Method invocableMethod(
+      Object bean, Class<?> targetType, Method contractMethod, List<Method> hierarchyMethods) {
+    var candidates = new ArrayList<Method>();
+    candidates.add(contractMethod);
+    candidates.addAll(hierarchyMethods);
+    IllegalStateException lastFailure = null;
+    for (var candidate : candidates) {
       try {
-        return AopUtils.selectInvocableMethod(candidate.annotationSource(), bean.getClass());
-      } catch (IllegalStateException secondFailure) {
-        var interfaceMethod = compatibleInterfaceMethod(targetType, candidate.contractMethod());
-        if (interfaceMethod != null) {
-          return AopUtils.selectInvocableMethod(interfaceMethod, bean.getClass());
-        }
-        throw secondFailure;
+        return AopUtils.selectInvocableMethod(candidate, bean.getClass());
+      } catch (IllegalStateException failure) {
+        lastFailure = failure;
       }
     }
+    var interfaceMethod = compatibleInterfaceMethod(targetType, contractMethod);
+    if (interfaceMethod != null) {
+      return AopUtils.selectInvocableMethod(interfaceMethod, bean.getClass());
+    }
+    throw Objects.requireNonNull(lastFailure, "no invocable Tool method candidate");
   }
 
   private static Method compatibleInterfaceMethod(Class<?> targetType, Method contractMethod) {
-    for (var implemented : ClassUtils.getAllInterfacesForClassAsSet(targetType)) {
-      for (var method : implemented.getMethods()) {
-        if (!method.getName().equals(contractMethod.getName())
-            || method.getParameterCount() != contractMethod.getParameterCount()) {
-          continue;
-        }
-        var compatible = true;
-        for (int index = 0; index < method.getParameterCount(); index++) {
-          if (!method.getParameterTypes()[index].isAssignableFrom(
-              contractMethod.getParameterTypes()[index])) {
-            compatible = false;
-            break;
-          }
-        }
-        if (compatible) {
-          return method;
-        }
+    return ClassUtils.getAllInterfacesForClassAsSet(targetType).stream()
+        .sorted(Comparator.comparing(Class::getName))
+        .flatMap(implemented -> java.util.Arrays.stream(implemented.getMethods()))
+        .filter(method -> method.getName().equals(contractMethod.getName()))
+        .filter(method -> method.getParameterCount() == contractMethod.getParameterCount())
+        .filter(method -> compatibleParameters(method, contractMethod))
+        .findFirst()
+        .orElse(null);
+  }
+
+  private static boolean compatibleParameters(Method candidate, Method contractMethod) {
+    for (int index = 0; index < candidate.getParameterCount(); index++) {
+      if (!candidate.getParameterTypes()[index].isAssignableFrom(
+          contractMethod.getParameterTypes()[index])) {
+        return false;
       }
     }
-    return null;
+    return true;
   }
 
   private static String logicalIdentity(Method method) {
     var parameters =
         java.util.Arrays.stream(method.getParameterTypes())
             .map(Class::getName)
-            .reduce((left, right) -> left + "," + right)
-            .orElse("");
+            .collect(Collectors.joining(","));
     return method.getName() + "(" + parameters + ")";
   }
 
-  private record Candidate(
-      Method contractMethod,
-      Method annotationSource,
-      AgentTool metadata,
-      boolean specificAnnotation) {}
+  private record AnnotatedMethod(Method source, AgentTool metadata) {}
 }

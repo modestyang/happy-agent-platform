@@ -133,6 +133,22 @@ class SpringToolCatalogScannerTest {
   }
 
   @Test
+  void rejectsContractVersionThatSkipsPastHistoricalMaximumPlusOne() {
+    var versionOne = scanner().scan(new DriftVersionOne());
+    var versionTwo =
+        new SpringToolCatalogScanner("build-2026.08.05", List.of(versionOne))
+            .scan(new DriftVersionTwo());
+    var scannerWithHistory =
+        new SpringToolCatalogScanner("build-2026.08.05", List.of(versionOne, versionTwo));
+
+    var exception =
+        assertThrows(
+            IllegalStateException.class, () -> scannerWithHistory.scan(new DriftVersionFour()));
+
+    assertTrue(exception.getMessage().contains("next version 3"));
+  }
+
+  @Test
   void excludesLifecycleReplacementAndBuildRegistrationFromContractChecksum() {
     var original = scanner().scan(new DriftVersionOne());
     var scannerWithHistory = new SpringToolCatalogScanner("build-2026.08.06", List.of(original));
@@ -197,6 +213,20 @@ class SpringToolCatalogScannerTest {
     var exception = assertThrows(IllegalStateException.class, scanner::buildManifest);
 
     assertTrue(exception.getMessage().contains("AVAILABLE"));
+    var cleared = assertThrows(IllegalStateException.class, scanner::buildManifest);
+    assertTrue(cleared.getMessage().contains("scan current executable"));
+  }
+
+  @Test
+  void exactOneScanFailureDoesNotCommitManifestState() {
+    var scanner = scanner();
+    scanner.scanRegistration(new HistoryTools());
+    assertEquals(1, scanner.buildManifest().availableTools().size());
+
+    assertThrows(
+        IllegalArgumentException.class, () -> scanner.scanRegistration(new MultipleToolMethods()));
+
+    assertThrows(IllegalStateException.class, scanner::buildManifest);
   }
 
   @Test
@@ -409,6 +439,23 @@ class SpringToolCatalogScannerTest {
     }
   }
 
+  static final class DriftVersionFour {
+    @AgentTool(
+        key = "fitness.drift",
+        version = 4,
+        runtimeName = "contract_drift",
+        displayName = "稳定契约工具",
+        description = "版本跳跃且模型说明已变化",
+        whenToUse = "需要稳定数据时",
+        whenNotToUse = "需要写入时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "稳定结果")
+    String changed() {
+      return "changed";
+    }
+  }
+
   static final class OperationalMetadataChangedVersionOne {
     @AgentTool(
         key = "fitness.drift",
@@ -461,6 +508,38 @@ class SpringToolCatalogScannerTest {
         outputDescription = "结果")
     String implicit(@AgentToolParam(description = "查询词", example = "legs") String query) {
       return query;
+    }
+  }
+
+  static final class MultipleToolMethods {
+    @AgentTool(
+        key = "fitness.multi_one",
+        version = 1,
+        runtimeName = "multi_one",
+        displayName = "多个工具一",
+        description = "验证单工具扫描基数",
+        whenToUse = "测试单工具扫描时",
+        whenNotToUse = "生产调用时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "结果一")
+    String one() {
+      return "one";
+    }
+
+    @AgentTool(
+        key = "fitness.multi_two",
+        version = 1,
+        runtimeName = "multi_two",
+        displayName = "多个工具二",
+        description = "验证单工具扫描基数",
+        whenToUse = "测试单工具扫描时",
+        whenNotToUse = "生产调用时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "结果二")
+    String two() {
+      return "two";
     }
   }
 }

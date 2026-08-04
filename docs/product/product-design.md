@@ -111,7 +111,7 @@ V1 不包含支付、社交、医疗诊断、运动手表接入、任意代码�
 - 平台硬限制不能覆盖。
 - 草稿采用稀疏覆盖；未填写表示继承，不用含义不清的 `null`。
 - 编辑器提供恢复默认值、字段来源和最终完整配置预览。
-- 默认档案版本化；发布快照保存档案版本、每项来源、解析后的完整配置和组件 checksum。
+- 默认档案版本化；发布快照使用闭合 `PublishedResolvedConfig` 保存应用范围、完整运行限制、完整模型参数、重试策略和逐叶来源。Framework、Provider、Model、Prompt、Memory、Output Schema、Evaluation Suite 与 Default Profile 的版本引用各自内嵌 checksum；Tool、Skill、Hook 的 checksum 内嵌在对应发布绑定中，不维护可与绑定身份漂移的独立 checksum 集合。
 - Tool Binding 只能收紧代码安全上限；写入型/高风险工具的强制审批不能关闭。
 
 ### 4.3 Agent 草稿、评测与发布
@@ -120,7 +120,7 @@ V1 不包含支付、社交、医疗诊断、运动手表接入、任意代码�
 2. 解析草稿，展示默认继承和框架最终配置；不完整或不兼容时返回闭合校验错误。
 3. 创建异步评测任务，使用绑定的 Evaluation Suite 运行并持久化用例结果。
 4. 评测达标且安全门通过后发布；失败使用 `SAFETY_GATE_FAILED`，未知框架使用 `FRAMEWORK_NOT_SUPPORTED`，缺少外部配置使用 `DEPENDENCY_NOT_CONFIGURED`。
-5. 发布生成不可变版本，冻结框架、Provider/Model、Prompt、Tool/Skill/Hook、Memory、Output Schema、Evaluation Suite、运行限制、完整有效配置和 checksum。
+5. 发布生成不可变版本，冻结框架、Provider/Model、Prompt、Tool/Skill/Hook、Memory、Output Schema、Evaluation Suite 与 Default Profile。固定组件使用“key + version + checksum”的发布引用；Tool/Skill/Hook 使用内嵌 checksum 的发布绑定，三个绑定数组允许为空并分别按组件 key/version 唯一。闭合有效配置完整保存应用范围、运行限制、模型参数、重试策略，以及每个运行/模型叶子和 Memory/Output/Default 选择的来源。
 6. 回滚不是修改旧版本，而是从目标快照创建新的不可变发布版本。
 
 ### 4.4 会话、Run、Trace 与 Playground

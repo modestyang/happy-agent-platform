@@ -279,18 +279,23 @@ Framework Catalog 由代码适配器注册并声明支持的 Skills、Hook 阶�
 - 后台提供“恢复默认值”和“查看配置来源”。
 - Agent 编辑页可预览最终发送给框架的完整配置。
 - 默认配置档案本身版本化。
-- 发布时把解析后的完整有效配置、默认档案版本和所有组件 checksum 写入不可变快照；以后默认值变化不能影响旧版本。
+- 发布时把解析后的完整有效配置、默认档案版本和所有组件 checksum 写入不可变快照；固定组件的 key/version/checksum 保存在同一发布引用中，Tool/Skill/Hook 的 checksum 保存在对应发布绑定中，不使用可与引用漂移的平行 checksum 集合。以后默认值变化不能影响旧版本。
 
 ### 6.8 发布快照
 
 不可变 Agent 版本完整包含：
 
 ```text
-frameworkVersion, providerVersion, modelBinding,
-promptVersion, toolBindings[], skillBindings[], hookBindings[],
+frameworkVersion, providerVersion, modelBinding, promptVersion,
 memoryPolicyVersion, outputSchemaVersion, evaluationSuiteVersion,
-runtimeLimits, resolvedEffectiveConfig, componentChecksums
+defaultProfileVersion  // PublishedComponentRef: key + version + checksum
+toolBindings[], skillBindings[], hookBindings[]
+  // published binding + embedded componentChecksum; arrays may be empty
+resolvedEffectiveConfig
+  // closed applicationScope + complete runtime/model/retry values + leaf provenance
 ```
+
+Tool、Skill、Hook 绑定分别按组件 key/version 唯一，身份和 checksum 在同一数组项中一一对应。`resolvedEffectiveConfig` 不是任意 path/value 列表，而是闭合结构：完整保存应用范围、Runtime Limits、Model Parameters、Retry Policy，并以闭合字段逐项保存所有运行限制、模型参数、重试、Memory、Output Schema 和 Default Profile 的解析来源。
 
 Tool、Skill、Hook、Prompt、默认档案、模型或框架的行为配置变化都先形成新草稿，通过兼容性校验和评测后才能发布。移除旧架构中的 Fitness↔Agent 内部 HTTP、服务 Token、委托换票和网络鉴权；外部 Tool 通过统一的 HTTP/MCP Adapter 执行。
 

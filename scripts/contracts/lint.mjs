@@ -227,6 +227,17 @@ for (const fixture of fixtures.filter(Boolean)) {
     const actualKeys = schemas[schemaName]?.properties?.[property]?.['x-unique-by'] ?? [];
     if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) failures.push(`${fixture.service}: ${path} must set x-unique-by=${JSON.stringify(expectedKeys)}`);
   }
+  for (const path of invariants.arraysAllowEmpty ?? []) {
+    const [schemaName, property] = path.split('.');
+    const minimum = schemas[schemaName]?.properties?.[property]?.minItems ?? 0;
+    if (minimum !== 0) failures.push(`${fixture.service}: ${path} must allow an empty array`);
+  }
+  for (const [schemaName, properties] of Object.entries(invariants.forbiddenProperties ?? {})) {
+    for (const property of properties) if (schemas[schemaName]?.properties?.[property]) failures.push(`${fixture.service}: ${schemaName} must not declare ${property}`);
+  }
+  for (const schemaName of invariants.forbiddenSchemas ?? []) {
+    if (schemas[schemaName]) failures.push(`${fixture.service}: obsolete schema ${schemaName} must be removed`);
+  }
   for (const [schemaName, minimum] of Object.entries(invariants.minimumProperties ?? {})) {
     if (schemas[schemaName]?.minProperties !== minimum) failures.push(`${fixture.service}: ${schemaName} must set minProperties=${minimum}`);
   }
@@ -239,6 +250,11 @@ for (const fixture of fixtures.filter(Boolean)) {
     const [schemaName, property] = path.split('.');
     const actualRef = schemas[schemaName]?.properties?.[property]?.items?.$ref;
     if (actualRef !== `#/components/schemas/${expectedRef}`) failures.push(`${fixture.service}: ${path} items must reference ${expectedRef}`);
+  }
+  for (const [path, expectedPattern] of Object.entries(invariants.propertyPatterns ?? {})) {
+    const [schemaName, property] = path.split('.');
+    const actualPattern = schemas[schemaName]?.properties?.[property]?.pattern;
+    if (actualPattern !== expectedPattern) failures.push(`${fixture.service}: ${path} must set pattern ${expectedPattern}`);
   }
   for (const [path, values] of Object.entries(invariants.arrayEnumIncludes ?? {})) {
     const [schemaName, property] = path.split('.');

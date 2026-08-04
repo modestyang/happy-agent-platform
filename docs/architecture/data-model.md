@@ -73,7 +73,7 @@
 | `draft_tool_bindings` | Tool key/version、enabled、usage guidance、timeout、calls/run、审批、重试、结果模式；不得突破代码上限 |
 | `draft_skill_bindings` | Skill key/version、enabled、稀疏配置；必需 Tool 校验 |
 | `draft_hook_bindings` | Hook key/version、enabled、稀疏 config；required Hook 不可关闭 |
-| `agent_versions` | agent/version（唯一）、发布时间/主体、来源草稿/回滚版本、框架/Provider/Model/Prompt/Memory/Output/Evaluation 引用、默认档案版本、完整 runtime limits、解析后的完整有效配置、组件 checksums；不可变 |
+| `agent_versions` | agent/version（唯一）、发布时间/主体、来源草稿/回滚版本；Framework/Provider/Model/Prompt/Memory/Output/Evaluation/Default Profile 使用内嵌 checksum 的发布引用，Tool/Skill/Hook 使用内嵌 checksum 且按 key/version 唯一的发布绑定（允许空数组）；闭合有效配置保存应用范围、完整 runtime limits/model parameters/retry policy 与逐叶来源；不可变，不另存可漂移的 checksum 集合 |
 | `evaluation_jobs` | job、草稿版本/输入 checksum、suite version、状态、租约/重试、总结果、错误 |
 | `evaluation_case_results` | job、case key、状态、score、expected/actual 结构化摘要、安全结果和 Trace 引用 |
 | `probe_jobs` | Provider/Model 目标、探测类型、状态、租约/重试、能力/健康结果、错误 |

@@ -32,45 +32,72 @@
       "ProbeJob": {"property":"status", "values":["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]}
     },
     "requiredProperties": {
-      "AgentVersion": ["memoryPolicyVersion", "outputSchemaVersion", "evaluationSuiteVersion", "defaultProfileVersion", "modelParameters", "resolvedEffectiveConfig", "componentChecksums"],
+      "AgentVersion": ["frameworkVersion","providerVersion","modelBinding","promptVersion","toolBindings","skillBindings","hookBindings","memoryPolicyVersion","outputSchemaVersion","evaluationSuiteVersion","defaultProfileVersion","resolvedEffectiveConfig"],
       "ResolvedAgentConfig": ["modelParameters"],
       "AgentDraftPatchRequest": ["resetPaths"],
       "SkillPatchRequest": ["status"],
       "ObjectJsonSchema": ["properties"],
-      "PublishedComponentChecksums": ["framework","provider","model","tool","skill","hook","memoryPolicy","prompt","outputSchema","evaluationSuite","defaultProfile"]
+      "PublishedComponentRef": ["componentKey","version","componentChecksum"],
+      "PublishedToolBinding": ["toolKey","contractVersion","enabled","componentChecksum"],
+      "PublishedSkillBinding": ["skillKey","version","enabled","componentChecksum"],
+      "PublishedHookBinding": ["hookKey","version","enabled","componentChecksum"],
+      "EffectiveValueSource": ["source"],
+      "PublishedResolvedConfig": ["applicationScope","runtimeLimits","modelParameters","retryPolicy","sources"],
+      "PublishedResolvedConfigSources": ["runtimeMaxRunSeconds","runtimeMaxToolCalls","runtimeMaxInputTokens","runtimeMaxOutputTokens","runtimeMaxCostUsd","runtimeConcurrentRuns","modelTemperature","modelTopP","modelMaxOutputTokens","retryPolicy","memoryPolicy","outputSchema","defaultProfile"]
     },
     "arrayMinimums": {
-      "ObjectJsonSchema.properties": 1,
-      "AgentVersion.resolvedEffectiveConfig": 1,
-      "PublishedComponentChecksums.tool": 1,
-      "PublishedComponentChecksums.skill": 1,
-      "PublishedComponentChecksums.hook": 1
+      "ObjectJsonSchema.properties": 1
     },
-    "uniqueArrays": ["PublishedComponentChecksums.tool", "PublishedComponentChecksums.skill", "PublishedComponentChecksums.hook"],
+    "uniqueArrays": ["AgentVersion.toolBindings","AgentVersion.skillBindings","AgentVersion.hookBindings"],
     "uniqueArraysBy": {
-      "PublishedComponentChecksums.tool":["componentKey","version"],
-      "PublishedComponentChecksums.skill":["componentKey","version"],
-      "PublishedComponentChecksums.hook":["componentKey","version"]
+      "AgentVersion.toolBindings":["toolKey","contractVersion"],
+      "AgentVersion.skillBindings":["skillKey","version"],
+      "AgentVersion.hookBindings":["hookKey","version"]
     },
+    "arraysAllowEmpty": ["AgentVersion.toolBindings","AgentVersion.skillBindings","AgentVersion.hookBindings"],
+    "forbiddenProperties": {"AgentVersion":["runtimeLimits","modelParameters","componentChecksums"]},
+    "forbiddenSchemas": ["PublishedComponentChecksums"],
     "minimumProperties": {"SparseModelParameters":1},
     "schemaPropertyRefs": {
       "DefaultValues.modelParameters":"SparseModelParameters",
       "ResolvedAgentConfig.modelParameters":"ModelParameters",
-      "AgentVersion.modelParameters":"ModelParameters",
-      "AgentVersion.componentChecksums":"PublishedComponentChecksums",
-      "PublishedComponentChecksums.framework":"FrameworkComponentChecksum",
-      "PublishedComponentChecksums.provider":"ProviderComponentChecksum",
-      "PublishedComponentChecksums.model":"ModelComponentChecksum",
-      "PublishedComponentChecksums.memoryPolicy":"MemoryPolicyComponentChecksum",
-      "PublishedComponentChecksums.prompt":"PromptComponentChecksum",
-      "PublishedComponentChecksums.outputSchema":"OutputSchemaComponentChecksum",
-      "PublishedComponentChecksums.evaluationSuite":"EvaluationSuiteComponentChecksum",
-      "PublishedComponentChecksums.defaultProfile":"DefaultProfileComponentChecksum"
+      "AgentVersion.frameworkVersion":"PublishedComponentRef",
+      "AgentVersion.providerVersion":"PublishedComponentRef",
+      "AgentVersion.modelBinding":"PublishedComponentRef",
+      "AgentVersion.promptVersion":"PublishedComponentRef",
+      "AgentVersion.memoryPolicyVersion":"PublishedComponentRef",
+      "AgentVersion.outputSchemaVersion":"PublishedComponentRef",
+      "AgentVersion.evaluationSuiteVersion":"PublishedComponentRef",
+      "AgentVersion.defaultProfileVersion":"PublishedComponentRef",
+      "AgentVersion.resolvedEffectiveConfig":"PublishedResolvedConfig",
+      "PublishedResolvedConfig.runtimeLimits":"RuntimeLimits",
+      "PublishedResolvedConfig.modelParameters":"ModelParameters",
+      "PublishedResolvedConfig.retryPolicy":"RetryPolicy",
+      "PublishedResolvedConfig.sources":"PublishedResolvedConfigSources",
+      "PublishedResolvedConfigSources.runtimeMaxRunSeconds":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.runtimeMaxToolCalls":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.runtimeMaxInputTokens":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.runtimeMaxOutputTokens":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.runtimeMaxCostUsd":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.runtimeConcurrentRuns":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.modelTemperature":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.modelTopP":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.modelMaxOutputTokens":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.retryPolicy":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.memoryPolicy":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.outputSchema":"EffectiveValueSource",
+      "PublishedResolvedConfigSources.defaultProfile":"EffectiveValueSource"
     },
     "arrayItemRefs": {
-      "PublishedComponentChecksums.tool":"ToolComponentChecksum",
-      "PublishedComponentChecksums.skill":"SkillComponentChecksum",
-      "PublishedComponentChecksums.hook":"HookComponentChecksum"
+      "AgentVersion.toolBindings":"PublishedToolBinding",
+      "AgentVersion.skillBindings":"PublishedSkillBinding",
+      "AgentVersion.hookBindings":"PublishedHookBinding"
+    },
+    "propertyPatterns": {
+      "PublishedComponentRef.componentChecksum":"^[a-f0-9]{64}$",
+      "PublishedToolBinding.componentChecksum":"^[a-f0-9]{64}$",
+      "PublishedSkillBinding.componentChecksum":"^[a-f0-9]{64}$",
+      "PublishedHookBinding.componentChecksum":"^[a-f0-9]{64}$"
     },
     "arrayEnumIncludes": {
       "AgentDraftPatchRequest.resetPaths":["runtime.modelParameters.temperature","runtime.modelParameters.topP","runtime.modelParameters.maxOutputTokens"]

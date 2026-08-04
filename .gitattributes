@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.java text
+*.xml text
+*.ts text
+*.json text
+*.yml text
+*.yaml text

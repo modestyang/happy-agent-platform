@@ -84,7 +84,12 @@ for (const fixture of fixtures.filter(Boolean)) {
   if (!document) continue;
   if (document.openapi !== '3.1.0') failures.push(`${fixture.service}: OpenAPI version must be 3.1.0`);
   if (document.jsonSchemaDialect !== 'https://json-schema.org/draft/2020-12/schema') failures.push(`${fixture.service}: JSON Schema dialect must be explicit`);
-  if (!document.components?.securitySchemes?.bearerAuth) failures.push(`${fixture.service}: bearerAuth security scheme is required`);
+  const expectedSecurity = requirements?.security?.[fixture.service];
+  const securityScheme = document.components?.securitySchemes?.[expectedSecurity?.scheme];
+  if (!securityScheme) failures.push(`${fixture.service}: security scheme ${expectedSecurity?.scheme} is required`);
+  if (securityScheme?.type !== 'http' || securityScheme?.scheme !== 'bearer') failures.push(`${fixture.service}: ${expectedSecurity?.scheme} must be an HTTP bearer scheme`);
+  if (securityScheme?.['x-audience'] !== expectedSecurity?.audience) failures.push(`${fixture.service}: ${expectedSecurity?.scheme} must declare audience ${expectedSecurity?.audience}`);
+  if (securityScheme?.['x-required-scope'] !== expectedSecurity?.scope) failures.push(`${fixture.service}: ${expectedSecurity?.scheme} must declare scope ${expectedSecurity?.scope}`);
   const declaredProblemCodes = new Set(document.components?.schemas?.ProblemCode?.enum ?? []);
 
   const operationIds = new Set();
@@ -97,7 +102,14 @@ for (const fixture of fixtures.filter(Boolean)) {
       else if (operationIds.has(operation.operationId)) failures.push(`${context}: duplicate operationId ${operation.operationId}`);
       else operationIds.add(operation.operationId);
       if (!operation.summary || !operation.description) failures.push(`${context}: summary and description are required`);
-      if (!Array.isArray(operation.security) && !Array.isArray(document.security)) failures.push(`${context}: security is required`);
+      const effectiveSecurity = operation.security === undefined ? document.security : operation.security;
+      if (!Array.isArray(effectiveSecurity) || effectiveSecurity.length === 0) failures.push(`${context}: non-empty inherited or operation security is required`);
+      for (const requirement of effectiveSecurity ?? []) {
+        const entries = Object.entries(requirement ?? {});
+        if (entries.length !== 1 || entries[0]?.[0] !== expectedSecurity?.scheme || !Array.isArray(entries[0]?.[1]) || entries[0][1].length !== 0) {
+          failures.push(`${context}: security must exclusively require ${expectedSecurity?.scheme}`);
+        }
+      }
       if (!Array.isArray(operation['x-error-codes']) || operation['x-error-codes'].length === 0) failures.push(`${context}: x-error-codes must close error semantics`);
       for (const code of operation['x-error-codes'] ?? []) if (!declaredProblemCodes.has(code)) failures.push(`${context}: x-error-codes contains undeclared ${code}`);
       for (const [status, response] of Object.entries(operation.responses ?? {})) {
@@ -155,6 +167,11 @@ for (const fixture of fixtures.filter(Boolean)) {
       const parameters = parametersFor(document, pathItem, operation);
       if (!parameters.some((parameter) => parameter.in === 'query' && parameter.name === parameterName)) failures.push(`${context}: required query parameter ${parameterName} is missing`);
     }
+    if (expected.exactQueryParameters) {
+      const actual = parametersFor(document, pathItem, operation).filter((parameter) => parameter.in === 'query').map((parameter) => parameter.name).sort();
+      const wanted = [...(expected.queryParameters ?? [])].sort();
+      if (JSON.stringify(actual) !== JSON.stringify(wanted)) failures.push(`${context}: query parameters must equal [${wanted.join(', ')}], got [${actual.join(', ')}]`);
+    }
   }
 
   const expectedOperationIds = new Set(fixture.operations.map((operation) => operation.operationId));
@@ -180,6 +197,16 @@ for (const fixture of fixtures.filter(Boolean)) {
     }).filter(Boolean);
     for (const value of invariant.values) if (!actual.includes(value)) failures.push(`${fixture.service}: ${schemaName} is missing discriminated ${invariant.property}=${value}`);
   }
+  for (const [schemaName, invariant] of Object.entries(invariants.unionBranches ?? {})) {
+    const branches = schemas[schemaName]?.oneOf ?? [];
+    for (const [value, expectation] of Object.entries(invariant.branches ?? {})) {
+      const branch = branches.map((candidate, index) => candidate.$ref ? resolveRef(document, candidate.$ref, `${schemaName}.oneOf[${index}]`) : candidate)
+        .find((candidate) => candidate?.properties?.[invariant.property]?.const === value);
+      if (!branch) continue;
+      for (const property of expectation.required ?? []) if (!(branch.required ?? []).includes(property)) failures.push(`${fixture.service}: ${schemaName} ${value} must require ${property}`);
+      for (const property of expectation.forbidden ?? []) if (branch.properties?.[property]) failures.push(`${fixture.service}: ${schemaName} ${value} must exclude ${property}`);
+    }
+  }
   for (const [schemaName, properties] of Object.entries(invariants.requiredProperties ?? {})) {
     const schema = schemas[schemaName];
     for (const property of properties) {
@@ -190,6 +217,38 @@ for (const fixture of fixtures.filter(Boolean)) {
   for (const [path, minimum] of Object.entries(invariants.arrayMinimums ?? {})) {
     const [schemaName, property] = path.split('.');
     if (schemas[schemaName]?.properties?.[property]?.minItems !== minimum) failures.push(`${fixture.service}: ${path} must set minItems=${minimum}`);
+  }
+  for (const path of invariants.uniqueArrays ?? []) {
+    const [schemaName, property] = path.split('.');
+    if (schemas[schemaName]?.properties?.[property]?.uniqueItems !== true) failures.push(`${fixture.service}: ${path} must set uniqueItems=true`);
+  }
+  for (const [path, expectedKeys] of Object.entries(invariants.uniqueArraysBy ?? {})) {
+    const [schemaName, property] = path.split('.');
+    const actualKeys = schemas[schemaName]?.properties?.[property]?.['x-unique-by'] ?? [];
+    if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) failures.push(`${fixture.service}: ${path} must set x-unique-by=${JSON.stringify(expectedKeys)}`);
+  }
+  for (const [schemaName, minimum] of Object.entries(invariants.minimumProperties ?? {})) {
+    if (schemas[schemaName]?.minProperties !== minimum) failures.push(`${fixture.service}: ${schemaName} must set minProperties=${minimum}`);
+  }
+  for (const [path, expectedRef] of Object.entries(invariants.schemaPropertyRefs ?? {})) {
+    const [schemaName, property] = path.split('.');
+    const actualRef = schemas[schemaName]?.properties?.[property]?.$ref;
+    if (actualRef !== `#/components/schemas/${expectedRef}`) failures.push(`${fixture.service}: ${path} must reference ${expectedRef}`);
+  }
+  for (const [path, expectedRef] of Object.entries(invariants.arrayItemRefs ?? {})) {
+    const [schemaName, property] = path.split('.');
+    const actualRef = schemas[schemaName]?.properties?.[property]?.items?.$ref;
+    if (actualRef !== `#/components/schemas/${expectedRef}`) failures.push(`${fixture.service}: ${path} items must reference ${expectedRef}`);
+  }
+  for (const [path, values] of Object.entries(invariants.arrayEnumIncludes ?? {})) {
+    const [schemaName, property] = path.split('.');
+    const actual = schemas[schemaName]?.properties?.[property]?.items?.enum ?? [];
+    for (const value of values) if (!actual.includes(value)) failures.push(`${fixture.service}: ${path} enum must include ${value}`);
+  }
+  for (const [path, values] of Object.entries(invariants.arrayEnumExcludes ?? {})) {
+    const [schemaName, property] = path.split('.');
+    const actual = schemas[schemaName]?.properties?.[property]?.items?.enum ?? [];
+    for (const value of values) if (actual.includes(value)) failures.push(`${fixture.service}: ${path} enum must exclude ${value}`);
   }
 }
 

@@ -6,7 +6,20 @@
     "discriminatedUnions": {
       "DailyMealPlan": {"property":"status", "values":["GENERATING", "READY", "FAILED"]},
       "CreateMealRecordRequest": {"property":"source", "values":["MANUAL", "RECOGNITION_CONFIRMED"]},
+      "CurrentGoalReport": {"property":"state", "values":["QUEUED", "GENERATING", "READY", "STALE", "FAILED"]},
       "AgentRunEvent": {"property":"type", "values":["RUN_STATE", "TEXT_DELTA", "STRUCTURED_COMPONENT", "TOOL", "APPROVAL", "ERROR", "COMPLETED"]}
+    },
+    "unionBranches": {
+      "CurrentGoalReport": {
+        "property":"state",
+        "branches": {
+          "QUEUED":{"required":["reportId","goalId","goalVersion","state","windowStart","windowEnd","updatedAt"],"forbidden":["metrics","computedThrough","failure"]},
+          "GENERATING":{"required":["reportId","goalId","goalVersion","state","windowStart","windowEnd","updatedAt"],"forbidden":["metrics","computedThrough","failure"]},
+          "READY":{"required":["reportId","goalId","goalVersion","state","windowStart","windowEnd","metrics","computedThrough","updatedAt"],"forbidden":["failure"]},
+          "STALE":{"required":["reportId","goalId","goalVersion","state","windowStart","windowEnd","metrics","computedThrough","updatedAt"],"forbidden":["failure"]},
+          "FAILED":{"required":["reportId","goalId","goalVersion","state","windowStart","windowEnd","failure","updatedAt"],"forbidden":["metrics","computedThrough"]}
+        }
+      }
     },
     "requiredProperties": {
       "ReadyDailyMealPlan": ["breakfast", "lunch", "dinner", "dailyNutrition"]
@@ -19,13 +32,51 @@
       "ProbeJob": {"property":"status", "values":["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]}
     },
     "requiredProperties": {
-      "AgentVersion": ["memoryPolicyVersion", "outputSchemaVersion", "evaluationSuiteVersion", "defaultProfileVersion", "resolvedEffectiveConfig"],
+      "AgentVersion": ["memoryPolicyVersion", "outputSchemaVersion", "evaluationSuiteVersion", "defaultProfileVersion", "modelParameters", "resolvedEffectiveConfig", "componentChecksums"],
+      "ResolvedAgentConfig": ["modelParameters"],
       "AgentDraftPatchRequest": ["resetPaths"],
       "SkillPatchRequest": ["status"],
-      "ObjectJsonSchema": ["properties"]
+      "ObjectJsonSchema": ["properties"],
+      "PublishedComponentChecksums": ["framework","provider","model","tool","skill","hook","memoryPolicy","prompt","outputSchema","evaluationSuite","defaultProfile"]
     },
     "arrayMinimums": {
-      "ObjectJsonSchema.properties": 1
+      "ObjectJsonSchema.properties": 1,
+      "AgentVersion.resolvedEffectiveConfig": 1,
+      "PublishedComponentChecksums.tool": 1,
+      "PublishedComponentChecksums.skill": 1,
+      "PublishedComponentChecksums.hook": 1
+    },
+    "uniqueArrays": ["PublishedComponentChecksums.tool", "PublishedComponentChecksums.skill", "PublishedComponentChecksums.hook"],
+    "uniqueArraysBy": {
+      "PublishedComponentChecksums.tool":["componentKey","version"],
+      "PublishedComponentChecksums.skill":["componentKey","version"],
+      "PublishedComponentChecksums.hook":["componentKey","version"]
+    },
+    "minimumProperties": {"SparseModelParameters":1},
+    "schemaPropertyRefs": {
+      "DefaultValues.modelParameters":"SparseModelParameters",
+      "ResolvedAgentConfig.modelParameters":"ModelParameters",
+      "AgentVersion.modelParameters":"ModelParameters",
+      "AgentVersion.componentChecksums":"PublishedComponentChecksums",
+      "PublishedComponentChecksums.framework":"FrameworkComponentChecksum",
+      "PublishedComponentChecksums.provider":"ProviderComponentChecksum",
+      "PublishedComponentChecksums.model":"ModelComponentChecksum",
+      "PublishedComponentChecksums.memoryPolicy":"MemoryPolicyComponentChecksum",
+      "PublishedComponentChecksums.prompt":"PromptComponentChecksum",
+      "PublishedComponentChecksums.outputSchema":"OutputSchemaComponentChecksum",
+      "PublishedComponentChecksums.evaluationSuite":"EvaluationSuiteComponentChecksum",
+      "PublishedComponentChecksums.defaultProfile":"DefaultProfileComponentChecksum"
+    },
+    "arrayItemRefs": {
+      "PublishedComponentChecksums.tool":"ToolComponentChecksum",
+      "PublishedComponentChecksums.skill":"SkillComponentChecksum",
+      "PublishedComponentChecksums.hook":"HookComponentChecksum"
+    },
+    "arrayEnumIncludes": {
+      "AgentDraftPatchRequest.resetPaths":["runtime.modelParameters.temperature","runtime.modelParameters.topP","runtime.modelParameters.maxOutputTokens"]
+    },
+    "arrayEnumExcludes": {
+      "AgentDraftPatchRequest.resetPaths":["runtime.modelParameters"]
     }
   }
 }

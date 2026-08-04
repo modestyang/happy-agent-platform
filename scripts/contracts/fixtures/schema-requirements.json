@@ -2,5 +2,9 @@
   "public": ["Problem","ProblemCode","HomeDashboard","UserPreferences","Goal","WorkoutPlanDetail","WorkoutExerciseDetail","WorkoutRecord","ExerciseDetail","DailyMealPlan","MealFeedback","MealRecognitionJob","MealRecord","BodyMetricRecord","CurrentGoalReport","MediaUploadTicket","AiSession","AiSessionDetail","AiRun","AgentRunEvent"],
   "admin": ["Problem","ProblemCode","FrameworkComponent","ProviderComponent","ModelComponent","ToolComponent","SkillComponent","HookComponent","MemoryPolicyComponent","PromptComponent","OutputSchemaComponent","EvaluationSuiteComponent","DefaultProfile","Agent","AgentDraft","ResolvedAgentConfig","AgentVersion","EvaluationJob","ProbeJob","AdminSessionDetail","RunDetail","TraceEvent","AgentRunEvent"],
   "problemCodes": ["DEPENDENCY_NOT_CONFIGURED","CURRENT_GOAL_NOT_FOUND","SAFETY_GATE_FAILED","FRAMEWORK_NOT_SUPPORTED"],
-  "componentCatalogs": ["FrameworkComponent","ProviderComponent","ModelComponent","ToolComponent","SkillComponent","HookComponent","MemoryPolicyComponent","PromptComponent","OutputSchemaComponent","EvaluationSuiteComponent"]
+  "componentCatalogs": ["FrameworkComponent","ProviderComponent","ModelComponent","ToolComponent","SkillComponent","HookComponent","MemoryPolicyComponent","PromptComponent","OutputSchemaComponent","EvaluationSuiteComponent"],
+  "security": {
+    "public": {"scheme":"userBearerAuth","audience":"happy-agent-public-v1","scope":"USER"},
+    "admin": {"scheme":"agentAdminBearerAuth","audience":"happy-agent-admin-v1","scope":"AGENT_ADMIN"}
+  }
 }

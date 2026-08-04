@@ -15,7 +15,7 @@ V1 不包含支付、社交、医疗诊断、运动手表接入、任意代码�
 
 - 健身用户：只能访问自己的目标、偏好、计划、记录、报告和 AI 会话。
 - Agent 管理员：管理组件、默认档案、Agent 草稿和版本，并查看管理域中的会话、Run、Trace 与评测。
-- 手机端与管理端使用独立的外部授权边界；二者没有旧式内部服务 Token、委托换票或内部 HTTP 鉴权。
+- 手机端与管理端使用独立的外部授权边界：Public API 只接受 audience `happy-agent-public-v1` 且包含 `USER` scope 的 `userBearerAuth` JWT；Admin API 只接受 audience `happy-agent-admin-v1` 且包含 `AGENT_ADMIN` scope 的 `agentAdminBearerAuth` JWT。二者没有旧式内部服务 Token、委托换票或内部 HTTP 鉴权，也不能交叉接受对方 Token。
 - Provider 凭据只显示掩码；明文只在写入或轮换请求中短暂出现，响应永不返回明文或密文。
 
 ## 3. 手机端信息架构

@@ -91,7 +91,7 @@ Registry 按 `frameworkKey` 选择 AgentScope 或 Spring AI Alibaba；未选择�
 
 ## 8. 安全与配置边界
 
-- Fitness 与 Admin 使用不同 scope；Controller 在调用用例前完成外部授权。
+- Fitness 外部边界只接受 `userBearerAuth`：JWT audience 固定为 `happy-agent-public-v1`，必需 scope 为 `USER`。Admin 外部边界只接受 `agentAdminBearerAuth`：JWT audience 固定为 `happy-agent-admin-v1`，必需 scope 为 `AGENT_ADMIN`；Controller 在调用用例前完成外部授权，两个边界不得互相降级或复用 Token。
 - Provider 密文只由 Agent infrastructure 加解密；主密钥来自只读 Secret 文件。
 - OSS 优先 ECS RAM Role；仓库和 DTO 都不保存长期 AccessKey。
 - 正式代码不包含 Fake Runtime、Fake Media 或“缺配置返回伪结果”的实现。

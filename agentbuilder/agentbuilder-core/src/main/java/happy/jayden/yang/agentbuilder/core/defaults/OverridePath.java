@@ -1,0 +1,13 @@
+package happy.jayden.yang.agentbuilder.core.defaults;
+
+public enum OverridePath {
+  RUNTIME_MAX_RUN_SECONDS,
+  RUNTIME_MAX_TOOL_CALLS,
+  RUNTIME_MAX_INPUT_TOKENS,
+  RUNTIME_MAX_OUTPUT_TOKENS,
+  RUNTIME_MAX_COST_USD,
+  MODEL_TEMPERATURE,
+  MODEL_TOP_P,
+  MODEL_MAX_OUTPUT_TOKENS,
+  RETRY_POLICY
+}

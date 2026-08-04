@@ -11,14 +11,11 @@ public record PublishedResolvedConfig(
     RetryPolicy retryPolicy,
     PublishedResolvedConfigSources sources) {
   public PublishedResolvedConfig {
-    TextValidation.requireLength(applicationScope, 1, 120, "applicationScope");
+    TextValidation.requireNonBlankLength(applicationScope, 1, 120, "applicationScope");
     Objects.requireNonNull(runtimeLimits, "runtimeLimits");
     Objects.requireNonNull(modelParameters, "modelParameters");
     Objects.requireNonNull(retryPolicy, "retryPolicy");
     Objects.requireNonNull(sources, "sources");
-    if (applicationScope.isBlank() || applicationScope.length() > 120) {
-      throw new IllegalArgumentException("applicationScope must contain 1 to 120 characters");
-    }
   }
 
   public Duration timeout() {

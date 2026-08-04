@@ -12,7 +12,7 @@ public record ResolvedAgentConfig(
     RetryPolicy retryPolicy,
     PublishedResolvedConfigSources sources) {
   public ResolvedAgentConfig {
-    TextValidation.requireLength(applicationScope, 1, 120, "applicationScope");
+    TextValidation.requireNonBlankLength(applicationScope, 1, 120, "applicationScope");
     Objects.requireNonNull(runtimeLimits, "runtimeLimits");
     Objects.requireNonNull(modelParameters, "modelParameters");
     Objects.requireNonNull(retryPolicy, "retryPolicy");

@@ -19,10 +19,6 @@ public record EffectiveValueSource(
     return new EffectiveValueSource(ValueSource.AGENT_OVERRIDE, Optional.empty());
   }
 
-  public static EffectiveValueSource agentOverride(PublishedComponentRef version) {
-    return new EffectiveValueSource(ValueSource.AGENT_OVERRIDE, Optional.of(version));
-  }
-
   public static EffectiveValueSource codeDefault(PublishedComponentRef version) {
     return new EffectiveValueSource(ValueSource.CODE_DEFAULT, Optional.of(version));
   }

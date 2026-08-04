@@ -30,4 +30,12 @@ public final class TextValidation {
     }
     return value;
   }
+
+  public static String requireNonBlankLength(String value, int minimum, int maximum, String field) {
+    requireLength(value, minimum, maximum, field);
+    if (value.isBlank()) {
+      throw new IllegalArgumentException(field + " cannot be blank");
+    }
+    return value;
+  }
 }

@@ -1,8 +1,6 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
 import happy.jayden.yang.agentbuilder.core.component.AgentComponents;
-import happy.jayden.yang.agentbuilder.core.component.ComponentMetadata;
-import happy.jayden.yang.agentbuilder.core.component.DefaultProfileRef;
 import happy.jayden.yang.agentbuilder.core.component.HookBinding;
 import happy.jayden.yang.agentbuilder.core.component.PublishedComponentRef;
 import happy.jayden.yang.agentbuilder.core.component.PublishedHookBinding;
@@ -23,11 +21,12 @@ public final class EffectiveConfigResolver {
     Objects.requireNonNull(componentDefaults, "componentDefaults");
     Objects.requireNonNull(applicationDefaults, "applicationDefaults");
     Objects.requireNonNull(agentOverrides, "agentOverrides");
+    validateDefaultProfile(applicationDefaults, agentOverrides);
 
     var applicationValues = applicationDefaults.values();
     var overrideValues = agentOverrides.values();
     var codeSource = componentDefaults.sourceVersion();
-    var applicationSource = applicationDefaults.defaultProfileVersion();
+    var applicationSource = applicationDefaults.defaultProfileVersion().publishedRef();
 
     var runSeconds =
         capped(
@@ -119,9 +118,19 @@ public final class EffectiveConfigResolver {
             topP.source(),
             modelOutputTokens.source(),
             retry.source(),
-            EffectiveValueSource.codeDefault(codeSource),
-            EffectiveValueSource.codeDefault(codeSource),
-            EffectiveValueSource.applicationProfile(applicationSource));
+            componentSource(
+                agentOverrides.memoryPolicyVersion(),
+                applicationDefaults.memoryPolicyVersion(),
+                codeSource,
+                applicationSource),
+            componentSource(
+                agentOverrides.outputSchemaVersion(),
+                applicationDefaults.outputSchemaVersion(),
+                codeSource,
+                applicationSource),
+            agentOverrides.defaultProfileVersion().isPresent()
+                ? EffectiveValueSource.agentOverride()
+                : EffectiveValueSource.applicationProfile(applicationSource));
 
     return new ResolvedAgentConfig(
         applicationDefaults.applicationScope(),
@@ -144,6 +153,9 @@ public final class EffectiveConfigResolver {
       AgentOverrides agentOverrides,
       AgentComponents baseline) {
     Objects.requireNonNull(baseline, "baseline");
+    validateDefaultProfile(applicationDefaults, agentOverrides);
+    var codeSource = componentDefaults.sourceVersion();
+    var applicationSource = applicationDefaults.defaultProfileVersion().publishedRef();
     var baseConfig =
         resolve(platformLimits, componentDefaults, applicationDefaults, agentOverrides);
 
@@ -151,44 +163,37 @@ public final class EffectiveConfigResolver {
         selectComponent(
             agentOverrides.memoryPolicyVersion(),
             applicationDefaults.memoryPolicyVersion(),
-            baseline.memoryPolicyVersion());
+            baseline.memoryPolicyVersion(),
+            codeSource,
+            applicationSource);
     var output =
         selectComponent(
             agentOverrides.outputSchemaVersion(),
             applicationDefaults.outputSchemaVersion(),
-            baseline.outputSchemaVersion());
+            baseline.outputSchemaVersion(),
+            codeSource,
+            applicationSource);
     var evaluation =
         selectComponent(
             agentOverrides.evaluationSuiteVersion(),
             applicationDefaults.evaluationSuiteVersion(),
-            baseline.evaluationSuiteVersion());
-    var applicationProfile =
-        new DefaultProfileRef(
-            new ComponentMetadata(
-                applicationDefaults.defaultProfileVersion().componentKey(),
-                applicationDefaults.defaultProfileVersion().version(),
-                happy.jayden.yang.agentbuilder.core.component.ComponentStatus.AVAILABLE,
-                applicationDefaults.defaultProfileVersion().componentChecksum()));
+            baseline.evaluationSuiteVersion(),
+            codeSource,
+            applicationSource);
     var defaultProfile =
-        agentOverrides
-            .defaultProfileVersion()
-            .<ComponentChoice<DefaultProfileRef>>map(
-                value ->
-                    new ComponentChoice<>(
-                        value, EffectiveValueSource.agentOverride(value.publishedRef())))
-            .orElseGet(
-                () ->
-                    new ComponentChoice<>(
-                        applicationProfile,
-                        EffectiveValueSource.applicationProfile(
-                            applicationProfile.publishedRef())));
+        new ComponentChoice<>(
+            applicationDefaults.defaultProfileVersion(),
+            agentOverrides.defaultProfileVersion().isPresent()
+                ? EffectiveValueSource.agentOverride()
+                : EffectiveValueSource.applicationProfile(applicationSource));
 
     var hooks =
         resolveHooks(
             baseline.hookBindings(),
             applicationDefaults.values().optionalHookDefaults(),
             agentOverrides.hookBindings(),
-            applicationDefaults.defaultProfileVersion());
+            codeSource,
+            applicationSource);
     var components =
         new AgentComponents(
             baseline.frameworkVersion(),
@@ -229,10 +234,10 @@ public final class EffectiveConfigResolver {
 
     var sources =
         new ResolvedComponentSources(
-            EffectiveValueSource.agentOverride(baseline.frameworkVersion().publishedRef()),
-            EffectiveValueSource.agentOverride(baseline.providerVersion().publishedRef()),
-            EffectiveValueSource.agentOverride(baseline.modelBinding().publishedRef()),
-            EffectiveValueSource.agentOverride(baseline.promptVersion().publishedRef()),
+            EffectiveValueSource.agentOverride(),
+            EffectiveValueSource.agentOverride(),
+            EffectiveValueSource.agentOverride(),
+            EffectiveValueSource.agentOverride(),
             memory.source(),
             output.source(),
             evaluation.source(),
@@ -243,11 +248,7 @@ public final class EffectiveConfigResolver {
                         new ResolvedBindingSource(
                             binding.toolKey(),
                             binding.contractVersion(),
-                            EffectiveValueSource.agentOverride(
-                                new PublishedComponentRef(
-                                    binding.toolKey(),
-                                    binding.contractVersion(),
-                                    binding.componentChecksum()))))
+                            EffectiveValueSource.agentOverride()))
                 .toList(),
             baseline.skillBindings().stream()
                 .map(
@@ -255,35 +256,36 @@ public final class EffectiveConfigResolver {
                         new ResolvedBindingSource(
                             binding.skillKey(),
                             binding.version(),
-                            EffectiveValueSource.agentOverride(
-                                new PublishedComponentRef(
-                                    binding.skillKey(),
-                                    binding.version(),
-                                    binding.componentChecksum()))))
+                            EffectiveValueSource.agentOverride()))
                 .toList(),
             hooks.sources());
     return new ResolvedAgentDefinition(resolvedConfig, components, sources);
   }
 
   private static <T extends happy.jayden.yang.agentbuilder.core.component.VersionedComponent>
-      ComponentChoice<T> selectComponent(Optional<T> agent, Optional<T> application, T baseline) {
+      ComponentChoice<T> selectComponent(
+          Optional<T> agent,
+          Optional<T> application,
+          T baseline,
+          PublishedComponentRef codeSource,
+          PublishedComponentRef applicationSource) {
     if (agent.isPresent()) {
       var value = agent.orElseThrow();
-      return new ComponentChoice<>(value, EffectiveValueSource.agentOverride(value.publishedRef()));
+      return new ComponentChoice<>(value, EffectiveValueSource.agentOverride());
     }
     if (application.isPresent()) {
       var value = application.orElseThrow();
       return new ComponentChoice<>(
-          value, EffectiveValueSource.applicationProfile(value.publishedRef()));
+          value, EffectiveValueSource.applicationProfile(applicationSource));
     }
-    return new ComponentChoice<>(
-        baseline, EffectiveValueSource.codeDefault(baseline.publishedRef()));
+    return new ComponentChoice<>(baseline, EffectiveValueSource.codeDefault(codeSource));
   }
 
   private static ResolvedHooks resolveHooks(
       List<PublishedHookBinding> baseline,
       List<HookBinding> applicationPatches,
       Optional<List<HookBinding>> agentBindings,
+      PublishedComponentRef codeSource,
       PublishedComponentRef applicationProfile) {
     var resolved = new ArrayList<>(baseline);
     for (var patch : applicationPatches) {
@@ -299,18 +301,15 @@ public final class EffectiveConfigResolver {
         resolved.stream()
             .map(
                 binding -> {
-                  var identity =
-                      new PublishedComponentRef(
-                          binding.hookKey(), binding.version(), binding.componentChecksum());
                   EffectiveValueSource source;
                   if (agentBindings.orElse(List.of()).stream()
                       .anyMatch(item -> sameIdentity(item, binding))) {
-                    source = EffectiveValueSource.agentOverride(identity);
+                    source = EffectiveValueSource.agentOverride();
                   } else if (applicationPatches.stream()
                       .anyMatch(item -> sameIdentity(item, binding))) {
                     source = EffectiveValueSource.applicationProfile(applicationProfile);
                   } else {
-                    source = EffectiveValueSource.codeDefault(identity);
+                    source = EffectiveValueSource.codeDefault(codeSource);
                   }
                   return new ResolvedBindingSource(binding.hookKey(), binding.version(), source);
                 })
@@ -382,6 +381,35 @@ public final class EffectiveConfigResolver {
           application.orElseThrow(), EffectiveValueSource.applicationProfile(applicationSource));
     }
     return new Choice<>(codeDefault, EffectiveValueSource.codeDefault(codeSource));
+  }
+
+  private static EffectiveValueSource componentSource(
+      Optional<?> agent,
+      Optional<?> application,
+      PublishedComponentRef codeSource,
+      PublishedComponentRef applicationSource) {
+    if (agent.isPresent()) {
+      return EffectiveValueSource.agentOverride();
+    }
+    if (application.isPresent()) {
+      return EffectiveValueSource.applicationProfile(applicationSource);
+    }
+    return EffectiveValueSource.codeDefault(codeSource);
+  }
+
+  private static void validateDefaultProfile(
+      ApplicationDefaults applicationDefaults, AgentOverrides agentOverrides) {
+    agentOverrides
+        .defaultProfileVersion()
+        .ifPresent(
+            selected -> {
+              if (!selected
+                  .publishedRef()
+                  .equals(applicationDefaults.defaultProfileVersion().publishedRef())) {
+                throw new IllegalArgumentException(
+                    "agent defaultProfileVersion must match loaded application defaults");
+              }
+            });
   }
 
   private record Choice<T>(T value, EffectiveValueSource source) {}

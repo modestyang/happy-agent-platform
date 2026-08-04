@@ -1,5 +1,6 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,11 +33,12 @@ public class ResolvedAgentDefinitionTest {
   @Test
   void resolverClosesComponentOverridesOptionalHooksAndTheirProvenanceTogether() {
     var baseline = components("memory.base", "schema.base", "evaluation.base", "defaults.base");
+    var selectedProfile = new DefaultProfileRef(key("defaults.agent"), version(3), A);
     var applicationHook = new HookBinding(key("hook.audit"), version(1), true, List.of());
     var application =
         new ApplicationDefaults(
             "fitness",
-            baseline.defaultProfileVersion().publishedRef(),
+            selectedProfile,
             DefaultValues.empty().withOptionalHookDefaults(List.of(applicationHook)),
             Optional.of(new MemoryPolicyRef(key("memory.app"), version(2), B)),
             Optional.of(new OutputSchemaRef(key("schema.app"), version(2), B)),
@@ -47,7 +49,7 @@ public class ResolvedAgentDefinitionTest {
             Optional.of(new MemoryPolicyRef(key("memory.agent"), version(3), A)),
             Optional.of(new OutputSchemaRef(key("schema.agent"), version(3), A)),
             Optional.of(new EvaluationSuiteRef(key("evaluation.agent"), version(3), A)),
-            Optional.of(new DefaultProfileRef(key("defaults.agent"), version(3), A)),
+            Optional.of(selectedProfile),
             Optional.empty());
 
     var definition =
@@ -118,7 +120,7 @@ public class ResolvedAgentDefinitionTest {
     var application =
         new ApplicationDefaults(
             "fitness",
-            baseline.defaultProfileVersion().publishedRef(),
+            baseline.defaultProfileVersion(),
             DefaultValues.empty(),
             Optional.of(new MemoryPolicyRef(key("memory.app"), version(2), B)),
             Optional.of(new OutputSchemaRef(key("schema.app"), version(2), B)),
@@ -148,11 +150,10 @@ public class ResolvedAgentDefinitionTest {
   }
 
   @Test
-  void resolvedAggregateRejectsComponentAndProvenanceDrift() {
+  void resolvedAggregateKeepsComponentIdentitySeparateFromValueProvenance() {
     var baseline = components("memory.base", "schema.base", "evaluation.base", "defaults.base");
     var application =
-        new ApplicationDefaults(
-            "fitness", baseline.defaultProfileVersion().publishedRef(), DefaultValues.empty());
+        new ApplicationDefaults("fitness", baseline.defaultProfileVersion(), DefaultValues.empty());
     var resolved =
         resolver()
             .resolveDefinition(
@@ -171,8 +172,7 @@ public class ResolvedAgentDefinitionTest {
             baseline.evaluationSuiteVersion(),
             baseline.defaultProfileVersion());
 
-    assertThrows(
-        IllegalArgumentException.class,
+    assertDoesNotThrow(
         () ->
             new ResolvedAgentDefinition(resolved.resolvedConfig(), mismatched, resolved.sources()));
   }
@@ -181,8 +181,7 @@ public class ResolvedAgentDefinitionTest {
   void resolvedApplicationScopeRejectsInvalidUnicodeAtConstructionBoundary() {
     var baseline = components("memory.base", "schema.base", "evaluation.base", "defaults.base");
     var application =
-        new ApplicationDefaults(
-            "fitness", baseline.defaultProfileVersion().publishedRef(), DefaultValues.empty());
+        new ApplicationDefaults("fitness", baseline.defaultProfileVersion(), DefaultValues.empty());
     var resolved =
         resolver()
             .resolveDefinition(
@@ -194,6 +193,47 @@ public class ResolvedAgentDefinitionTest {
         () ->
             new ResolvedAgentConfig(
                 "bad\ud800scope",
+                config.runtimeLimits(),
+                config.modelParameters(),
+                config.retryPolicy(),
+                config.sources()));
+  }
+
+  @Test
+  void publishedScopeCountsUnicodeCodePointsOnce() {
+    var baseline = components("memory.base", "schema.base", "evaluation.base", "defaults.base");
+    var application =
+        new ApplicationDefaults("fitness", baseline.defaultProfileVersion(), DefaultValues.empty());
+    var config =
+        resolver()
+            .resolveDefinition(
+                limits(), codeDefaults(), application, AgentOverrides.none(), baseline)
+            .resolvedConfig()
+            .publishedConfig();
+
+    var oneHundredTwenty = "😀".repeat(120);
+    assertDoesNotThrow(
+        () ->
+            new PublishedResolvedConfig(
+                oneHundredTwenty,
+                config.runtimeLimits(),
+                config.modelParameters(),
+                config.retryPolicy(),
+                config.sources()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PublishedResolvedConfig(
+                "😀".repeat(121),
+                config.runtimeLimits(),
+                config.modelParameters(),
+                config.retryPolicy(),
+                config.sources()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PublishedResolvedConfig(
+                "   ",
                 config.runtimeLimits(),
                 config.modelParameters(),
                 config.retryPolicy(),

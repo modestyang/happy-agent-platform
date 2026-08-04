@@ -24,8 +24,7 @@ class AgentVersionSnapshotSecurityTest {
 
     var baseline = components("memory.base", "schema.base", "evaluation.base", "defaults.base");
     var application =
-        new ApplicationDefaults(
-            "fitness", baseline.defaultProfileVersion().publishedRef(), DefaultValues.empty());
+        new ApplicationDefaults("fitness", baseline.defaultProfileVersion(), DefaultValues.empty());
     var definition =
         resolver()
             .resolveDefinition(
@@ -59,8 +58,7 @@ class AgentVersionSnapshotSecurityTest {
   void canonicalNumbersAndEveryComponentMutationAffectChecksum() {
     var baseline = components("memory.base", "schema.base", "evaluation.base", "defaults.base");
     var application =
-        new ApplicationDefaults(
-            "fitness", baseline.defaultProfileVersion().publishedRef(), DefaultValues.empty());
+        new ApplicationDefaults("fitness", baseline.defaultProfileVersion(), DefaultValues.empty());
     var definition =
         resolver()
             .resolveDefinition(

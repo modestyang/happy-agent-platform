@@ -61,7 +61,7 @@ class EffectiveConfigResolverTest {
     var applicationDefaults =
         new ApplicationDefaults(
             "fitness",
-            publishedRef("defaults.fitness", 7, B),
+            defaultProfileRef("defaults.fitness", 7, B),
             DefaultValues.empty().withMaxToolCalls(5));
     var overrides = AgentOverrides.onlyTemperature(new BigDecimal("0.6"));
 
@@ -82,9 +82,14 @@ class EffectiveConfigResolverTest {
         ValueSource.APPLICATION_PROFILE, resolved.sources().runtimeMaxToolCalls().source());
 
     var snapshot = AgentVersionSnapshot.publish(definition);
-    applicationDefaults.changeTimeout(Duration.ofSeconds(40));
+    applicationDefaults =
+        new ApplicationDefaults(
+            "fitness",
+            defaultProfileRef("defaults.fitness", 8, A),
+            DefaultValues.empty().withTimeout(Duration.ofSeconds(40)));
 
     assertEquals(Duration.ofSeconds(30), snapshot.resolvedConfig().timeout());
+    assertEquals(40, applicationDefaults.values().maxRunSeconds().orElseThrow());
   }
 
   @Test
@@ -105,7 +110,7 @@ class EffectiveConfigResolverTest {
             publishedRef("framework.agentscope", 3, A));
     var appDefaults =
         new ApplicationDefaults(
-            "fitness", publishedRef("defaults.fitness", 7, B), DefaultValues.empty());
+            "fitness", defaultProfileRef("defaults.fitness", 7, B), DefaultValues.empty());
     var overrides =
         new AgentOverrides(
             DefaultValues.empty()
@@ -172,7 +177,7 @@ class EffectiveConfigResolverTest {
                 RetryPolicy.SAFE_ONCE,
                 publishedRef("framework.agentscope", 3, A)),
             new ApplicationDefaults(
-                "fitness", publishedRef("defaults.fitness", 7, B), DefaultValues.empty()),
+                "fitness", defaultProfileRef("defaults.fitness", 7, B), DefaultValues.empty()),
             AgentOverrides.none(),
             components);
   }
@@ -199,6 +204,10 @@ class EffectiveConfigResolverTest {
       String key, int version, String checksum) {
     return new happy.jayden.yang.agentbuilder.core.component.PublishedComponentRef(
         key(key), version(version), checksum);
+  }
+
+  private static DefaultProfileRef defaultProfileRef(String key, int version, String checksum) {
+    return new DefaultProfileRef(key(key), version(version), checksum);
   }
 
   private static ComponentKey key(String value) {

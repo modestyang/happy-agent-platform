@@ -2,6 +2,7 @@ package happy.jayden.yang.agentbuilder.core.defaults;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import happy.jayden.yang.agentbuilder.core.component.DefaultProfileRef;
 import happy.jayden.yang.agentbuilder.core.component.PublishedComponentRef;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -17,7 +18,7 @@ class EffectiveConfigPriorityTest {
   void everyLimitedLeafResolvesCodeThenApplicationThenAgentBeforePlatformCeiling(CappedLeaf leaf) {
     var application =
         new ApplicationDefaults(
-            "fitness", ref("defaults.fitness"), set(DefaultValues.empty(), leaf, false));
+            "fitness", defaultProfileRef(), set(DefaultValues.empty(), leaf, false));
     var resolver = new EffectiveConfigResolver();
 
     var fromApplication =
@@ -49,7 +50,7 @@ class EffectiveConfigPriorityTest {
   void everyNonLimitedModelLeafResolvesApplicationThenAgent(ModelLeaf leaf) {
     var application =
         new ApplicationDefaults(
-            "fitness", ref("defaults.fitness"), set(DefaultValues.empty(), leaf, false));
+            "fitness", defaultProfileRef(), set(DefaultValues.empty(), leaf, false));
     var resolver = new EffectiveConfigResolver();
     var fromApplication =
         resolver.resolve(limits(), codeDefaults(), application, AgentOverrides.none());
@@ -194,6 +195,13 @@ class EffectiveConfigPriorityTest {
   private static PublishedComponentRef ref(String key) {
     return new PublishedComponentRef(
         new happy.jayden.yang.agentbuilder.core.component.ComponentKey(key),
+        new happy.jayden.yang.agentbuilder.core.component.ComponentVersion(1),
+        SHA);
+  }
+
+  private static DefaultProfileRef defaultProfileRef() {
+    return new DefaultProfileRef(
+        new happy.jayden.yang.agentbuilder.core.component.ComponentKey("defaults.fitness"),
         new happy.jayden.yang.agentbuilder.core.component.ComponentVersion(1),
         SHA);
   }

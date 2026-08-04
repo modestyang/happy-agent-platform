@@ -1,24 +1,23 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
+import happy.jayden.yang.agentbuilder.core.component.DefaultProfileRef;
 import happy.jayden.yang.agentbuilder.core.component.EvaluationSuiteRef;
 import happy.jayden.yang.agentbuilder.core.component.MemoryPolicyRef;
 import happy.jayden.yang.agentbuilder.core.component.OutputSchemaRef;
-import happy.jayden.yang.agentbuilder.core.component.PublishedComponentRef;
 import happy.jayden.yang.agentbuilder.core.component.TextValidation;
-import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 
 public final class ApplicationDefaults {
   private final String applicationScope;
-  private final PublishedComponentRef defaultProfileVersion;
+  private final DefaultProfileRef defaultProfileVersion;
+  private final DefaultValues values;
   private final Optional<MemoryPolicyRef> memoryPolicyVersion;
   private final Optional<OutputSchemaRef> outputSchemaVersion;
   private final Optional<EvaluationSuiteRef> evaluationSuiteVersion;
-  private volatile DefaultValues values;
 
   public ApplicationDefaults(
-      String applicationScope, PublishedComponentRef defaultProfileVersion, DefaultValues values) {
+      String applicationScope, DefaultProfileRef defaultProfileVersion, DefaultValues values) {
     this(
         applicationScope,
         defaultProfileVersion,
@@ -30,7 +29,7 @@ public final class ApplicationDefaults {
 
   public ApplicationDefaults(
       String applicationScope,
-      PublishedComponentRef defaultProfileVersion,
+      DefaultProfileRef defaultProfileVersion,
       DefaultValues values,
       Optional<MemoryPolicyRef> memoryPolicyVersion,
       Optional<OutputSchemaRef> outputSchemaVersion,
@@ -49,7 +48,7 @@ public final class ApplicationDefaults {
     return applicationScope;
   }
 
-  public PublishedComponentRef defaultProfileVersion() {
+  public DefaultProfileRef defaultProfileVersion() {
     return defaultProfileVersion;
   }
 
@@ -69,15 +68,8 @@ public final class ApplicationDefaults {
     return evaluationSuiteVersion;
   }
 
-  public synchronized void changeTimeout(Duration timeout) {
-    values = values.withTimeout(timeout);
-  }
-
   private static String requireScope(String value) {
-    TextValidation.requireUnicodeScalar(value, "applicationScope");
-    if (value.isBlank() || value.codePointCount(0, value.length()) > 120) {
-      throw new IllegalArgumentException("applicationScope must contain 1 to 120 characters");
-    }
+    TextValidation.requireNonBlankLength(value, 1, 120, "applicationScope");
     return value;
   }
 }

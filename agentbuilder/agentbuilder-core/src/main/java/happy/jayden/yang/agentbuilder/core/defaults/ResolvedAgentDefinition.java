@@ -1,7 +1,6 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
 import happy.jayden.yang.agentbuilder.core.component.AgentComponents;
-import happy.jayden.yang.agentbuilder.core.component.VersionedComponent;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -15,22 +14,6 @@ public record ResolvedAgentDefinition(
     Objects.requireNonNull(resolvedConfig, "resolvedConfig");
     Objects.requireNonNull(components, "components");
     Objects.requireNonNull(sources, "sources");
-    requireMatches(components.frameworkVersion(), sources.frameworkVersion(), "frameworkVersion");
-    requireMatches(components.providerVersion(), sources.providerVersion(), "providerVersion");
-    requireMatches(components.modelBinding(), sources.modelBinding(), "modelBinding");
-    requireMatches(components.promptVersion(), sources.promptVersion(), "promptVersion");
-    requireMatches(
-        components.memoryPolicyVersion(), sources.memoryPolicyVersion(), "memoryPolicyVersion");
-    requireMatches(
-        components.outputSchemaVersion(), sources.outputSchemaVersion(), "outputSchemaVersion");
-    requireMatches(
-        components.evaluationSuiteVersion(),
-        sources.evaluationSuiteVersion(),
-        "evaluationSuiteVersion");
-    requireMatches(
-        components.defaultProfileVersion(),
-        sources.defaultProfileVersion(),
-        "defaultProfileVersion");
     requireBindingIdentities(
         components.toolBindings(),
         sources.toolBindings(),
@@ -51,13 +34,6 @@ public record ResolvedAgentDefinition(
         || !sources.defaultProfileVersion().equals(resolvedConfig.sources().defaultProfile())) {
       throw new IllegalArgumentException(
           "resolved component provenance must match PublishedResolvedConfigSources");
-    }
-  }
-
-  private static void requireMatches(
-      VersionedComponent component, EffectiveValueSource source, String field) {
-    if (!component.publishedRef().equals(source.sourceVersion().orElseThrow())) {
-      throw new IllegalArgumentException(field + " must match resolved provenance");
     }
   }
 

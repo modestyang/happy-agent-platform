@@ -53,8 +53,7 @@ class SnapshotChecksumCoverageTest {
   private static happy.jayden.yang.agentbuilder.core.defaults.ResolvedAgentDefinition definition(
       AgentComponents value) {
     var application =
-        new ApplicationDefaults(
-            "fitness", value.defaultProfileVersion().publishedRef(), DefaultValues.empty());
+        new ApplicationDefaults("fitness", value.defaultProfileVersion(), DefaultValues.empty());
     return resolver()
         .resolveDefinition(limits(), codeDefaults(), application, AgentOverrides.none(), value);
   }

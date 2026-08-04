@@ -23,6 +23,8 @@ public record ToolBinding(
     approvalPolicy = Objects.requireNonNull(approvalPolicy, "approvalPolicy");
     retryPolicy = Objects.requireNonNull(retryPolicy, "retryPolicy");
     resultMode = Objects.requireNonNull(resultMode, "resultMode");
+    usageGuidance.ifPresent(
+        value -> TextValidation.requireLength(value, 0, 2_000, "usageGuidance"));
     timeoutMs.ifPresent(value -> requireAtLeast(value, 100, "timeoutMs"));
     maxCallsPerRun.ifPresent(value -> requireAtLeast(value, 1, "maxCallsPerRun"));
   }

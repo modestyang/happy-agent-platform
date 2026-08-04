@@ -23,10 +23,7 @@ public record AgentDraft(
     DefaultValues runtimeOverrides,
     Instant updatedAt) {
   public AgentDraft {
-    Objects.requireNonNull(agentKey, "agentKey");
-    if (!ComponentValidation.KEY.matcher(agentKey).matches() || agentKey.length() > 120) {
-      throw new IllegalArgumentException("agentKey must satisfy the frozen AgentDraft contract");
-    }
+    TextValidation.requireLength(agentKey, 2, 120, "agentKey");
     if (revision < 1) {
       throw new IllegalArgumentException("revision must be at least 1");
     }
@@ -34,9 +31,24 @@ public record AgentDraft(
     Objects.requireNonNull(providerVersion, "providerVersion");
     Objects.requireNonNull(modelBinding, "modelBinding");
     Objects.requireNonNull(promptVersion, "promptVersion");
-    toolBindings = List.copyOf(toolBindings);
-    skillBindings = List.copyOf(skillBindings);
-    hookBindings = List.copyOf(hookBindings);
+    toolBindings =
+        ComponentCollections.bindings(
+            toolBindings,
+            100,
+            item -> ComponentCollections.identity(item.toolKey(), item.contractVersion()),
+            "toolBindings");
+    skillBindings =
+        ComponentCollections.bindings(
+            skillBindings,
+            100,
+            item -> ComponentCollections.identity(item.skillKey(), item.version()),
+            "skillBindings");
+    hookBindings =
+        ComponentCollections.bindings(
+            hookBindings,
+            100,
+            item -> ComponentCollections.identity(item.hookKey(), item.version()),
+            "hookBindings");
     memoryPolicyVersion = requireOptional(memoryPolicyVersion, "memoryPolicyVersion");
     outputSchemaVersion = requireOptional(outputSchemaVersion, "outputSchemaVersion");
     evaluationSuiteVersion = requireOptional(evaluationSuiteVersion, "evaluationSuiteVersion");

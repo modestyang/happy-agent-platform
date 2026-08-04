@@ -20,9 +20,24 @@ public record AgentComponents(
     Objects.requireNonNull(providerVersion, "providerVersion");
     Objects.requireNonNull(modelBinding, "modelBinding");
     Objects.requireNonNull(promptVersion, "promptVersion");
-    toolBindings = List.copyOf(toolBindings);
-    skillBindings = List.copyOf(skillBindings);
-    hookBindings = List.copyOf(hookBindings);
+    toolBindings =
+        ComponentCollections.bindings(
+            toolBindings,
+            100,
+            item -> ComponentCollections.identity(item.toolKey(), item.contractVersion()),
+            "toolBindings");
+    skillBindings =
+        ComponentCollections.bindings(
+            skillBindings,
+            100,
+            item -> ComponentCollections.identity(item.skillKey(), item.version()),
+            "skillBindings");
+    hookBindings =
+        ComponentCollections.bindings(
+            hookBindings,
+            100,
+            item -> ComponentCollections.identity(item.hookKey(), item.version()),
+            "hookBindings");
     Objects.requireNonNull(memoryPolicyVersion, "memoryPolicyVersion");
     Objects.requireNonNull(outputSchemaVersion, "outputSchemaVersion");
     Objects.requireNonNull(evaluationSuiteVersion, "evaluationSuiteVersion");

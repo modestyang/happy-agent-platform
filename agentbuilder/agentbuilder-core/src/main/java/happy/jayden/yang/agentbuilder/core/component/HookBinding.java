@@ -8,7 +8,10 @@ public record HookBinding(
   public HookBinding {
     Objects.requireNonNull(hookKey, "hookKey");
     Objects.requireNonNull(version, "version");
-    config = List.copyOf(config);
+    if (hookKey.value().codePointCount(0, hookKey.value().length()) > 120) {
+      throw new IllegalArgumentException("hookKey cannot exceed 120 characters");
+    }
+    config = ComponentCollections.configEntries(config, "config");
   }
 
   public HookBinding(ComponentKey hookKey, ComponentVersion version, boolean enabled) {

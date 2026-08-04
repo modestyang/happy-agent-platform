@@ -13,6 +13,9 @@ public record PublishedSkillBinding(
     Objects.requireNonNull(skillKey, "skillKey");
     Objects.requireNonNull(version, "version");
     ComponentValidation.requireChecksum(componentChecksum);
-    applicationConfig = List.copyOf(applicationConfig);
+    if (skillKey.value().codePointCount(0, skillKey.value().length()) > 120) {
+      throw new IllegalArgumentException("skillKey cannot exceed 120 characters");
+    }
+    applicationConfig = ComponentCollections.configEntries(applicationConfig, "applicationConfig");
   }
 }

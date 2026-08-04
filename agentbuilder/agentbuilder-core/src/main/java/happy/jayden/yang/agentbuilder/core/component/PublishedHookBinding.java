@@ -13,6 +13,9 @@ public record PublishedHookBinding(
     Objects.requireNonNull(hookKey, "hookKey");
     Objects.requireNonNull(version, "version");
     ComponentValidation.requireChecksum(componentChecksum);
-    config = List.copyOf(config);
+    if (hookKey.value().codePointCount(0, hookKey.value().length()) > 120) {
+      throw new IllegalArgumentException("hookKey cannot exceed 120 characters");
+    }
+    config = ComponentCollections.configEntries(config, "config");
   }
 }

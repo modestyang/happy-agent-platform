@@ -65,8 +65,15 @@ class EffectiveConfigResolverTest {
             DefaultValues.empty().withMaxToolCalls(5));
     var overrides = AgentOverrides.onlyTemperature(new BigDecimal("0.6"));
 
-    var resolved =
-        new EffectiveConfigResolver().resolve(limits, codeDefaults, applicationDefaults, overrides);
+    var definition =
+        new EffectiveConfigResolver()
+            .resolveDefinition(
+                limits,
+                codeDefaults,
+                applicationDefaults,
+                overrides,
+                components(List.of(), List.of(), List.of()));
+    var resolved = definition.resolvedConfig();
 
     assertEquals(Duration.ofSeconds(30), resolved.timeout());
     assertEquals(new BigDecimal("0.6"), resolved.temperature());
@@ -74,8 +81,7 @@ class EffectiveConfigResolverTest {
     assertEquals(
         ValueSource.APPLICATION_PROFILE, resolved.sources().runtimeMaxToolCalls().source());
 
-    var snapshot =
-        AgentVersionSnapshot.publish(resolved, components(List.of(), List.of(), List.of()));
+    var snapshot = AgentVersionSnapshot.publish(definition);
     applicationDefaults.changeTimeout(Duration.ofSeconds(40));
 
     assertEquals(Duration.ofSeconds(30), snapshot.resolvedConfig().timeout());
@@ -124,7 +130,6 @@ class EffectiveConfigResolverTest {
     var reset = new ResetAgentOverrides(Set.of(OverridePath.MODEL_TEMPERATURE));
     assertFalse(reset.applyTo(overrides).values().modelParameters().temperature().isPresent());
 
-    var resolved = resolvedFixture();
     var toolA = ToolBinding.published("tool.alpha", 1, true, A);
     var toolB = ToolBinding.published("tool.beta", 2, true, B);
     var skillA = SkillBinding.published("skill.alpha", 1, true, A);
@@ -132,10 +137,10 @@ class EffectiveConfigResolverTest {
 
     var first =
         AgentVersionSnapshot.publish(
-            resolved, components(List.of(toolB, toolA), List.of(skillB, skillA), List.of()));
+            resolvedFixture(components(List.of(toolB, toolA), List.of(skillB, skillA), List.of())));
     var second =
         AgentVersionSnapshot.publish(
-            resolved, components(List.of(toolA, toolB), List.of(skillA, skillB), List.of()));
+            resolvedFixture(components(List.of(toolA, toolB), List.of(skillA, skillB), List.of())));
 
     assertEquals(first.canonicalJson(), second.canonicalJson());
     assertEquals(first.checksum(), second.checksum());
@@ -143,17 +148,17 @@ class EffectiveConfigResolverTest {
     assertNotEquals(
         first.checksum(),
         AgentVersionSnapshot.publish(
-                resolved,
-                components(
-                    List.of(ToolBinding.published("tool.alpha", 1, false, A), toolB),
-                    List.of(skillA, skillB),
-                    List.of()))
+                resolvedFixture(
+                    components(
+                        List.of(ToolBinding.published("tool.alpha", 1, false, A), toolB),
+                        List.of(skillA, skillB),
+                        List.of())))
             .checksum());
   }
 
-  private static ResolvedAgentConfig resolvedFixture() {
+  private static ResolvedAgentDefinition resolvedFixture(AgentComponents components) {
     return new EffectiveConfigResolver()
-        .resolve(
+        .resolveDefinition(
             new PlatformLimits(Duration.ofSeconds(45), 8, 8_000, 2_000, new BigDecimal("2.00"), 2),
             new ComponentDefaults(
                 Duration.ofSeconds(30),
@@ -168,7 +173,8 @@ class EffectiveConfigResolverTest {
                 publishedRef("framework.agentscope", 3, A)),
             new ApplicationDefaults(
                 "fitness", publishedRef("defaults.fitness", 7, B), DefaultValues.empty()),
-            AgentOverrides.none());
+            AgentOverrides.none(),
+            components);
   }
 
   private static AgentComponents components(

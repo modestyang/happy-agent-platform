@@ -1,5 +1,6 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
+import happy.jayden.yang.agentbuilder.core.component.TextValidation;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Objects;
@@ -11,7 +12,7 @@ public record ResolvedAgentConfig(
     RetryPolicy retryPolicy,
     PublishedResolvedConfigSources sources) {
   public ResolvedAgentConfig {
-    Objects.requireNonNull(applicationScope, "applicationScope");
+    TextValidation.requireLength(applicationScope, 1, 120, "applicationScope");
     Objects.requireNonNull(runtimeLimits, "runtimeLimits");
     Objects.requireNonNull(modelParameters, "modelParameters");
     Objects.requireNonNull(retryPolicy, "retryPolicy");

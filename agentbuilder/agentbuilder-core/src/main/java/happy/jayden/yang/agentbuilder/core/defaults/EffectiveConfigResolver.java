@@ -1,7 +1,14 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
+import happy.jayden.yang.agentbuilder.core.component.AgentComponents;
+import happy.jayden.yang.agentbuilder.core.component.ComponentMetadata;
+import happy.jayden.yang.agentbuilder.core.component.DefaultProfileRef;
+import happy.jayden.yang.agentbuilder.core.component.HookBinding;
 import happy.jayden.yang.agentbuilder.core.component.PublishedComponentRef;
+import happy.jayden.yang.agentbuilder.core.component.PublishedHookBinding;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -99,12 +106,6 @@ public final class EffectiveConfigResolver {
             codeSource,
             applicationSource);
 
-    var memorySource =
-        sourceForOptional(
-            overrideValues.memoryPolicy(),
-            applicationValues.memoryPolicy(),
-            codeSource,
-            applicationSource);
     var platformSource = EffectiveValueSource.platformLimit();
     var sources =
         new PublishedResolvedConfigSources(
@@ -118,7 +119,7 @@ public final class EffectiveConfigResolver {
             topP.source(),
             modelOutputTokens.source(),
             retry.source(),
-            memorySource,
+            EffectiveValueSource.codeDefault(codeSource),
             EffectiveValueSource.codeDefault(codeSource),
             EffectiveValueSource.applicationProfile(applicationSource));
 
@@ -136,18 +137,221 @@ public final class EffectiveConfigResolver {
         sources);
   }
 
-  private static EffectiveValueSource sourceForOptional(
-      Optional<?> agent,
-      Optional<?> application,
-      PublishedComponentRef codeSource,
-      PublishedComponentRef applicationSource) {
+  public ResolvedAgentDefinition resolveDefinition(
+      PlatformLimits platformLimits,
+      ComponentDefaults componentDefaults,
+      ApplicationDefaults applicationDefaults,
+      AgentOverrides agentOverrides,
+      AgentComponents baseline) {
+    Objects.requireNonNull(baseline, "baseline");
+    var baseConfig =
+        resolve(platformLimits, componentDefaults, applicationDefaults, agentOverrides);
+
+    var memory =
+        selectComponent(
+            agentOverrides.memoryPolicyVersion(),
+            applicationDefaults.memoryPolicyVersion(),
+            baseline.memoryPolicyVersion());
+    var output =
+        selectComponent(
+            agentOverrides.outputSchemaVersion(),
+            applicationDefaults.outputSchemaVersion(),
+            baseline.outputSchemaVersion());
+    var evaluation =
+        selectComponent(
+            agentOverrides.evaluationSuiteVersion(),
+            applicationDefaults.evaluationSuiteVersion(),
+            baseline.evaluationSuiteVersion());
+    var applicationProfile =
+        new DefaultProfileRef(
+            new ComponentMetadata(
+                applicationDefaults.defaultProfileVersion().componentKey(),
+                applicationDefaults.defaultProfileVersion().version(),
+                happy.jayden.yang.agentbuilder.core.component.ComponentStatus.AVAILABLE,
+                applicationDefaults.defaultProfileVersion().componentChecksum()));
+    var defaultProfile =
+        agentOverrides
+            .defaultProfileVersion()
+            .<ComponentChoice<DefaultProfileRef>>map(
+                value ->
+                    new ComponentChoice<>(
+                        value, EffectiveValueSource.agentOverride(value.publishedRef())))
+            .orElseGet(
+                () ->
+                    new ComponentChoice<>(
+                        applicationProfile,
+                        EffectiveValueSource.applicationProfile(
+                            applicationProfile.publishedRef())));
+
+    var hooks =
+        resolveHooks(
+            baseline.hookBindings(),
+            applicationDefaults.values().optionalHookDefaults(),
+            agentOverrides.hookBindings(),
+            applicationDefaults.defaultProfileVersion());
+    var components =
+        new AgentComponents(
+            baseline.frameworkVersion(),
+            baseline.providerVersion(),
+            baseline.modelBinding(),
+            baseline.promptVersion(),
+            baseline.toolBindings(),
+            baseline.skillBindings(),
+            hooks.bindings(),
+            memory.value(),
+            output.value(),
+            evaluation.value(),
+            defaultProfile.value());
+
+    var oldSources = baseConfig.sources();
+    var configSources =
+        new PublishedResolvedConfigSources(
+            oldSources.runtimeMaxRunSeconds(),
+            oldSources.runtimeMaxToolCalls(),
+            oldSources.runtimeMaxInputTokens(),
+            oldSources.runtimeMaxOutputTokens(),
+            oldSources.runtimeMaxCostUsd(),
+            oldSources.runtimeConcurrentRuns(),
+            oldSources.modelTemperature(),
+            oldSources.modelTopP(),
+            oldSources.modelMaxOutputTokens(),
+            oldSources.retryPolicy(),
+            memory.source(),
+            output.source(),
+            defaultProfile.source());
+    var resolvedConfig =
+        new ResolvedAgentConfig(
+            baseConfig.applicationScope(),
+            baseConfig.runtimeLimits(),
+            baseConfig.modelParameters(),
+            baseConfig.retryPolicy(),
+            configSources);
+
+    var sources =
+        new ResolvedComponentSources(
+            EffectiveValueSource.agentOverride(baseline.frameworkVersion().publishedRef()),
+            EffectiveValueSource.agentOverride(baseline.providerVersion().publishedRef()),
+            EffectiveValueSource.agentOverride(baseline.modelBinding().publishedRef()),
+            EffectiveValueSource.agentOverride(baseline.promptVersion().publishedRef()),
+            memory.source(),
+            output.source(),
+            evaluation.source(),
+            defaultProfile.source(),
+            baseline.toolBindings().stream()
+                .map(
+                    binding ->
+                        new ResolvedBindingSource(
+                            binding.toolKey(),
+                            binding.contractVersion(),
+                            EffectiveValueSource.agentOverride(
+                                new PublishedComponentRef(
+                                    binding.toolKey(),
+                                    binding.contractVersion(),
+                                    binding.componentChecksum()))))
+                .toList(),
+            baseline.skillBindings().stream()
+                .map(
+                    binding ->
+                        new ResolvedBindingSource(
+                            binding.skillKey(),
+                            binding.version(),
+                            EffectiveValueSource.agentOverride(
+                                new PublishedComponentRef(
+                                    binding.skillKey(),
+                                    binding.version(),
+                                    binding.componentChecksum()))))
+                .toList(),
+            hooks.sources());
+    return new ResolvedAgentDefinition(resolvedConfig, components, sources);
+  }
+
+  private static <T extends happy.jayden.yang.agentbuilder.core.component.VersionedComponent>
+      ComponentChoice<T> selectComponent(Optional<T> agent, Optional<T> application, T baseline) {
     if (agent.isPresent()) {
-      return EffectiveValueSource.agentOverride();
+      var value = agent.orElseThrow();
+      return new ComponentChoice<>(value, EffectiveValueSource.agentOverride(value.publishedRef()));
     }
     if (application.isPresent()) {
-      return EffectiveValueSource.applicationProfile(applicationSource);
+      var value = application.orElseThrow();
+      return new ComponentChoice<>(
+          value, EffectiveValueSource.applicationProfile(value.publishedRef()));
     }
-    return EffectiveValueSource.codeDefault(codeSource);
+    return new ComponentChoice<>(
+        baseline, EffectiveValueSource.codeDefault(baseline.publishedRef()));
+  }
+
+  private static ResolvedHooks resolveHooks(
+      List<PublishedHookBinding> baseline,
+      List<HookBinding> applicationPatches,
+      Optional<List<HookBinding>> agentBindings,
+      PublishedComponentRef applicationProfile) {
+    var resolved = new ArrayList<>(baseline);
+    for (var patch : applicationPatches) {
+      replaceHook(resolved, baseline, patch);
+    }
+    if (agentBindings.isPresent()) {
+      resolved.clear();
+      for (var binding : agentBindings.orElseThrow()) {
+        resolved.add(resolveHook(baseline, binding));
+      }
+    }
+    var sources =
+        resolved.stream()
+            .map(
+                binding -> {
+                  var identity =
+                      new PublishedComponentRef(
+                          binding.hookKey(), binding.version(), binding.componentChecksum());
+                  EffectiveValueSource source;
+                  if (agentBindings.orElse(List.of()).stream()
+                      .anyMatch(item -> sameIdentity(item, binding))) {
+                    source = EffectiveValueSource.agentOverride(identity);
+                  } else if (applicationPatches.stream()
+                      .anyMatch(item -> sameIdentity(item, binding))) {
+                    source = EffectiveValueSource.applicationProfile(applicationProfile);
+                  } else {
+                    source = EffectiveValueSource.codeDefault(identity);
+                  }
+                  return new ResolvedBindingSource(binding.hookKey(), binding.version(), source);
+                })
+            .toList();
+    return new ResolvedHooks(List.copyOf(resolved), sources);
+  }
+
+  private static void replaceHook(
+      List<PublishedHookBinding> resolved, List<PublishedHookBinding> baseline, HookBinding patch) {
+    var replacement = resolveHook(baseline, patch);
+    for (int index = 0; index < resolved.size(); index++) {
+      if (sameIdentity(patch, resolved.get(index))) {
+        resolved.set(index, replacement);
+        return;
+      }
+    }
+    throw new IllegalArgumentException(
+        "optional hook default is not registered: " + patch.hookKey());
+  }
+
+  private static PublishedHookBinding resolveHook(
+      List<PublishedHookBinding> baseline, HookBinding binding) {
+    return baseline.stream()
+        .filter(candidate -> sameIdentity(binding, candidate))
+        .findFirst()
+        .map(
+            component ->
+                new PublishedHookBinding(
+                    binding.hookKey(),
+                    binding.version(),
+                    binding.enabled(),
+                    component.componentChecksum(),
+                    binding.config()))
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "hook binding is not registered: " + binding.hookKey()));
+  }
+
+  private static boolean sameIdentity(HookBinding left, PublishedHookBinding right) {
+    return left.hookKey().equals(right.hookKey()) && left.version().equals(right.version());
   }
 
   private static Choice<Integer> capped(Choice<Integer> selected, int limit) {
@@ -181,4 +385,9 @@ public final class EffectiveConfigResolver {
   }
 
   private record Choice<T>(T value, EffectiveValueSource source) {}
+
+  private record ComponentChoice<T>(T value, EffectiveValueSource source) {}
+
+  private record ResolvedHooks(
+      List<PublishedHookBinding> bindings, List<ResolvedBindingSource> sources) {}
 }

@@ -1,9 +1,9 @@
 package happy.jayden.yang.agentbuilder.core.defaults;
 
 import happy.jayden.yang.agentbuilder.core.component.HookBinding;
-import happy.jayden.yang.agentbuilder.core.component.VersionReference;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -16,7 +16,6 @@ public record DefaultValues(
     Optional<BigDecimal> maxCostUsd,
     SparseModelParameters modelParameters,
     Optional<RetryPolicy> retryPolicy,
-    Optional<VersionReference> memoryPolicy,
     List<HookBinding> optionalHookDefaults) {
   public DefaultValues {
     maxRunSeconds = requireOptional(maxRunSeconds, "maxRunSeconds");
@@ -26,8 +25,7 @@ public record DefaultValues(
     maxCostUsd = requireOptional(maxCostUsd, "maxCostUsd");
     modelParameters = Objects.requireNonNull(modelParameters, "modelParameters");
     retryPolicy = requireOptional(retryPolicy, "retryPolicy");
-    memoryPolicy = requireOptional(memoryPolicy, "memoryPolicy");
-    optionalHookDefaults = List.copyOf(optionalHookDefaults);
+    optionalHookDefaults = validateHooks(optionalHookDefaults);
     maxRunSeconds.ifPresent(value -> requireRange(value, 1, 3600, "maxRunSeconds"));
     maxToolCalls.ifPresent(value -> requireRange(value, 0, 1000, "maxToolCalls"));
     maxInputTokens.ifPresent(value -> requireAtLeast(value, 1, "maxInputTokens"));
@@ -48,7 +46,6 @@ public record DefaultValues(
         Optional.empty(),
         Optional.empty(),
         SparseModelParameters.empty(),
-        Optional.empty(),
         Optional.empty(),
         List.of());
   }
@@ -157,6 +154,18 @@ public record DefaultValues(
         Optional.of(value));
   }
 
+  public DefaultValues withOptionalHookDefaults(List<HookBinding> value) {
+    return new DefaultValues(
+        maxRunSeconds,
+        maxToolCalls,
+        maxInputTokens,
+        maxOutputTokens,
+        maxCostUsd,
+        modelParameters,
+        retryPolicy,
+        value);
+  }
+
   DefaultValues without(OverridePath path) {
     return switch (path) {
       case RUNTIME_MAX_RUN_SECONDS ->
@@ -240,6 +249,11 @@ public record DefaultValues(
               maxCostUsd,
               modelParameters,
               Optional.empty());
+      case MEMORY_POLICY_VERSION,
+              OUTPUT_SCHEMA_VERSION,
+              EVALUATION_SUITE_VERSION,
+              DEFAULT_PROFILE_VERSION ->
+          this;
     };
   }
 
@@ -259,12 +273,26 @@ public record DefaultValues(
         maxCostUsd,
         modelParameters,
         retryPolicy,
-        memoryPolicy,
         optionalHookDefaults);
   }
 
   private static <T> Optional<T> requireOptional(Optional<T> value, String field) {
     return Objects.requireNonNull(value, field);
+  }
+
+  private static List<HookBinding> validateHooks(List<HookBinding> values) {
+    var copy = List.copyOf(values);
+    if (copy.size() > 100) {
+      throw new IllegalArgumentException("optionalHookDefaults cannot contain more than 100 items");
+    }
+    var identities = new HashSet<String>();
+    for (var hook : copy) {
+      var identity = hook.hookKey().value() + "\u0000" + hook.version().value();
+      if (!identities.add(identity)) {
+        throw new IllegalArgumentException("optionalHookDefaults contains duplicate identity");
+      }
+    }
+    return copy;
   }
 
   private static void requireRange(int value, int minimum, int maximum, String field) {

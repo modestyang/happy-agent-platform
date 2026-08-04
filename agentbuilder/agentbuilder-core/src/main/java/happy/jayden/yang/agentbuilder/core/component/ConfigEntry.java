@@ -7,7 +7,7 @@ public record ConfigEntry(String path, ConfigValue value) implements Comparable<
   private static final Pattern PATH = Pattern.compile("^[a-zA-Z][a-zA-Z0-9_.-]{0,255}$");
 
   public ConfigEntry {
-    Objects.requireNonNull(path, "path");
+    TextValidation.requireUnicodeScalar(path, "path");
     Objects.requireNonNull(value, "value");
     if (!PATH.matcher(path).matches()) {
       throw new IllegalArgumentException("invalid config path: " + path);

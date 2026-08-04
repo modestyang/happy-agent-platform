@@ -1,6 +1,5 @@
 package happy.jayden.yang.agentbuilder.core.component;
 
-import java.util.Objects;
 import java.util.regex.Pattern;
 
 final class ComponentValidation {
@@ -10,7 +9,7 @@ final class ComponentValidation {
   private ComponentValidation() {}
 
   static String requireKey(String value) {
-    Objects.requireNonNull(value, "componentKey");
+    TextValidation.requireUnicodeScalar(value, "componentKey");
     if (!KEY.matcher(value).matches()) {
       throw new IllegalArgumentException("componentKey must satisfy " + KEY.pattern());
     }
@@ -18,7 +17,7 @@ final class ComponentValidation {
   }
 
   static String requireChecksum(String value) {
-    Objects.requireNonNull(value, "componentChecksum");
+    TextValidation.requireUnicodeScalar(value, "componentChecksum");
     if (!SHA256.matcher(value).matches()) {
       throw new IllegalArgumentException("componentChecksum must be a lowercase SHA-256 value");
     }

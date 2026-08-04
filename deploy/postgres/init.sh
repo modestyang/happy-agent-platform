@@ -16,4 +16,4 @@ agent_password="$(read_secret "${AGENT_DB_PASSWORD_FILE:?AGENT_DB_PASSWORD_FILE 
 psql --username="${POSTGRES_USER}" --dbname="${POSTGRES_DB}" --set=ON_ERROR_STOP=1 \
   --set="fitness_password=${fitness_password}" \
   --set="agent_password=${agent_password}" \
-  --file=/docker-entrypoint-initdb.d/01-init.sql
+  --file=/usr/local/share/happy-agent-init.sql

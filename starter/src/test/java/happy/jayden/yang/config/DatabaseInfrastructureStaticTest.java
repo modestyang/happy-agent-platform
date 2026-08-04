@@ -41,6 +41,27 @@ class DatabaseInfrastructureStaticTest {
     assertThat(process.waitFor()).isEqualTo(2);
   }
 
+  @Test
+  void onlyInitShellIsInThePostgresEntrypointScanDirectory() throws IOException {
+    String compose = Files.readString(projectRoot().resolve("deploy/docker-compose.yml"));
+    String initScript = Files.readString(projectRoot().resolve("deploy/postgres/init.sh"));
+
+    assertThat(compose).contains("target: /docker-entrypoint-initdb.d/00-init.sh");
+    assertThat(compose).containsOnlyOnce("/docker-entrypoint-initdb.d/");
+    assertThat(compose).doesNotContain("target: /docker-entrypoint-initdb.d/01-init.sql");
+    assertThat(compose).contains("target: /usr/local/share/happy-agent-init.sql");
+    assertThat(initScript).containsOnlyOnce("--file=/usr/local/share/happy-agent-init.sql");
+  }
+
+  @Test
+  void testcontainerCopiesVariableSqlOutsideTheEntrypointScanDirectory() throws IOException {
+    String integrationTest =
+        Files.readString(projectRoot().resolve("starter/src/test/java/happy/jayden/yang/config/DualSchemaIntegrationTest.java"));
+
+    assertThat(integrationTest).contains("/usr/local/share/happy-agent-init.sql");
+    assertThat(integrationTest).doesNotContain("/docker-entrypoint-initdb.d/01-init.sql");
+  }
+
   private static Path projectRoot() {
     Path directory = Path.of("").toAbsolutePath();
     while (directory != null) {

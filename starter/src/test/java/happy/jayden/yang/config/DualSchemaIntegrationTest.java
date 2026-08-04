@@ -39,7 +39,7 @@ class DualSchemaIntegrationTest {
               "/docker-entrypoint-initdb.d/00-init.sh")
           .withCopyFileToContainer(
               MountableFile.forHostPath(PROJECT_ROOT.resolve("deploy/postgres/init.sql")),
-              "/docker-entrypoint-initdb.d/01-init.sql")
+              "/usr/local/share/happy-agent-init.sql")
           .withCopyFileToContainer(
               MountableFile.forHostPath(testSecret("fitness_db_password", "fitness-test-password")),
               "/run/secrets/fitness_db_password")

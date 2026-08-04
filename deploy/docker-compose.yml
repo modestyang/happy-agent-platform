@@ -17,7 +17,7 @@ services:
         read_only: true
       - type: bind
         source: ./postgres/init.sql
-        target: /docker-entrypoint-initdb.d/01-init.sql
+        target: /usr/local/share/happy-agent-init.sql
         read_only: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]

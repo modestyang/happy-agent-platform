@@ -1,0 +1,31 @@
+{
+  "public": {
+    "anyOfRequiredChoices": {
+      "CreateBodyMetricRecordRequest": ["weightKg", "bodyFatPercent", "waistCm", "restingHeartRateBpm"]
+    },
+    "discriminatedUnions": {
+      "DailyMealPlan": {"property":"status", "values":["GENERATING", "READY", "FAILED"]},
+      "CreateMealRecordRequest": {"property":"source", "values":["MANUAL", "RECOGNITION_CONFIRMED"]},
+      "AgentRunEvent": {"property":"type", "values":["RUN_STATE", "TEXT_DELTA", "STRUCTURED_COMPONENT", "TOOL", "APPROVAL", "ERROR", "COMPLETED"]}
+    },
+    "requiredProperties": {
+      "ReadyDailyMealPlan": ["breakfast", "lunch", "dinner", "dailyNutrition"]
+    }
+  },
+  "admin": {
+    "discriminatedUnions": {
+      "ClosedJsonSchema": {"property":"type", "values":["OBJECT", "ARRAY", "STRING", "NUMBER", "INTEGER", "BOOLEAN"]},
+      "AgentRunEvent": {"property":"type", "values":["RUN_STATE", "TEXT_DELTA", "STRUCTURED_OUTPUT", "TOOL", "HOOK", "APPROVAL", "CHECKPOINT", "ERROR", "COMPLETED"]},
+      "ProbeJob": {"property":"status", "values":["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]}
+    },
+    "requiredProperties": {
+      "AgentVersion": ["memoryPolicyVersion", "outputSchemaVersion", "evaluationSuiteVersion", "defaultProfileVersion", "resolvedEffectiveConfig"],
+      "AgentDraftPatchRequest": ["resetPaths"],
+      "SkillPatchRequest": ["status"],
+      "ObjectJsonSchema": ["properties"]
+    },
+    "arrayMinimums": {
+      "ObjectJsonSchema.properties": 1
+    }
+  }
+}

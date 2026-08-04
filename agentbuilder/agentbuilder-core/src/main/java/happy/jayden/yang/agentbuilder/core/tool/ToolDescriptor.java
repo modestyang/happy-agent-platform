@@ -100,11 +100,6 @@ public record ToolDescriptor(
   }
 
   private static String requireText(String value, int minimum, int maximum, String field) {
-    Objects.requireNonNull(value, field);
-    if (value.isBlank() || value.length() < minimum || value.length() > maximum) {
-      throw new IllegalArgumentException(
-          field + " length must be between " + minimum + " and " + maximum);
-    }
-    return value;
+    return ToolText.require(value, minimum, maximum, field);
   }
 }

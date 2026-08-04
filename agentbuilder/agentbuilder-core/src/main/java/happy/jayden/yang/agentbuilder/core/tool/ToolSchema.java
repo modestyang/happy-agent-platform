@@ -12,10 +12,8 @@ import java.util.Objects;
 public record ToolSchema(Map<String, Object> document) {
   public ToolSchema {
     Objects.requireNonNull(document, "document");
+    ToolSchemaValidator.validate(document);
     document = immutableMap(document);
-    if (!document.containsKey("type")) {
-      throw new IllegalArgumentException("schema must declare type");
-    }
   }
 
   private static Map<String, Object> immutableMap(Map<?, ?> source) {

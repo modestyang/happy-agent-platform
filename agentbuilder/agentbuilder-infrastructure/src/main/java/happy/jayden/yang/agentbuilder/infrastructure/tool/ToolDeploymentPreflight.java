@@ -13,6 +13,9 @@ public final class ToolDeploymentPreflight {
       ToolBuildManifest manifest, Collection<PublishedAgentToolReference> publishedReferences) {
     Objects.requireNonNull(manifest, "manifest");
     Objects.requireNonNull(publishedReferences, "publishedReferences");
+    if (publishedReferences.stream().anyMatch(Objects::isNull)) {
+      throw new IllegalArgumentException("publishedReferences must not contain null");
+    }
     var available = new HashSet<String>();
     manifest
         .availableTools()
@@ -23,7 +26,6 @@ public final class ToolDeploymentPreflight {
 
     var missing =
         publishedReferences.stream()
-            .filter(Objects::nonNull)
             .filter(
                 reference ->
                     !available.contains(

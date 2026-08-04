@@ -57,4 +57,17 @@ class ToolDeploymentPreflightTest {
 
     assertDoesNotThrow(() -> new ToolDeploymentPreflight().verify(manifest, required));
   }
+
+  @Test
+  void nullPublishedReferenceFailsClosed() {
+    var manifest =
+        new ToolBuildManifest(
+            "build-2", List.of(new ToolManifestEntry("fitness.history", 1, CHECKSUM)));
+    var required = new java.util.ArrayList<PublishedAgentToolReference>();
+    required.add(null);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolDeploymentPreflight().verify(manifest, required));
+  }
 }

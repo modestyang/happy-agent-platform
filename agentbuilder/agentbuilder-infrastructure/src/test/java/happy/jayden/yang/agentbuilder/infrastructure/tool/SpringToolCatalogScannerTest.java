@@ -14,6 +14,7 @@ import happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSourceType;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
@@ -55,6 +56,7 @@ class SpringToolCatalogScannerTest {
     assertEquals(List.of("request"), input.get("required"));
     var request = property(input, "request");
     assertEquals("查询范围", request.get("description"));
+    assertEquals(List.of(Map.of("from_date", "2026-07-01")), request.get("examples"));
     assertEquals(false, request.get("additionalProperties"));
     assertEquals(List.of("from_date"), request.get("required"));
     var fromDate = property(request, "from_date");
@@ -157,22 +159,73 @@ class SpringToolCatalogScannerTest {
   }
 
   @Test
-  void discoversToolBeansFromSpringAndBuildsMetadataOnlyManifest() {
+  void discoversToolBeansFromSpringAndBuildsMetadataOnlyManifest() throws Exception {
     try (var context = new AnnotationConfigApplicationContext()) {
       context.registerBean(HistoryTools.class, HistoryTools::new);
       context.refresh();
 
       var scanner = scanner();
-      var descriptors = scanner.scan(context);
-      var manifest = scanner.buildManifest(descriptors);
+      var registrations = scanner.scanRegistrations(context);
+      var manifest = scanner.buildManifest();
 
-      assertEquals(1, descriptors.size());
+      assertEquals(1, registrations.size());
       assertEquals("build-2026.08.05", manifest.registeredBuild());
       assertEquals(1, manifest.availableTools().size());
-      assertEquals(descriptors.get(0).toolKey(), manifest.availableTools().get(0).toolKey());
       assertEquals(
-          descriptors.get(0).schemaChecksum(), manifest.availableTools().get(0).schemaChecksum());
+          registrations.get(0).descriptor().toolKey(), manifest.availableTools().get(0).toolKey());
+      assertEquals(
+          registrations.get(0).descriptor().schemaChecksum(),
+          manifest.availableTools().get(0).schemaChecksum());
+      assertEquals(
+          new HistoryResult(0),
+          registrations
+              .get(0)
+              .handler()
+              .invoke(
+                  Map.of("request", Map.of("from_date", "2026-07-01")),
+                  new ToolExecutionContext(
+                      "user-1", "run-1", Set.of("workout:read"), "operation-1")));
     }
+  }
+
+  @Test
+  void manifestRequiresCurrentAvailableExecutableRegistrations() {
+    var scanner = scanner();
+    assertThrows(IllegalStateException.class, scanner::buildManifest);
+
+    scanner.scanRegistration(new OperationalMetadataChangedVersionOne());
+    var exception = assertThrows(IllegalStateException.class, scanner::buildManifest);
+
+    assertTrue(exception.getMessage().contains("AVAILABLE"));
+  }
+
+  @Test
+  void requiresExplicitNamesForMethodParameters() {
+    var exception =
+        assertThrows(IllegalArgumentException.class, () -> scanner().scan(new ImplicitNameTool()));
+
+    assertTrue(exception.getMessage().contains("explicit"));
+  }
+
+  @Test
+  void rejectsRollbackBelowCompleteHistoricalMaximumAndIncompleteHistory() {
+    var versionOne = scanner().scan(new DriftVersionOne());
+    var versionTwo =
+        new SpringToolCatalogScanner("build-2026.08.05", List.of(versionOne))
+            .scan(new DriftVersionTwo());
+
+    assertThrows(IllegalStateException.class, () -> scanner().scan(new DriftVersionTwo()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new SpringToolCatalogScanner("build-2026.08.05", List.of(versionTwo)));
+    var scannerWithCompleteHistory =
+        new SpringToolCatalogScanner("build-2026.08.05", List.of(versionOne, versionTwo));
+    var exception =
+        assertThrows(
+            IllegalStateException.class,
+            () -> scannerWithCompleteHistory.scan(new DriftVersionOne()));
+
+    assertTrue(exception.getMessage().contains("historical maximum"));
   }
 
   private static SpringToolCatalogScanner scanner() {
@@ -227,7 +280,10 @@ class SpringToolCatalogScannerTest {
         returnDirect = false,
         status = ToolLifecycleStatus.AVAILABLE)
     HistoryResult history(
-        @AgentToolParam(name = "request", description = "查询范围", example = "{}")
+        @AgentToolParam(
+                name = "request",
+                description = "查询范围",
+                example = "{\"from_date\":\"2026-07-01\"}")
             HistoryRequest request,
         ToolExecutionContext context) {
       return new HistoryResult(0);
@@ -388,6 +444,23 @@ class SpringToolCatalogScannerTest {
         defaultTimeoutMs = 6000)
     String changed() {
       return "changed";
+    }
+  }
+
+  static final class ImplicitNameTool {
+    @AgentTool(
+        key = "fitness.implicit",
+        version = 1,
+        runtimeName = "implicit_name",
+        displayName = "隐式参数工具",
+        description = "验证模型参数必须显式命名",
+        whenToUse = "验证契约时",
+        whenNotToUse = "实际运行时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "结果")
+    String implicit(@AgentToolParam(description = "查询词", example = "legs") String query) {
+      return query;
     }
   }
 }

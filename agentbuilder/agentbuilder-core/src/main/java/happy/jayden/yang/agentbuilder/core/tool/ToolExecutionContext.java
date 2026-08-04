@@ -9,16 +9,15 @@ public record ToolExecutionContext(
   public ToolExecutionContext {
     userId = requireText(userId, "userId");
     runId = requireText(runId, "runId");
-    grantedScopes =
-        Set.copyOf(new LinkedHashSet<>(Objects.requireNonNull(grantedScopes, "grantedScopes")));
+    var scopes = new LinkedHashSet<String>();
+    for (var scope : Objects.requireNonNull(grantedScopes, "grantedScopes")) {
+      scopes.add(ToolText.require(scope, 1, 120, "grantedScopes item"));
+    }
+    grantedScopes = Set.copyOf(scopes);
     operationId = requireText(operationId, "operationId");
   }
 
   private static String requireText(String value, String field) {
-    Objects.requireNonNull(value, field);
-    if (value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    return value;
+    return ToolText.require(value, 1, 160, field);
   }
 }

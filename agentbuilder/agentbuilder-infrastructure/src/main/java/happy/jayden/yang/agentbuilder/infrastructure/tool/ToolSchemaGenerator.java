@@ -1,7 +1,9 @@
 package happy.jayden.yang.agentbuilder.infrastructure.tool;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.agentbuilder.core.tool.AgentToolParam;
-import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchema;
 import java.lang.reflect.Field;
 import java.lang.reflect.GenericArrayType;
@@ -33,34 +35,25 @@ import java.util.regex.PatternSyntaxException;
 
 final class ToolSchemaGenerator {
 
-  ToolSchema inputSchema(Method method) {
+  private final ObjectMapper exampleMapper =
+      new ObjectMapper()
+          .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
+
+  ToolSchema inputSchema(ToolMethodDefinition method) {
     var properties = new LinkedHashMap<String, Object>();
     var required = new ArrayList<String>();
-    for (var parameter : method.getParameters()) {
-      if (parameter.getType() == ToolExecutionContext.class) {
-        continue;
-      }
-      var metadata = parameter.getAnnotation(AgentToolParam.class);
-      if (metadata == null) {
-        throw new IllegalArgumentException(
-            "model parameter "
-                + parameter.getName()
-                + " on "
-                + method.toGenericString()
-                + " must declare @AgentToolParam");
-      }
-      var name = parameterName(metadata, parameter.getName());
-      if (properties.containsKey(name)) {
-        throw new IllegalArgumentException("duplicate model parameter name " + name);
-      }
+    for (var parameter : method.modelParameters()) {
+      var metadata = parameter.metadata();
+      var name = parameter.name();
       properties.put(
           name,
           describedSchema(
-              parameter.getParameterizedType(),
+              parameter.type(),
               metadata,
               new HashSet<>(),
-              method.toGenericString()));
-      if (metadata.required() && rawClass(parameter.getParameterizedType()) != Optional.class) {
+              method.contractMethod().toGenericString()));
+      if (metadata.required() && parameter.rawType() != Optional.class) {
         required.add(name);
       }
     }
@@ -353,7 +346,7 @@ final class ToolSchemaGenerator {
     }
   }
 
-  private static Object exampleValue(Object type, String value) {
+  private Object exampleValue(Object type, String value) {
     try {
       if ("integer".equals(type)) {
         return Long.parseLong(value);
@@ -367,8 +360,16 @@ final class ToolSchemaGenerator {
         }
         return Boolean.parseBoolean(value);
       }
+      if ("object".equals(type) || "array".equals(type)) {
+        var parsed = exampleMapper.readValue(value, Object.class);
+        if ("object".equals(type) && !(parsed instanceof Map<?, ?>)
+            || "array".equals(type) && !(parsed instanceof List<?>)) {
+          throw new IllegalArgumentException(type + " example must be structured JSON");
+        }
+        return parsed;
+      }
       return value;
-    } catch (NumberFormatException exception) {
+    } catch (NumberFormatException | JsonProcessingException exception) {
       throw new IllegalArgumentException("example does not match schema type " + type, exception);
     }
   }

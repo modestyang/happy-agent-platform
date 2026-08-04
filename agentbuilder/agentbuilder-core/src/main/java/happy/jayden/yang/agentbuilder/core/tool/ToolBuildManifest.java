@@ -6,10 +6,7 @@ import java.util.Objects;
 
 public record ToolBuildManifest(String registeredBuild, List<ToolManifestEntry> availableTools) {
   public ToolBuildManifest {
-    Objects.requireNonNull(registeredBuild, "registeredBuild");
-    if (registeredBuild.isBlank()) {
-      throw new IllegalArgumentException("registeredBuild must not be blank");
-    }
+    registeredBuild = ToolText.require(registeredBuild, 1, 160, "registeredBuild");
     availableTools = List.copyOf(Objects.requireNonNull(availableTools, "availableTools"));
     var identities = new HashSet<String>();
     for (var tool : availableTools) {

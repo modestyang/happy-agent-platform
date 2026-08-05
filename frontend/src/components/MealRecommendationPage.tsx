@@ -12,9 +12,14 @@ export type MealRecommendation = {
 };
 
 const mealNames = { BREAKFAST: '早餐', LUNCH: '午餐', DINNER: '晚餐' } as const;
+const shanghaiHourFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23' });
+
+function shanghaiHour(now: Date) {
+  return Number(shanghaiHourFormatter.format(now));
+}
 
 export function nextMealType(now: Date): MealRecommendation['mealType'] {
-  const hour = now.getHours();
+  const hour = shanghaiHour(now);
   if (hour < 9) return 'BREAKFAST';
   if (hour < 12) return 'LUNCH';
   return 'DINNER';
@@ -25,7 +30,7 @@ export function nextMealRecommendation(recommendations: MealRecommendation[], no
 }
 
 export function mealTimingLabel(now: Date, mealType: MealRecommendation['mealType']) {
-  return mealType === 'DINNER' && now.getHours() >= 18 ? '今晚' : '下一餐';
+  return mealType === 'DINNER' && shanghaiHour(now) >= 18 ? '今晚' : '下一餐';
 }
 
 export function recommendationKcal(recommendation?: MealRecommendation) {

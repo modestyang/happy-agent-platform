@@ -55,4 +55,14 @@ describe('workoutSession', () => {
     expect(previousWorkoutSession(next)).toMatchObject({ phase: 'EXERCISE', exerciseIndex: 0, setIndex: 0, remaining: 2 });
     expect(previousWorkoutSession(started)).toEqual(started);
   });
+
+  it('does not count the same set twice after navigating back to repeat it', () => {
+    let state = startWorkoutSession(createWorkoutSession(exercises.map((exercise) => ({ ...exercise, sets: 1 }))));
+    for (let second = 0; second < 5; second += 1) state = advanceWorkoutSession(state);
+    for (let second = 0; second < 30; second += 1) state = advanceWorkoutSession(state);
+    state = previousWorkoutSession(state);
+    state = advanceWorkoutSession(state);
+    state = advanceWorkoutSession(state);
+    expect(state.completedSets).toBe(1);
+  });
 });

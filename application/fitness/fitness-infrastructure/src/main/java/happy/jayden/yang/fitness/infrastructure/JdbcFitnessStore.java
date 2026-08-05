@@ -22,6 +22,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -123,8 +124,8 @@ public final class JdbcFitnessStore implements FitnessStore {
             (rs, row) -> mealRecommendation(rs),
             userId,
             recommendationDate);
-    PlanDto plan = latestPlan(userId);
-    List<ExerciseDto> exercises = exerciseDetails(plan.id());
+    PlanDto plan = planForDate(userId, recommendationDate);
+    List<ExerciseDto> exercises = exerciseDetails();
     Long completedWorkoutCount =
         jdbc.queryForObject(
             "SELECT COUNT(*) FROM workout_plans WHERE user_id=? AND status='COMPLETED'",
@@ -261,21 +262,19 @@ public final class JdbcFitnessStore implements FitnessStore {
             exercise);
       }
     }
+    seedTodayPlan(userId);
     seedMealRecommendation(
         userId,
-        1,
         "BREAKFAST",
         List.of(new MealItemDto("燕麦酸奶莓果杯", 360), new MealItemDto("水煮蛋", 75)),
         "早餐补足蛋白质和慢碳水，让上午更稳。");
     seedMealRecommendation(
         userId,
-        2,
         "LUNCH",
         List.of(new MealItemDto("番茄牛肉荞麦面", 480), new MealItemDto("清炒时蔬", 110)),
         "午餐保留主食，搭配牛肉和蔬菜更耐饿。");
     seedMealRecommendation(
         userId,
-        3,
         "DINNER",
         List.of(new MealItemDto("香煎鸡胸南瓜碗", 420), new MealItemDto("菌菇豆腐汤", 120)),
         "晚餐清淡但不空腹，照顾训练后的恢复。");
@@ -283,20 +282,53 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   private void seedMealRecommendation(
       UUID userId,
-      int number,
       String mealType,
       List<MealItemDto> items,
       String reason) {
+    LocalDate recommendationDate = LocalDate.now(USER_ZONE);
+    UUID recommendationId =
+        UUID.nameUUIDFromBytes(
+            ("local-meal-recommendation-" + recommendationDate + "-" + mealType)
+                .getBytes(StandardCharsets.UTF_8));
     jdbc.update(
         "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at) "
             + "VALUES (?::uuid,?,?,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) "
-            + "ON CONFLICT (recommendation_id) DO UPDATE SET recommendation_date=EXCLUDED.recommendation_date,items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
-        "70000000-0000-0000-0000-" + String.format("%012d", number),
+            + "ON CONFLICT (user_id,recommendation_date,meal_type) DO UPDATE SET items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
+        recommendationId,
         userId,
-        LocalDate.now(USER_ZONE),
+        recommendationDate,
         mealType,
         json(items),
         reason);
+  }
+
+  private void seedTodayPlan(UUID userId) {
+    LocalDate today = LocalDate.now(USER_ZONE);
+    Long existing =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM workout_plans WHERE user_id=? AND scheduled_for=?",
+            Long.class,
+            userId,
+            today);
+    if (existing != null && existing > 0) {
+      return;
+    }
+    UUID planId =
+        UUID.nameUUIDFromBytes(
+            ("local-workout-plan-" + today).getBytes(StandardCharsets.UTF_8));
+    jdbc.update(
+        "INSERT INTO workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for) VALUES (?,?,? ,28,'PLANNED',?)",
+        planId,
+        userId,
+        "全身燃脂训练",
+        today);
+    for (int exercise = 1; exercise <= 4; exercise++) {
+      jdbc.update(
+          "INSERT INTO workout_plan_exercises(workout_plan_id,exercise_id,display_order) VALUES (?,?::uuid,?) ON CONFLICT DO NOTHING",
+          planId,
+          "60000000-0000-0000-0000-" + String.format("%012d", exercise),
+          exercise);
+    }
   }
 
   private void seedExercises() {
@@ -377,10 +409,11 @@ public final class JdbcFitnessStore implements FitnessStore {
         userId);
   }
 
-  private PlanDto latestPlan(UUID userId) {
+  private PlanDto planForDate(UUID userId, LocalDate scheduledFor) {
     PlanDto base =
-        required(
-            "SELECT workout_plan_id,title,estimated_minutes,status FROM workout_plans WHERE user_id=? ORDER BY scheduled_for DESC LIMIT 1",
+        jdbc
+            .query(
+            "SELECT workout_plan_id,title,estimated_minutes,status FROM workout_plans WHERE user_id=? AND scheduled_for=? ORDER BY CASE status WHEN 'PLANNED' THEN 0 ELSE 1 END, workout_plan_id LIMIT 1",
             (rs, row) ->
                 new PlanDto(
                     rs.getObject("workout_plan_id", UUID.class),
@@ -388,7 +421,14 @@ public final class JdbcFitnessStore implements FitnessStore {
                     rs.getInt("estimated_minutes"),
                     rs.getString("status"),
                     List.of()),
-            userId);
+            userId,
+            scheduledFor)
+            .stream()
+            .findFirst()
+            .orElse(null);
+    if (base == null) {
+      return null;
+    }
     List<PlanExerciseDto> exercises =
         jdbc.query(
             "SELECT e.exercise_id,e.name,e.target_area,e.sets,e.seconds,e.steps,e.errors FROM workout_plan_exercises pe JOIN exercises e ON e.exercise_id=pe.exercise_id WHERE pe.workout_plan_id=? ORDER BY pe.display_order",
@@ -405,9 +445,9 @@ public final class JdbcFitnessStore implements FitnessStore {
     return new PlanDto(base.id(), base.title(), base.estimatedMinutes(), base.status(), exercises);
   }
 
-  private List<ExerciseDto> exerciseDetails(UUID planId) {
+  private List<ExerciseDto> exerciseDetails() {
     return jdbc.query(
-        "SELECT e.exercise_id,e.name,e.target_area,e.sets,e.seconds,e.steps,e.errors,e.image_urls FROM workout_plan_exercises pe JOIN exercises e ON e.exercise_id=pe.exercise_id WHERE pe.workout_plan_id=? ORDER BY pe.display_order",
+        "SELECT exercise_id,name,target_area,sets,seconds,steps,errors,image_urls FROM exercises ORDER BY name",
         (rs, row) ->
             new ExerciseDto(
                 rs.getObject("exercise_id", UUID.class),
@@ -418,8 +458,7 @@ public final class JdbcFitnessStore implements FitnessStore {
                 strings(rs.getString("steps")),
                 strings(rs.getString("errors")),
                 "FOUR_STEP_IMAGES",
-                strings(rs.getString("image_urls"))),
-        planId);
+                strings(rs.getString("image_urls"))));
   }
 
   private MealDto meal(ResultSet rs) throws SQLException {

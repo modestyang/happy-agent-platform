@@ -16,9 +16,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @Configuration
+@EnableScheduling
 public class FitnessExperienceConfig {
 
   @Bean
@@ -61,10 +64,26 @@ public class FitnessExperienceConfig {
       name = "happy.fitness.local-seed.enabled",
       havingValue = "true",
       matchIfMissing = false)
-  ApplicationRunner localFitnessSeed(JdbcFitnessStore store) {
-    return arguments -> {
-      BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-      store.seedLocalExperience(encoder.encode("demo123"));
-    };
+  LocalExperienceSeed localFitnessSeed(JdbcFitnessStore store) {
+    return new LocalExperienceSeed(store);
+  }
+
+  static final class LocalExperienceSeed implements ApplicationRunner {
+    private final JdbcFitnessStore store;
+    private final String passwordHash = new BCryptPasswordEncoder().encode("demo123");
+
+    LocalExperienceSeed(JdbcFitnessStore store) {
+      this.store = store;
+    }
+
+    @Override
+    public void run(org.springframework.boot.ApplicationArguments arguments) {
+      refresh();
+    }
+
+    @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Shanghai")
+    public void refresh() {
+      store.seedLocalExperience(passwordHash);
+    }
   }
 }

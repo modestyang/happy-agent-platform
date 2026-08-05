@@ -345,7 +345,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
 
 export function App() {
   const [data, setData] = useState<Dashboard>(); const [auth, setAuth] = useState<'loading' | 'login' | 'ready' | 'error'>('loading'); const [error, setError] = useState('');
-  async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); } } }
+  async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); throw err; } } }
   useEffect(() => { void load(false); }, []);
   if (auth === 'loading') return <div className="desktop"><main className="phone status"><Mascot /><div className="spinner" />正在读取你的记录…</main></div>;
   if (auth === 'login') return <Login onLogin={() => load(false)} />;

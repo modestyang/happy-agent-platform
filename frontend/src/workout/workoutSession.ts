@@ -16,6 +16,7 @@ export type WorkoutSessionState = {
   remaining: number;
   elapsedSeconds: number;
   completedSets: number;
+  completedSetKeys: readonly string[];
   restKind?: WorkoutRestKind;
 };
 
@@ -31,6 +32,7 @@ export function createWorkoutSession(exercises: readonly WorkoutExercise[]): Wor
     remaining: 0,
     elapsedSeconds: 0,
     completedSets: 0,
+    completedSetKeys: [],
   };
 }
 
@@ -58,7 +60,9 @@ export function advanceWorkoutSession(state: WorkoutSessionState): WorkoutSessio
   if (state.remaining > 1) return { ...elapsedState, remaining: state.remaining - 1 };
 
   const current = state.exercises[state.exerciseIndex];
-  const completedState = { ...elapsedState, completedSets: elapsedState.completedSets + 1 };
+  const completedKey = `${state.exerciseIndex}:${state.setIndex}`;
+  const completedSetKeys = state.completedSetKeys.includes(completedKey) ? state.completedSetKeys : [...state.completedSetKeys, completedKey];
+  const completedState = { ...elapsedState, completedSets: completedSetKeys.length, completedSetKeys };
   if (state.setIndex + 1 < exerciseSets(current)) {
     return { ...completedState, phase: 'REST', remaining: 20, restKind: 'SET' };
   }

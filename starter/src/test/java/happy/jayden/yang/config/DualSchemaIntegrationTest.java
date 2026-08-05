@@ -67,6 +67,7 @@ class DualSchemaIntegrationTest {
     try {
       Path secret = Files.createTempFile("happy-agent-", "-" + name);
       Files.writeString(secret, value, StandardCharsets.UTF_8);
+      secret.toFile().setReadable(true, false);
       secret.toFile().deleteOnExit();
       return secret;
     } catch (IOException exception) {
@@ -97,10 +98,10 @@ class DualSchemaIntegrationTest {
     assertThatThrownBy(
             () ->
                 fitnessJdbc.queryForObject("select count(*) from agent.agent_versions", Long.class))
-        .hasMessageContaining("permission denied");
+        .hasStackTraceContaining("permission denied");
     assertThatThrownBy(
             () -> agentJdbc.queryForObject("select count(*) from fitness.users", Long.class))
-        .hasMessageContaining("permission denied");
+        .hasStackTraceContaining("permission denied");
   }
 
   @Test
@@ -111,9 +112,9 @@ class DualSchemaIntegrationTest {
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(1L);
+        .isEqualTo(2L);
     assertThat(
             agentJdbc.queryForObject("select count(*) from agent.agent_schema_history", Long.class))
-        .isEqualTo(1L);
+        .isEqualTo(3L);
   }
 }

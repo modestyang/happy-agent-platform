@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       FITNESS_DB_PASSWORD_FILE: /run/secrets/fitness_db_password
       AGENT_DB_PASSWORD_FILE: /run/secrets/agent_db_password
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - type: bind
         source: ${POSTGRES_DATA_DIR:-/opt/happy-agent/data/postgres}

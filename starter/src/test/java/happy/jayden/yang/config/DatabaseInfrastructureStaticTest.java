@@ -11,11 +11,13 @@ import org.springframework.context.annotation.DependsOn;
 
 class DatabaseInfrastructureStaticTest {
 
-  private static final Path RESTORE_SCRIPT = projectRoot().resolve("deploy/scripts/restore-database.sh");
+  private static final Path RESTORE_SCRIPT =
+      projectRoot().resolve("deploy/scripts/restore-database.sh");
 
   @Test
   void agentFlywayWaitsForFitnessMigration() throws NoSuchMethodException {
-    Method agentFlyway = AgentDataSourceConfig.class.getDeclaredMethod("agentFlyway", javax.sql.DataSource.class);
+    Method agentFlyway =
+        AgentDataSourceConfig.class.getDeclaredMethod("agentFlyway", javax.sql.DataSource.class);
 
     DependsOn dependsOn = agentFlyway.getAnnotation(DependsOn.class);
 
@@ -56,7 +58,10 @@ class DatabaseInfrastructureStaticTest {
   @Test
   void testcontainerCopiesVariableSqlOutsideTheEntrypointScanDirectory() throws IOException {
     String integrationTest =
-        Files.readString(projectRoot().resolve("starter/src/test/java/happy/jayden/yang/config/DualSchemaIntegrationTest.java"));
+        Files.readString(
+            projectRoot()
+                .resolve(
+                    "starter/src/test/java/happy/jayden/yang/config/DualSchemaIntegrationTest.java"));
 
     assertThat(integrationTest).contains("/usr/local/share/happy-agent-init.sql");
     assertThat(integrationTest).doesNotContain("/docker-entrypoint-initdb.d/01-init.sql");

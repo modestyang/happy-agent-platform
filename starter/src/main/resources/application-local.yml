@@ -1,0 +1,16 @@
+happy:
+  datasource:
+    fitness:
+      url: ${HAPPY_DB_URL:jdbc:postgresql://localhost:5432/happy_agent}
+      username: fitness_app
+      password: ${FITNESS_DB_PASSWORD}
+    agent:
+      url: ${HAPPY_DB_URL:jdbc:postgresql://localhost:5432/happy_agent}
+      username: agent_app
+      password: ${AGENT_DB_PASSWORD}
+  fitness:
+    local-seed:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:8080}

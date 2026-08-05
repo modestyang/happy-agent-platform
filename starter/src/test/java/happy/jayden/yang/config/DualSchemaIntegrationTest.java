@@ -112,7 +112,7 @@ class DualSchemaIntegrationTest {
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(2L);
+        .isEqualTo(3L);
     assertThat(
             agentJdbc.queryForObject("select count(*) from agent.agent_schema_history", Long.class))
         .isEqualTo(3L);

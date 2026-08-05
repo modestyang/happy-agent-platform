@@ -94,6 +94,7 @@ class FitnessExperienceIntegrationTest {
             .andExpect(jsonPath("$.exercises[0].imageUrls.length()").value(4))
             .andExpect(jsonPath("$.report.status").value("READY"))
             .andExpect(jsonPath("$.report.conclusion").isString())
+            .andExpect(jsonPath("$.report.metrics[0].label").value("目标进度"))
             .andExpect(jsonPath("$.ai.configured").value(false))
             .andExpect(jsonPath("$.ai.reason").value("请在 Agent 工作台配置模型 Provider"))
             .andReturn();

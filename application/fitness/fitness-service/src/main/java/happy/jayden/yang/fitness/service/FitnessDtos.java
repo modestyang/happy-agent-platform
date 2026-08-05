@@ -82,7 +82,7 @@ public final class FitnessDtos {
 
   public record WorkoutCompletionDto(UUID id, String status, BigDecimal completionRatio) {}
 
-  public record ReportMetric(String name, String value) {}
+  public record ReportMetric(String label, String value) {}
 
   public record ReportDto(
       String status,

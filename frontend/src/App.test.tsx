@@ -82,6 +82,30 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/meals', expect.objectContaining({ method: 'POST', body: JSON.stringify({ mealType: 'BREAKFAST', items: [{ name: '牛肉面', estimatedKcal: 520 }] }) })));
   });
 
+  it('keeps the current page mounted while refreshing after a record is saved', async () => {
+    let bootstrapCalls = 0;
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/app/bootstrap') {
+        bootstrapCalls += 1;
+        if (bootstrapCalls === 1) return new Response(JSON.stringify(dashboard), { status: 200 });
+        return new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('button', { name: /我要记录/ }));
+    await user.click(screen.getByRole('button', { name: '保存身材记录' }));
+    await waitFor(() => expect(bootstrapCalls).toBe(2));
+
+    expect(screen.getByRole('heading', { name: '今天，慢慢变好' })).toBeInTheDocument();
+    resolveRefresh?.(new Response(JSON.stringify(dashboard), { status: 200 }));
+  });
+
   it('completes a workout and makes AI dependency failures explicit', async () => {
     const fetchMock = mockFetch();
     const user = userEvent.setup();
@@ -93,6 +117,7 @@ describe('App', () => {
 
     await user.click(screen.getByRole('link', { name: 'AI花爷' }));
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '今天怎么练' }) })));
     expect(await screen.findByText(/AI 服务尚未配置/)).toBeInTheDocument();
   });
 
@@ -105,5 +130,7 @@ describe('App', () => {
 
     expect(screen.getByText('动作步骤 1')).toBeInTheDocument();
     expect(screen.getByText('动作步骤 4')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '常见错误' })).toBeInTheDocument();
+    expect(screen.getByText('暂无特别提醒，保持动作稳定即可。')).toBeInTheDocument();
   });
 });

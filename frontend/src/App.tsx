@@ -34,7 +34,7 @@ function Empty({ text }: { text: string }) { return <div className="slim-card"><
 function HomePage({ data, reload }: { data: Dashboard; reload: () => Promise<void> }) {
   const [drawer, setDrawer] = useState(false); const navigate = useNavigate(); const goal = data.goal;
   const totalKcal = data.meals.flatMap((meal) => meal.items).reduce((sum, item) => sum + item.estimatedKcal, 0);
-  return <section className="page"><Header nickname={data.user.nickname} />
+  return <section className={`page ${drawer ? 'page-modal' : ''}`}><Header nickname={data.user.nickname} />
     {goal ? <section className="goal-card"><div className="row"><span>{goal.name}</span><span className="meta">目标 {goal.targetWeightJin} 斤</span></div><div className="weight">{goal.currentWeightJin}<small> 斤</small></div><div className="progress"><i style={{ width: `${goal.progressPercent}%` }} /></div><div className="row"><span className="meta">已完成 {goal.progressPercent}%</span><button className="detail-link" onClick={() => navigate('/me#report')}>查看进度详情 <ChevronRight size={15} /></button></div></section> : <Empty text="还没有进行中的目标" />}
     <div className="quick-grid"><button className="quick orange" onClick={() => navigate('/plan')}>今日训练<small>{data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 个动作` : '还未安排'}</small></button><button className="quick cream" onClick={() => setDrawer(true)}>今日饮食<small>{totalKcal} kcal 已记录</small></button><button className="quick mint" onClick={() => setDrawer(true)}>我要记录<small>身材 / 饮食</small></button><button className="quick blue" onClick={() => navigate('/me#report')}>我的报告<small>看见长期变化</small></button></div>
     <h2 className="section-title">今天的节奏</h2>{data.plan ? <section className="slim-card"><p className="eyebrow">TODAY'S SESSION · {data.plan.status}</p><h3 className="plan-name">{data.plan.title}</h3><p className="meta">{data.plan.exercises.length} 个动作 · {data.plan.estimatedMinutes} 分钟</p></section> : <Empty text="今天暂时没有训练计划" />}
@@ -65,7 +65,7 @@ function AiPage({ data }: { data: Dashboard }) {
 
 function LibraryPage({ data }: { data: Dashboard }) {
   const [picked, setPicked] = useState<Exercise>();
-  return <section className="page"><Header nickname={data.user.nickname} title="动作库" />{picked ? <><button className="quiet" onClick={() => setPicked(undefined)}>← 返回动作库</button><h2>{picked.name}</h2><p className="subtle">{picked.targetArea} · {picked.sets} 组 · {picked.seconds} 秒</p><div className="steps">{[1, 2, 3, 4].map((step) => <div className="step-art" key={step}>动作步骤 {step}<br /><span className="meta">{picked.steps[step - 1] ?? '稳定控制身体'}</span></div>)}</div></> : data.exercises.length ? <><div className="chips">{Array.from(new Set(data.exercises.map((item) => item.targetArea))).map((area) => <span className="chip" key={area}>{area}</span>)}</div><div className="quick-grid">{data.exercises.map((exercise) => <button className="exercise" key={exercise.id} onClick={() => setPicked(exercise)}>{exercise.name}<small>{exercise.targetArea}</small></button>)}</div></> : <Empty text="动作库正在整理中" />}</section>;
+  return <section className="page"><Header nickname={data.user.nickname} title="动作库" />{picked ? <><button className="quiet" onClick={() => setPicked(undefined)}>← 返回动作库</button><h2>{picked.name}</h2><p className="subtle">{picked.targetArea} · {picked.sets} 组 · {picked.seconds} 秒</p><div className="steps">{[1, 2, 3, 4].map((step) => <div className="step-art" key={step}>动作步骤 {step}<br /><span className="meta">{picked.steps[step - 1] ?? '稳定控制身体'}</span></div>)}</div><h3>常见错误</h3>{picked.errors.length ? picked.errors.map((item) => <p className="bullet" key={item}>{item}</p>) : <p className="subtle">暂无特别提醒，保持动作稳定即可。</p>}</> : data.exercises.length ? <><div className="chips">{Array.from(new Set(data.exercises.map((item) => item.targetArea))).map((area) => <span className="chip" key={area}>{area}</span>)}</div><div className="quick-grid">{data.exercises.map((exercise) => <button className="exercise" key={exercise.id} onClick={() => setPicked(exercise)}>{exercise.name}<small>{exercise.targetArea}</small></button>)}</div></> : <Empty text="动作库正在整理中" />}</section>;
 }
 
 function MePage({ data }: { data: Dashboard }) {
@@ -84,10 +84,10 @@ function Shell({ data, reload }: { data: Dashboard; reload: () => Promise<void> 
 
 export function App() {
   const [data, setData] = useState<Dashboard>(); const [auth, setAuth] = useState<'loading' | 'login' | 'ready' | 'error'>('loading'); const [error, setError] = useState('');
-  async function load() { setAuth('loading'); setError(''); try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else { setError(errorText(err)); setAuth('error'); } } }
-  useEffect(() => { void load(); }, []);
+  async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); } } }
+  useEffect(() => { void load(false); }, []);
   if (auth === 'loading') return <div className="desktop"><main className="phone status"><div className="spinner" />正在读取你的记录…</main></div>;
-  if (auth === 'login') return <Login onLogin={load} />;
-  if (auth === 'error' || !data) return <div className="desktop"><main className="phone status"><p>{error || '暂时无法加载数据'}</p><button className="primary" onClick={() => void load()}>重新尝试</button></main></div>;
-  return <BrowserRouter><Shell data={data} reload={load} /></BrowserRouter>;
+  if (auth === 'login') return <Login onLogin={() => load(false)} />;
+  if (auth === 'error' || !data) return <div className="desktop"><main className="phone status"><p>{error || '暂时无法加载数据'}</p><button className="primary" onClick={() => void load(false)}>重新尝试</button></main></div>;
+  return <BrowserRouter><Shell data={data} reload={() => load(true)} /></BrowserRouter>;
 }

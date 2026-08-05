@@ -14,6 +14,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
@@ -113,6 +114,13 @@ public final class JdbcFitnessStore implements FitnessStore {
             "SELECT meal_id,occurred_at,meal_type,items FROM meals WHERE user_id=? ORDER BY occurred_at DESC",
             (rs, row) -> meal(rs),
             userId);
+    List<MealRecommendationDto> mealRecommendations =
+        jdbc.query(
+            "SELECT recommendation_id,recommendation_date,meal_type,items,reason,status,generated_at "
+                + "FROM daily_meal_recommendations WHERE user_id=? AND recommendation_date=CURRENT_DATE "
+                + "ORDER BY CASE meal_type WHEN 'BREAKFAST' THEN 1 WHEN 'LUNCH' THEN 2 ELSE 3 END",
+            (rs, row) -> mealRecommendation(rs),
+            userId);
     PlanDto plan = latestPlan(userId);
     List<ExerciseDto> exercises = exerciseDetails(plan.id());
     Long completedWorkoutCount =
@@ -125,6 +133,7 @@ public final class JdbcFitnessStore implements FitnessStore {
         goal,
         records,
         meals,
+        mealRecommendations,
         plan,
         exercises,
         completedWorkoutCount == null ? 0 : completedWorkoutCount);
@@ -238,6 +247,41 @@ public final class JdbcFitnessStore implements FitnessStore {
             exercise);
       }
     }
+    seedMealRecommendation(
+        userId,
+        1,
+        "BREAKFAST",
+        List.of(new MealItemDto("燕麦酸奶莓果杯", 360), new MealItemDto("水煮蛋", 75)),
+        "早餐补足蛋白质和慢碳水，让上午更稳。");
+    seedMealRecommendation(
+        userId,
+        2,
+        "LUNCH",
+        List.of(new MealItemDto("番茄牛肉荞麦面", 480), new MealItemDto("清炒时蔬", 110)),
+        "午餐保留主食，搭配牛肉和蔬菜更耐饿。");
+    seedMealRecommendation(
+        userId,
+        3,
+        "DINNER",
+        List.of(new MealItemDto("香煎鸡胸南瓜碗", 420), new MealItemDto("菌菇豆腐汤", 120)),
+        "晚餐清淡但不空腹，照顾训练后的恢复。");
+  }
+
+  private void seedMealRecommendation(
+      UUID userId,
+      int number,
+      String mealType,
+      List<MealItemDto> items,
+      String reason) {
+    jdbc.update(
+        "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at) "
+            + "VALUES (?::uuid,?,CURRENT_DATE,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) "
+            + "ON CONFLICT (recommendation_id) DO UPDATE SET recommendation_date=CURRENT_DATE,items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
+        "70000000-0000-0000-0000-" + String.format("%012d", number),
+        userId,
+        mealType,
+        json(items),
+        reason);
   }
 
   private void seedExercises() {
@@ -372,6 +416,21 @@ public final class JdbcFitnessStore implements FitnessStore {
           objectMapper.readValue(rs.getString("items"), MEAL_ITEMS));
     } catch (JsonProcessingException exception) {
       throw new SQLException("Invalid meal items JSON", exception);
+    }
+  }
+
+  private MealRecommendationDto mealRecommendation(ResultSet rs) throws SQLException {
+    try {
+      return new MealRecommendationDto(
+          rs.getObject("recommendation_id", UUID.class),
+          rs.getObject("recommendation_date", LocalDate.class),
+          happy.jayden.yang.fitness.service.FitnessDtos.MealType.valueOf(rs.getString("meal_type")),
+          objectMapper.readValue(rs.getString("items"), MEAL_ITEMS),
+          rs.getString("reason"),
+          rs.getString("status"),
+          rs.getTimestamp("generated_at").toInstant());
+    } catch (JsonProcessingException exception) {
+      throw new SQLException("Invalid recommendation items JSON", exception);
     }
   }
 

@@ -88,6 +88,7 @@ public final class FitnessApplicationService {
         goal,
         data.bodyRecords(),
         data.meals(),
+        data.mealRecommendations(),
         data.plan(),
         data.exercises(),
         data.completedWorkoutCount(),

@@ -49,6 +49,15 @@ public final class FitnessDtos {
 
   public record MealDto(UUID id, Instant occurredAt, MealType mealType, List<MealItemDto> items) {}
 
+  public record MealRecommendationDto(
+      UUID id,
+      LocalDate recommendationDate,
+      MealType mealType,
+      List<MealItemDto> items,
+      String reason,
+      String status,
+      Instant generatedAt) {}
+
   public record CreateMealRequest(MealType mealType, List<MealItemDto> items, Instant occurredAt) {}
 
   public record PlanExerciseDto(
@@ -102,6 +111,7 @@ public final class FitnessDtos {
       GoalState goal,
       List<BodyRecordDto> bodyRecords,
       List<MealDto> meals,
+      List<MealRecommendationDto> mealRecommendations,
       PlanDto plan,
       List<ExerciseDto> exercises,
       long completedWorkoutCount) {}
@@ -111,6 +121,7 @@ public final class FitnessDtos {
       GoalDto goal,
       List<BodyRecordDto> bodyRecords,
       List<MealDto> meals,
+      List<MealRecommendationDto> mealRecommendations,
       PlanDto plan,
       List<ExerciseDto> exercises,
       long completedWorkoutCount,

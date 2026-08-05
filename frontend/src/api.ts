@@ -26,9 +26,9 @@ export const api = {
   bootstrap: () => request<unknown>('/api/app/bootstrap'),
   login: (username: string, password: string) => request<unknown>('/api/local/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request<unknown>('/api/local/logout', { method: 'POST' }),
-  bodyRecord: (weight: number) => request<unknown>('/api/app/body-records', { method: 'POST', body: JSON.stringify({ weight }) }),
-  meal: (name: string, calories: number) => request<unknown>('/api/app/meals', { method: 'POST', body: JSON.stringify({ name, calories }) }),
-  completeWorkout: (id: string) => request<unknown>(`/api/app/workouts/${id}/complete`, { method: 'POST' }),
+  bodyRecord: (record: { weightJin?: number; waistCm?: number }) => request<unknown>('/api/app/body-records', { method: 'POST', body: JSON.stringify(record) }),
+  meal: (mealType: string, items: { name: string; estimatedKcal: number }[]) => request<unknown>('/api/app/meals', { method: 'POST', body: JSON.stringify({ mealType, items }) }),
+  completeWorkout: (id: string, completionRatio: number) => request<unknown>(`/api/app/workouts/${id}/complete`, { method: 'POST', body: JSON.stringify({ completionRatio }) }),
   goal: (body: unknown) => request<unknown>('/api/app/goals', { method: 'POST', body: JSON.stringify(body) }),
   aiMessage: (content: string) => request<unknown>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ content }) }),
 };

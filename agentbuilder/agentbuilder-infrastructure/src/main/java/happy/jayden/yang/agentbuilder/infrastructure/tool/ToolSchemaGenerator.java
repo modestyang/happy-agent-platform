@@ -284,6 +284,14 @@ final class ToolSchemaGenerator {
 
   private static void validateConstructibleBean(
       Class<?> type, List<Field> fields, String location) {
+    if (type.isInterface() || Modifier.isAbstract(type.getModifiers())) {
+      throw new IllegalArgumentException(
+          "Tool DTO "
+              + type.getName()
+              + " at "
+              + location
+              + " must be a concrete non-record class");
+    }
     for (var field : fields) {
       if (!isWritableBeanProperty(type, field)) {
         throw new IllegalArgumentException(

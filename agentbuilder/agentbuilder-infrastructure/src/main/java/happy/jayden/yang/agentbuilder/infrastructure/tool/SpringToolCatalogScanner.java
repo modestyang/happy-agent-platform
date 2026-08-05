@@ -1,7 +1,9 @@
 package happy.jayden.yang.agentbuilder.infrastructure.tool;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import happy.jayden.yang.agentbuilder.core.tool.ToolBuildManifest;
 import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
 import happy.jayden.yang.agentbuilder.core.tool.ToolLifecycleStatus;
@@ -23,7 +25,10 @@ public final class SpringToolCatalogScanner {
   private final ToolContractHistory history;
   private final ToolDescriptorFactory descriptors = new ToolDescriptorFactory();
   private final SpringToolMethodDiscovery methodDiscovery = new SpringToolMethodDiscovery();
-  private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new Jdk8Module());
+  private final ObjectMapper objectMapper =
+      new ObjectMapper()
+          .registerModules(new Jdk8Module(), new JavaTimeModule())
+          .disable(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE);
   private List<ToolRegistration> currentRegistrations = List.of();
 
   public SpringToolCatalogScanner(

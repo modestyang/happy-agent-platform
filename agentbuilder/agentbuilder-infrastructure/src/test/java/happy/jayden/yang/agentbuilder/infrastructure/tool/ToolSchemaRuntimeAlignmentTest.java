@@ -1,6 +1,8 @@
 package happy.jayden.yang.agentbuilder.infrastructure.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ToolSchemaRuntimeAlignmentTest {
@@ -68,6 +71,34 @@ class ToolSchemaRuntimeAlignmentTest {
   }
 
   @Test
+  void generatesLocalDateTimePatternThatAcceptsOnlyNoOffsetShape() {
+    var descriptor = scanner().scan(new JavaTimeTools());
+    var localDateTime =
+        property(
+            property(property(descriptor.inputSchema().document(), "request"), "window"),
+            "local_date_time");
+
+    assertEquals("string", localDateTime.get("type"));
+    assertFalse(localDateTime.containsKey("format"));
+    var pattern = (String) localDateTime.get("pattern");
+    assertNotNull(pattern);
+    assertTrue(Pattern.matches(pattern, "2026-08-05T09:10:11"));
+    assertTrue(Pattern.matches(pattern, "2026-08-05T09:10:11.123456789"));
+    assertFalse(Pattern.matches(pattern, "2026-08-05T09:10:11Z"));
+    assertFalse(Pattern.matches(pattern, "2026-08-05 09:10:11"));
+  }
+
+  @Test
+  void rejectsOffsetBearingExampleForLocalDateTimeContract() {
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> scanner().scanRegistration(new InvalidLocalDateTimeExampleTools()));
+
+    assertTrue(exception.getMessage().contains("does not match pattern"));
+  }
+
+  @Test
   void explicitlyRejectsInterfaceDto() {
     var exception =
         assertThrows(
@@ -89,6 +120,11 @@ class ToolSchemaRuntimeAlignmentTest {
 
   private static SpringToolCatalogScanner scanner() {
     return new SpringToolCatalogScanner("build-shape", List.of());
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> property(Map<String, Object> schema, String name) {
+    return ((Map<String, Map<String, Object>>) schema.get("properties")).get(name);
   }
 
   record OptionalRequest(
@@ -188,6 +224,28 @@ class ToolSchemaRuntimeAlignmentTest {
           + window.localDateTime()
           + "|"
           + window.offsetDateTime();
+    }
+  }
+
+  static final class InvalidLocalDateTimeExampleTools {
+    @AgentTool(
+        key = "fitness.invalid_local_date_time",
+        version = 1,
+        runtimeName = "invalid_local_date_time",
+        displayName = "错误本地日期时间工具",
+        description = "拒绝带偏移的本地日期时间契约示例",
+        whenToUse = "验证本地日期时间契约时",
+        whenNotToUse = "生产调用时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "结果")
+    String query(
+        @AgentToolParam(
+                name = "local_date_time",
+                description = "本地日期时间",
+                example = "2026-08-05T09:10:11Z")
+            LocalDateTime localDateTime) {
+      return localDateTime.toString();
     }
   }
 

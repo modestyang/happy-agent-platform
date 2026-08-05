@@ -35,6 +35,9 @@ import java.util.regex.PatternSyntaxException;
 
 final class ToolSchemaGenerator {
 
+  private static final String LOCAL_DATE_TIME_PATTERN =
+      "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?$";
+
   private final ObjectMapper exampleMapper =
       new ObjectMapper()
           .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
@@ -122,9 +125,9 @@ final class ToolSchemaGenerator {
         result.put("format", "uuid");
       } else if (raw == LocalDate.class) {
         result.put("format", "date");
-      } else if (raw == Instant.class
-          || raw == LocalDateTime.class
-          || raw == OffsetDateTime.class) {
+      } else if (raw == LocalDateTime.class) {
+        result.put("pattern", LOCAL_DATE_TIME_PATTERN);
+      } else if (raw == Instant.class || raw == OffsetDateTime.class) {
         result.put("format", "date-time");
       }
       return result;

@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public record AgentDraft(
     String agentKey,
+    String applicationScope,
     long revision,
     VersionReference frameworkVersion,
     VersionReference providerVersion,
@@ -24,6 +25,7 @@ public record AgentDraft(
     Instant updatedAt) {
   public AgentDraft {
     TextValidation.requireLength(agentKey, 2, 120, "agentKey");
+    TextValidation.requireNonBlankLength(applicationScope, 1, 120, "applicationScope");
     if (revision < 1) {
       throw new IllegalArgumentException("revision must be at least 1");
     }

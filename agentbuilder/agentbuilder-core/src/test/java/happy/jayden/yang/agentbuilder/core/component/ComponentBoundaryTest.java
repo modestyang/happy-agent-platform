@@ -102,6 +102,7 @@ class ComponentBoundaryTest {
     var reference = new VersionReference(key("component.one"), version(1));
     return new AgentDraft(
         agentKey,
+        "fitness",
         1,
         reference,
         reference,

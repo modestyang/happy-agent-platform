@@ -20,6 +20,7 @@ class AgentDraftContractTest {
     var draft =
         new AgentDraft(
             "coach.agent",
+            "fitness",
             3,
             framework,
             reference("provider.openai", 2),

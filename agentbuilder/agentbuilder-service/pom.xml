@@ -10,4 +10,17 @@
     </parent>
 
     <artifactId>agentbuilder-service</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>agentbuilder-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

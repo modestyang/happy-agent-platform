@@ -10,6 +10,11 @@ describe('App', () => {
     goal: { id: 'goal-1', name: '轻盈计划', startWeightJin: 130, currentWeightJin: 124.8, targetWeightJin: 116, status: 'ACTIVE', progressPercent: 46 },
     bodyRecords: [{ id: 'body-1', weightJin: 124.8, waistCm: 70, recordedAt: '2026-08-05' }],
     meals: [{ id: 'meal-1', occurredAt: '2026-08-05T12:00:00Z', mealType: 'LUNCH', items: [{ name: '鸡胸肉藜麦碗', estimatedKcal: 468 }] }],
+    mealRecommendations: [
+      { id: 'rec-breakfast', recommendationDate: '2026-08-06', mealType: 'BREAKFAST', items: [{ name: '燕麦酸奶莓果杯', estimatedKcal: 360 }], reason: '上午能量更稳定', status: 'READY', generatedAt: '2026-08-06T05:30:00+08:00' },
+      { id: 'rec-lunch', recommendationDate: '2026-08-06', mealType: 'LUNCH', items: [{ name: '番茄牛肉荞麦面', estimatedKcal: 480 }, { name: '清炒时蔬', estimatedKcal: 110 }], reason: '午餐保留主食更耐饿', status: 'READY', generatedAt: '2026-08-06T05:30:00+08:00' },
+      { id: 'rec-dinner', recommendationDate: '2026-08-06', mealType: 'DINNER', items: [{ name: '香煎鸡胸南瓜碗', estimatedKcal: 420 }], reason: '晚餐清淡但不空腹', status: 'READY', generatedAt: '2026-08-06T05:30:00+08:00' },
+    ],
     plan: { id: 'plan-1', title: '上肢力量 · B', estimatedMinutes: 42, status: 'PLANNED', exercises: [{ id: 'squat', name: '哑铃深蹲', targetArea: '下肢', sets: 4, seconds: 40, steps: ['站稳，核心收紧', '髋部向后坐', '脚跟发力站起'], errors: ['膝盖内扣', '弓背借力'] }] },
     exercises: [{ id: 'squat', name: '哑铃深蹲', targetArea: '下肢', sets: 4, seconds: 40, steps: ['站稳，核心收紧'], errors: [], illustrationMode: 'DIAGRAM', imageUrls: [] }],
     completedWorkoutCount: 3,
@@ -39,13 +44,17 @@ describe('App', () => {
   }
 
   it('shows the bootstrap home with the four entry blocks and tab navigation', async () => {
+    vi.setSystemTime(new Date('2026-08-06T10:00:00+08:00'));
     mockFetch();
     render(<App />);
 
     expect(await screen.findByText('124.8')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '训练' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '饮食' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '饮食' })).toHaveTextContent('记下今天吃了什么');
+    expect(screen.getByRole('button', { name: '饮食' })).toHaveTextContent('午餐');
+    expect(screen.getByRole('button', { name: '饮食' })).toHaveTextContent('番茄牛肉荞麦面');
+    expect(screen.getByRole('button', { name: '饮食' })).toHaveTextContent('约 590 kcal');
+    expect(screen.getByRole('button', { name: '训练' })).toHaveTextContent('上肢力量 · B');
     expect(screen.getByRole('button', { name: '记录' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '报告' })).toBeInTheDocument();
     expect(screen.queryByText('今天的节奏')).not.toBeInTheDocument();
@@ -53,6 +62,36 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: '今天' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '瘦瘦' })).toHaveClass('nav-link--ai');
     expect(screen.getByRole('link', { name: '动作' })).toBeInTheDocument();
+  });
+
+  it('opens today meal recommendations instead of the meal record drawer', async () => {
+    vi.setSystemTime(new Date('2026-08-06T10:00:00+08:00'));
+    mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('button', { name: '饮食' }));
+
+    expect(await screen.findByRole('heading', { name: '今天吃什么' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '记录抽屉' })).not.toBeInTheDocument();
+    expect(screen.getByText('早餐')).toBeInTheDocument();
+    expect(screen.getByText('午餐')).toBeInTheDocument();
+    expect(screen.getByText('晚餐')).toBeInTheDocument();
+    expect(screen.getByText('下一餐')).toBeInTheDocument();
+    expect(screen.getByText('番茄牛肉荞麦面')).toBeInTheDocument();
+    expect(screen.getByText('约 590 kcal')).toBeInTheDocument();
+  });
+
+  it('shows an honest empty state when today has no meal recommendation', async () => {
+    mockFetch({ '/api/app/bootstrap': { ...dashboard, mealRecommendations: [] } });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    expect(screen.getByRole('button', { name: '饮食' })).toHaveTextContent('今日建议尚未生成');
+    await user.click(screen.getByRole('button', { name: '饮食' }));
+    expect(await screen.findByRole('heading', { name: '今天还没有饮食建议' })).toBeInTheDocument();
   });
 
   it('offers AI generation only for a future date without a plan', async () => {

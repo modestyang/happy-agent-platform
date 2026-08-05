@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { ApiError, api } from './api';
 import { ExerciseVisual } from './components/ExerciseVisual';
+import { MealRecommendationPage, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
 import './app.css';
 
@@ -17,6 +18,7 @@ type Dashboard = {
   goal?: { id: string; name: string; startWeightJin: number; currentWeightJin: number; targetWeightJin: number; status: string; progressPercent: number };
   bodyRecords: { id: string; recordedAt: string; weightJin?: number; waistCm?: number }[];
   meals: { id: string; occurredAt: string; mealType: string; items: Food[] }[];
+  mealRecommendations: MealRecommendation[];
   plan?: { id: string; title: string; estimatedMinutes: number; status: string; exercises: Exercise[] };
   exercises: Exercise[];
   completedWorkoutCount?: number;
@@ -86,6 +88,7 @@ function Header({ nickname, title, subtitle }: { nickname: string; title: string
 
 function Navigation() {
   const { pathname } = useLocation();
+  if (pathname.startsWith('/meal/') || pathname.startsWith('/workout/')) return null;
   const items = [
     { to: '/', label: '今天', icon: Home },
     { to: '/plan', label: '计划', icon: CalendarDays },
@@ -104,14 +107,16 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
   const navigate = useNavigate();
   const goal = data.goal;
   const now = new Date();
-  const totalKcal = data.meals.filter((meal) => dayKey(new Date(meal.occurredAt)) === dayKey(now)).flatMap((meal) => meal.items).reduce((sum, item) => sum + item.estimatedKcal, 0);
+  const nextMeal = nextMealRecommendation(data.mealRecommendations ?? [], now);
+  const mealName = nextMeal?.mealType === 'BREAKFAST' ? '早餐' : nextMeal?.mealType === 'LUNCH' ? '午餐' : '晚餐';
   const hour = now.getHours();
   const greeting = hour < 11 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
+  const totalSets = data.plan?.exercises.reduce((sum, exercise) => sum + exercise.sets, 0) ?? 0;
   const quickActions = [
-    { title: '训练', detail: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 个动作` : '今天还没安排', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
-    { title: '饮食', detail: totalKcal ? `已记录 ${totalKcal} kcal` : '记下今天吃了什么', icon: Salad, tone: 'butter', action: () => onOpenRecord('meal') },
-    { title: '记录', detail: '体重 · 腰围 · 一餐', icon: Plus, tone: 'mint', action: () => onOpenRecord('body') },
-    { title: '报告', detail: '当前目标累计分析', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?prompt=请生成我的当前目标累计报告') },
+    { title: '训练', eyebrow: '今日主题', headline: data.plan?.title ?? '今天还没安排', meta: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 动作 · ${totalSets} 组` : '去看看本周计划', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
+    { title: '饮食', eyebrow: nextMeal ? `下一餐 · ${mealName}` : '今日推荐', headline: nextMeal?.items[0]?.name ?? '今日建议尚未生成', meta: nextMeal ? `约 ${recommendationKcal(nextMeal)} kcal` : '生成后会展示在这里', icon: Salad, tone: 'butter', action: () => navigate('/meal/today') },
+    { title: '记录', eyebrow: '留下真实数据', headline: '记录身材或一餐', meta: '体重 · 腰围 · 饮食', icon: Plus, tone: 'mint', action: () => onOpenRecord('body') },
+    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由瘦瘦整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?prompt=请生成我的当前目标累计报告') },
   ];
 
   return <section className="page home-page">
@@ -126,7 +131,7 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
       <div className="progress" role="progressbar" aria-label={`目标已完成 ${goal.progressPercent}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={goal.progressPercent}><i style={{ width: `${goal.progressPercent}%` }} /></div>
       <p>已经走完 {goal.progressPercent}% <Sparkles /></p>
     </section> : <Empty icon={Target} title="设一个刚刚好的目标" text="有方向，但不用给自己太大压力。" />}
-    <section className="home-actions" aria-label="今日快捷功能">{quickActions.map(({ title, detail, icon: Icon, tone, action }) => <button key={title} className={`home-action home-action--${tone}`} aria-label={title} onClick={action}><span><Icon /></span><div><strong>{title}</strong><small>{detail}</small></div><i><ChevronRight /></i></button>)}</section>
+    <section className="home-actions" aria-label="今日快捷功能">{quickActions.map(({ title, eyebrow, headline, meta, icon: Icon, tone, action }) => <button key={title} className={`home-action home-action--${tone}`} aria-label={title} onClick={action}><span className="home-action__icon"><Icon /></span><div className="home-action__title"><small>{eyebrow}</small><strong>{title}</strong></div><div className="home-action__summary"><b>{headline}</b><small>{meta}</small></div><i><ChevronRight /></i></button>)}</section>
   </section>;
 }
 
@@ -335,7 +340,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
     restoreFocus.current?.focus();
     setRecordTab(undefined);
   }, []);
-  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
+  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
 export function App() {

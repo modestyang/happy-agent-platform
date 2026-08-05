@@ -269,6 +269,22 @@ describe('App', () => {
     expect(completionCalls[0]?.[1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ completionRatio: 1 }) }));
   });
 
+  it('never completes an empty plan or a mismatched workout route', async () => {
+    const emptyDashboard = { ...dashboard, plan: { ...dashboard.plan, exercises: [] }, exercises: [] };
+    window.history.replaceState({}, '', '/workout/plan-1');
+    let fetchMock = mockFetch({ '/api/app/bootstrap': emptyDashboard });
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: '这次训练暂时不可用' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => path === '/api/app/workouts/plan-1/complete')).toBe(false);
+
+    cleanup();
+    window.history.replaceState({}, '', '/workout/not-the-current-plan');
+    fetchMock = mockFetch();
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: '这次训练暂时不可用' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/complete'))).toBe(false);
+  });
+
   it('turns the AI welcome capabilities into a focused conversation', async () => {
     mockFetch();
     const user = userEvent.setup();

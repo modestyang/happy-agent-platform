@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Check, ChevronLeft, Pause, Play, RotateCcw, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api';
 import {
@@ -63,17 +63,28 @@ function phaseVoice(state: WorkoutSessionState, exercise: PlayerExercise, muted:
 
 export function WorkoutPlayer({ plan, exerciseLibrary, reload }: WorkoutPlayerProps) {
   const navigate = useNavigate();
-  const exercises = useMemo(() => plan?.exercises.map((exercise) => {
+  const { planId } = useParams();
+  const activePlan = plan?.id === planId ? plan : undefined;
+  const exercises = useMemo(() => activePlan?.exercises.map((exercise) => {
     const libraryItem = exerciseLibrary.find((item) => item.id === exercise.id);
     return libraryItem ? { ...libraryItem, ...exercise, imageUrls: libraryItem.imageUrls ?? exercise.imageUrls } : exercise;
-  }) ?? [], [exerciseLibrary, plan]);
+  }) ?? [], [activePlan, exerciseLibrary]);
   const [session, setSession] = useState(() => createWorkoutSession(exercises));
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const completedPosted = useRef(false);
+  const started = useRef(false);
+  const exitTrigger = useRef<HTMLButtonElement>(null);
+  const exitDialog = useRef<HTMLDivElement>(null);
+  const continueButton = useRef<HTMLButtonElement>(null);
+  const pausedBeforeExit = useRef(false);
   const current = exercises[session.exerciseIndex] ?? exercises[0];
+  const totalSets = exercises.reduce((sum, exercise) => sum + Math.max(1, exercise.sets), 0);
+  const completionRatio = totalSets ? Math.min(1, session.completedSets / totalSets) : 0;
+  const voiceAvailable = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
   useEffect(() => {
     if (paused || session.phase === 'READY' || session.phase === 'COMPLETED') return;
@@ -88,36 +99,65 @@ export function WorkoutPlayer({ plan, exerciseLibrary, reload }: WorkoutPlayerPr
 
   useEffect(() => () => { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }, []);
 
-  useEffect(() => {
-    if (!plan || session.phase !== 'COMPLETED' || completedPosted.current) return;
-    completedPosted.current = true;
+  const persistCompletion = useCallback(async () => {
+    if (!activePlan || !started.current || totalSets === 0) return;
     setSaveState('saving');
-    void api.completeWorkout(plan.id, 1)
-      .then(async () => { await reload(); setSaveState('saved'); })
-      .catch(() => setSaveState('error'));
-  }, [plan, reload, session.phase]);
+    setRefreshFailed(false);
+    try {
+      await api.completeWorkout(activePlan.id, completionRatio);
+      setSaveState('saved');
+      try { await reload(); } catch { setRefreshFailed(true); }
+    } catch { setSaveState('error'); }
+  }, [activePlan, completionRatio, reload, totalSets]);
 
-  if (!plan || exercises.length === 0 || !current) {
+  useEffect(() => {
+    if (!activePlan || !started.current || exercises.length === 0 || session.phase !== 'COMPLETED' || completedPosted.current) return;
+    completedPosted.current = true;
+    void persistCompletion();
+  }, [activePlan, exercises.length, persistCompletion, session.phase]);
+
+  useEffect(() => {
+    if (!exitOpen) return;
+    continueButton.current?.focus();
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setExitOpen(false);
+        setPaused(pausedBeforeExit.current);
+        exitTrigger.current?.focus();
+        return;
+      }
+      if (event.key !== 'Tab' || !exitDialog.current) return;
+      const buttons = Array.from(exitDialog.current.querySelectorAll<HTMLButtonElement>('button'));
+      if (!buttons.length) return;
+      const first = buttons[0]; const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [exitOpen]);
+
+  if (!activePlan || exercises.length === 0 || !current) {
     return <section className="page workout-page workout-page--empty"><button className="workout-top-button" aria-label="返回计划" onClick={() => navigate('/plan')}><ChevronLeft /></button><h1>这次训练暂时不可用</h1><p>返回计划页重新选择一份训练。</p></section>;
   }
 
-  const totalSets = exercises.reduce((sum, exercise) => sum + Math.max(1, exercise.sets), 0);
-  const completedSets = exercises.slice(0, session.exerciseIndex).reduce((sum, exercise) => sum + Math.max(1, exercise.sets), 0) + session.setIndex;
-  const progress = session.phase === 'COMPLETED' ? 100 : Math.max(2, Math.round(completedSets / totalSets * 100));
+  const progress = session.phase === 'COMPLETED' ? Math.round(completionRatio * 100) : Math.max(2, Math.round(session.completedSets / totalSets * 100));
   const nextExercise = exercises[session.exerciseIndex + 1];
 
   if (session.phase === 'READY') {
     return <section className="page workout-page workout-ready">
-      <header className="workout-top"><button className="workout-top-button" aria-label="返回计划" onClick={() => navigate('/plan')}><ChevronLeft /></button><small>训练预览</small><button className="workout-top-button" aria-label={muted ? '打开声音' : '关闭声音'} onClick={() => setMuted((value) => !value)}>{muted ? <VolumeX /> : <Volume2 />}</button></header>
-      <div className="workout-ready__hero"><span>今日跟练</span><h1>{plan.title}</h1><p>{plan.estimatedMinutes} 分钟 · {exercises.length} 个动作 · {totalSets} 组</p></div>
+      <header className="workout-top"><button className="workout-top-button" aria-label="返回计划" onClick={() => navigate('/plan')}><ChevronLeft /></button><small>训练预览</small><button className="workout-top-button" aria-label={muted ? '打开声音' : '关闭声音'} onClick={() => setMuted((value) => { if (!value && 'speechSynthesis' in window) window.speechSynthesis.cancel(); return !value; })}>{muted ? <VolumeX /> : <Volume2 />}</button></header>
+      <div className="workout-ready__hero"><span>今日跟练</span><h1>{activePlan.title}</h1><p>{activePlan.estimatedMinutes} 分钟 · {exercises.length} 个动作 · {totalSets} 组</p></div>
+      {!voiceAvailable && <p className="workout-voice-note"><VolumeX /> 当前浏览器不支持语音播报，计时仍会正常继续。</p>}
       <div className="workout-ready__visual"><ExerciseVisual exercise={current} /></div>
       <div className="workout-ready__list">{exercises.map((exercise, index) => <article key={exercise.id}><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{exercise.name}</strong><small>{exercise.sets} 组 × {exercise.seconds} 秒 · {exercise.targetArea}</small></span></article>)}</div>
-      <button className="workout-start" onClick={() => { navigator.vibrate?.([50, 40, 50]); setSession((value) => startWorkoutSession(value)); }}><Play /> 开始训练</button>
+      <button className="workout-start" onClick={() => { started.current = true; navigator.vibrate?.([50, 40, 50]); setSession((value) => startWorkoutSession(value)); }}><Play /> 开始训练</button>
     </section>;
   }
 
   if (session.phase === 'COMPLETED') {
-    return <section className="page workout-page workout-complete"><div className="workout-complete__mark"><Check /></div><small>完成得刚刚好</small><h1>今天的训练<br />已经收下啦</h1><p>实际跟练 {Math.max(1, Math.ceil(session.elapsedSeconds / 60))} 分钟 · 完成 {totalSets} 组</p><div className={`workout-save workout-save--${saveState}`}>{saveState === 'saving' ? '正在保存训练记录…' : saveState === 'error' ? '记录保存失败，返回后可重试' : '训练记录已同步'}</div><button className="workout-finish" onClick={() => navigate('/plan')}><Check /> 返回计划</button></section>;
+    return <section className="page workout-page workout-complete"><div className="workout-complete__mark"><Check /></div><small>完成得刚刚好</small><h1>今天的训练<br />已经收下啦</h1><p>实际跟练 {Math.max(1, Math.ceil(session.elapsedSeconds / 60))} 分钟 · 完成 {session.completedSets} / {totalSets} 组</p><div className={`workout-save workout-save--${saveState}`}>{saveState === 'saving' ? '正在保存训练记录…' : saveState === 'error' ? '训练记录保存失败' : refreshFailed ? '训练已保存，页面数据稍后刷新' : '训练记录已同步'}</div>{saveState === 'error' && <button className="workout-retry" onClick={() => void persistCompletion()}>重新保存</button>}<button className="workout-finish" onClick={() => navigate('/plan')}><Check /> 返回计划</button></section>;
   }
 
   const isRest = session.phase === 'REST';
@@ -125,15 +165,16 @@ export function WorkoutPlayer({ plan, exerciseLibrary, reload }: WorkoutPlayerPr
   const phaseHint = session.phase === 'COUNTDOWN' ? '站稳，调整呼吸' : isRest ? (session.restKind === 'SET' ? `下一组 · ${current.name}` : `下一个 · ${nextExercise?.name ?? current.name}`) : `第 ${session.setIndex + 1} / ${current.sets} 组 · ${current.targetArea}`;
 
   return <section className={`page workout-page${isRest ? ' workout-page--rest' : ''}`}>
-    <header className="workout-top"><button className="workout-top-button" aria-label="退出训练" onClick={() => { setPaused(true); setExitOpen(true); }}><X /></button><div className="workout-progress"><i style={{ width: `${progress}%` }} /></div><button className="workout-top-button" aria-label={muted ? '打开声音' : '关闭声音'} onClick={() => setMuted((value) => !value)}>{muted ? <VolumeX /> : <Volume2 />}</button></header>
+    <header className="workout-top"><button ref={exitTrigger} className="workout-top-button" aria-label="退出训练" onClick={() => { pausedBeforeExit.current = paused; setPaused(true); setExitOpen(true); }}><X /></button><div className="workout-progress"><i style={{ width: `${progress}%` }} /></div><button className="workout-top-button" aria-label={muted ? '打开声音' : '关闭声音'} onClick={() => setMuted((value) => { if (!value && 'speechSynthesis' in window) window.speechSynthesis.cancel(); return !value; })}>{muted ? <VolumeX /> : <Volume2 />}</button></header>
     <div className="workout-stage">
       <div className="workout-stage__visual"><ExerciseVisual exercise={current} step={(session.setIndex % 4) + 1} /></div>
       <div className="workout-stage__copy"><small>{phaseHint}</small><h1>{phaseTitle}</h1>{session.phase === 'EXERCISE' && <p>{current.steps[0] ?? '保持身体稳定，自然呼吸。'}</p>}</div>
-      <div className="workout-timer" role="timer" aria-live="polite" aria-label={`剩余 ${session.remaining} 秒`} style={{ '--timer-progress': `${Math.max(0, session.remaining / (isRest ? (session.restKind === 'SET' ? 20 : 30) : session.phase === 'COUNTDOWN' ? 3 : current.seconds) * 360)}deg` } as CSSProperties}><strong>{session.remaining}</strong><small>秒</small></div>
+      <div className="sr-only" aria-live="assertive">{session.remaining <= 3 ? `${phaseTitle}，${session.remaining} 秒` : phaseTitle}</div>
+      <div className="workout-timer" role="timer" aria-label={`剩余 ${session.remaining} 秒`} style={{ '--timer-progress': `${Math.max(0, session.remaining / (isRest ? (session.restKind === 'SET' ? 20 : 30) : session.phase === 'COUNTDOWN' ? 3 : current.seconds) * 360)}deg` } as CSSProperties}><strong>{session.remaining}</strong><small>秒</small></div>
       {paused && <div className="workout-paused"><Pause /><strong>已暂停</strong><small>准备好再继续</small></div>}
     </div>
-    <div className="workout-controls"><button aria-label="上一个动作" disabled={session.exerciseIndex === 0} onClick={() => setSession((value) => previousWorkoutSession(value))}><SkipBack /></button><button className="workout-pause" aria-label={paused ? '继续训练' : '暂停训练'} onClick={() => { setPaused((value) => !value); speak(paused ? '继续训练' : '训练暂停', muted); }}>{paused ? <Play /> : <Pause />}</button><button aria-label="下一个动作" onClick={() => setSession((value) => nextWorkoutSession(value))}><SkipForward /></button></div>
+    <div className="workout-controls"><button aria-label="上一个动作" disabled={session.exerciseIndex === 0} onClick={() => setSession((value) => previousWorkoutSession(value))}><SkipBack /></button><button className="workout-pause" aria-label={paused ? '继续训练' : '暂停训练'} onClick={() => { setPaused((value) => !value); speak(paused ? '继续训练' : '训练暂停', muted); }}>{paused ? <Play /> : <Pause />}</button><button aria-label="下一个动作" disabled={session.exerciseIndex === exercises.length - 1} onClick={() => setSession((value) => nextWorkoutSession(value))}><SkipForward /></button></div>
     {nextExercise && <div className="workout-next"><small>接下来</small><strong>{nextExercise.name}</strong><span>{nextExercise.sets} 组</span></div>}
-    {exitOpen && <div className="workout-exit" role="dialog" aria-modal="true" aria-label="退出训练确认"><div><RotateCcw /><h2>要先离开一会儿吗？</h2><p>本次进度不会记为完成。</p><button className="workout-finish" onClick={() => navigate('/plan')}>退出训练</button><button className="workout-stay" onClick={() => { setExitOpen(false); setPaused(false); }}>继续跟练</button></div></div>}
+    {exitOpen && <div ref={exitDialog} className="workout-exit" role="dialog" aria-modal="true" aria-label="退出训练确认"><div><RotateCcw /><h2>要先离开一会儿吗？</h2><p>本次进度不会记为完成。</p><button className="workout-finish" onClick={() => navigate('/plan')}>退出训练</button><button ref={continueButton} className="workout-stay" onClick={() => { setExitOpen(false); setPaused(pausedBeforeExit.current); exitTrigger.current?.focus(); }}>继续跟练</button></div></div>}
   </section>;
 }

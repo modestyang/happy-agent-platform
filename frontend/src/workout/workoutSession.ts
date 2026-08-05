@@ -15,6 +15,7 @@ export type WorkoutSessionState = {
   setIndex: number;
   remaining: number;
   elapsedSeconds: number;
+  completedSets: number;
   restKind?: WorkoutRestKind;
 };
 
@@ -29,6 +30,7 @@ export function createWorkoutSession(exercises: readonly WorkoutExercise[]): Wor
     setIndex: 0,
     remaining: 0,
     elapsedSeconds: 0,
+    completedSets: 0,
   };
 }
 
@@ -56,19 +58,20 @@ export function advanceWorkoutSession(state: WorkoutSessionState): WorkoutSessio
   if (state.remaining > 1) return { ...elapsedState, remaining: state.remaining - 1 };
 
   const current = state.exercises[state.exerciseIndex];
+  const completedState = { ...elapsedState, completedSets: elapsedState.completedSets + 1 };
   if (state.setIndex + 1 < exerciseSets(current)) {
-    return { ...elapsedState, phase: 'REST', remaining: 20, restKind: 'SET' };
+    return { ...completedState, phase: 'REST', remaining: 20, restKind: 'SET' };
   }
   if (state.exerciseIndex + 1 < state.exercises.length) {
-    return { ...elapsedState, phase: 'REST', remaining: 30, restKind: 'EXERCISE' };
+    return { ...completedState, phase: 'REST', remaining: 30, restKind: 'EXERCISE' };
   }
-  return { ...elapsedState, phase: 'COMPLETED', remaining: 0, restKind: undefined };
+  return { ...completedState, phase: 'COMPLETED', remaining: 0, restKind: undefined };
 }
 
 export function nextWorkoutSession(state: WorkoutSessionState): WorkoutSessionState {
   const nextIndex = state.exerciseIndex + 1;
   if (nextIndex >= state.exercises.length) {
-    return { ...state, phase: 'COMPLETED', remaining: 0, restKind: undefined };
+    return state;
   }
   return beginExercise(state, nextIndex, 0);
 }

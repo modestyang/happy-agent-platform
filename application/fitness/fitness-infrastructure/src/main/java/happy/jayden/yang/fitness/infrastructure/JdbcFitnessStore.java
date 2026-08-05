@@ -27,7 +27,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +40,7 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   private static final TypeReference<List<MealItemDto>> MEAL_ITEMS = new TypeReference<>() {};
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
+  private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
 
@@ -92,7 +93,7 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   @Override
-  public BootstrapData loadBootstrap(UUID userId) {
+  public BootstrapData loadBootstrap(UUID userId, LocalDate recommendationDate) {
     UserDto user =
         required(
             "SELECT user_id,nickname FROM users WHERE user_id=?",
@@ -117,10 +118,11 @@ public final class JdbcFitnessStore implements FitnessStore {
     List<MealRecommendationDto> mealRecommendations =
         jdbc.query(
             "SELECT recommendation_id,recommendation_date,meal_type,items,reason,status,generated_at "
-                + "FROM daily_meal_recommendations WHERE user_id=? AND recommendation_date=CURRENT_DATE "
+                + "FROM daily_meal_recommendations WHERE user_id=? AND recommendation_date=? "
                 + "ORDER BY CASE meal_type WHEN 'BREAKFAST' THEN 1 WHEN 'LUNCH' THEN 2 ELSE 3 END",
             (rs, row) -> mealRecommendation(rs),
-            userId);
+            userId,
+            recommendationDate);
     PlanDto plan = latestPlan(userId);
     List<ExerciseDto> exercises = exerciseDetails(plan.id());
     Long completedWorkoutCount =
@@ -172,12 +174,24 @@ public final class JdbcFitnessStore implements FitnessStore {
       UUID userId, UUID workoutId, CompleteWorkoutRequest request) {
     int changed =
         jdbc.update(
-            "UPDATE workout_plans SET status='COMPLETED',completion_ratio=?,completed_at=CURRENT_TIMESTAMP WHERE workout_plan_id=? AND user_id=?",
+            "UPDATE workout_plans SET status='COMPLETED',completion_ratio=?,completed_at=CURRENT_TIMESTAMP WHERE workout_plan_id=? AND user_id=? AND status<>'COMPLETED'",
             request.completionRatio(),
             workoutId,
             userId);
     if (changed == 0) {
-      throw new NotFoundException("训练计划不存在");
+      return jdbc
+          .query(
+              "SELECT workout_plan_id,status,completion_ratio FROM workout_plans WHERE workout_plan_id=? AND user_id=?",
+              (rs, row) ->
+                  new WorkoutCompletionDto(
+                      rs.getObject("workout_plan_id", UUID.class),
+                      rs.getString("status"),
+                      rs.getBigDecimal("completion_ratio")),
+              workoutId,
+              userId)
+          .stream()
+          .findFirst()
+          .orElseThrow(() -> new NotFoundException("训练计划不存在"));
     }
     return new WorkoutCompletionDto(workoutId, "COMPLETED", request.completionRatio());
   }
@@ -217,20 +231,20 @@ public final class JdbcFitnessStore implements FitnessStore {
 
     seedExercises();
     for (int week = 1; week <= 8; week++) {
-      LocalDate weekDate = LocalDate.now(ZoneOffset.UTC).minusWeeks(8L - week);
+      LocalDate weekDate = LocalDate.now(USER_ZONE).minusWeeks(8L - week);
       String suffix = String.format("%012d", week);
       jdbc.update(
           "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES (?::uuid,?,?,?,?) ON CONFLICT DO NOTHING",
           "30000000-0000-0000-0000-" + suffix,
           userId,
-          Timestamp.from(weekDate.atStartOfDay().toInstant(ZoneOffset.UTC)),
+          Timestamp.from(weekDate.atStartOfDay(USER_ZONE).toInstant()),
           BigDecimal.valueOf(157L - week),
           BigDecimal.valueOf(91L - week));
       jdbc.update(
           "INSERT INTO meals(meal_id,user_id,occurred_at,meal_type,items) VALUES (?::uuid,?,?,?,?::jsonb) ON CONFLICT DO NOTHING",
           "40000000-0000-0000-0000-" + suffix,
           userId,
-          Timestamp.from(weekDate.atTime(12, 0).toInstant(ZoneOffset.UTC)),
+          Timestamp.from(weekDate.atTime(0, 1).atZone(USER_ZONE).toInstant()),
           week % 2 == 0 ? "LUNCH" : "DINNER",
           "[{\"name\":\"第" + week + "周均衡餐\",\"estimatedKcal\":520}]");
       String planId = "50000000-0000-0000-0000-" + suffix;
@@ -275,10 +289,11 @@ public final class JdbcFitnessStore implements FitnessStore {
       String reason) {
     jdbc.update(
         "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at) "
-            + "VALUES (?::uuid,?,CURRENT_DATE,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) "
-            + "ON CONFLICT (recommendation_id) DO UPDATE SET recommendation_date=CURRENT_DATE,items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
+            + "VALUES (?::uuid,?,?,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) "
+            + "ON CONFLICT (recommendation_id) DO UPDATE SET recommendation_date=EXCLUDED.recommendation_date,items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
         "70000000-0000-0000-0000-" + String.format("%012d", number),
         userId,
+        LocalDate.now(USER_ZONE),
         mealType,
         json(items),
         reason);

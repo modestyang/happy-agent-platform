@@ -134,6 +134,14 @@ class FitnessExperienceIntegrationTest {
         .andExpect(jsonPath("$.status").value("COMPLETED"));
 
     mvc.perform(
+            post("/api/app/workouts/{id}/complete", workoutId)
+                .cookie(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"completionRatio\":0.2}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.completionRatio").value(0.8));
+
+    mvc.perform(
             post("/api/app/goals")
                 .cookie(session)
                 .contentType(MediaType.APPLICATION_JSON)

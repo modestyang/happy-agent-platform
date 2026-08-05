@@ -12,6 +12,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,7 +29,7 @@ public final class FitnessPorts {
 
     void revokeSession(String sessionTokenHash);
 
-    BootstrapData loadBootstrap(UUID userId);
+    BootstrapData loadBootstrap(UUID userId, LocalDate recommendationDate);
 
     BodyRecordDto createBodyRecord(UUID userId, CreateBodyRecordRequest request);
 

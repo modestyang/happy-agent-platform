@@ -32,6 +32,8 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -40,6 +42,7 @@ public final class FitnessApplicationService {
 
   public static final String AI_REASON = "请在 Agent 工作台配置模型 Provider";
   private static final Duration SESSION_TTL = Duration.ofDays(14);
+  private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
   private final FitnessStore store;
   private final PasswordVerifier passwordVerifier;
   private final AgentProviderStatus providerStatus;
@@ -80,7 +83,7 @@ public final class FitnessApplicationService {
   }
 
   public BootstrapDto bootstrap(String sessionToken) {
-    BootstrapData data = store.loadBootstrap(authenticate(sessionToken));
+    BootstrapData data = store.loadBootstrap(authenticate(sessionToken), LocalDate.now(USER_ZONE));
     BigDecimal currentWeight = currentWeight(data);
     GoalDto goal = goal(data.goal(), currentWeight);
     return new BootstrapDto(
@@ -137,7 +140,7 @@ public final class FitnessApplicationService {
     }
     positive(request.targetWeightJin(), "targetWeightJin");
     GoalState created = store.createGoal(userId, request);
-    BigDecimal current = currentWeight(store.loadBootstrap(userId));
+    BigDecimal current = currentWeight(store.loadBootstrap(userId, LocalDate.now(USER_ZONE)));
     return goal(created, current);
   }
 

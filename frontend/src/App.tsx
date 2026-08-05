@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { ApiError, api } from './api';
 import { ExerciseVisual } from './components/ExerciseVisual';
-import { MealRecommendationPage, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
+import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
 import { WorkoutPlayer } from './components/WorkoutPlayer';
 import './app.css';
@@ -115,7 +115,7 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
   const totalSets = data.plan?.exercises.reduce((sum, exercise) => sum + exercise.sets, 0) ?? 0;
   const quickActions = [
     { title: '训练', eyebrow: '今日主题', headline: data.plan?.title ?? '今天还没安排', meta: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 动作 · ${totalSets} 组` : '去看看本周计划', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
-    { title: '饮食', eyebrow: nextMeal ? `下一餐 · ${mealName}` : '今日推荐', headline: nextMeal?.items[0]?.name ?? '今日建议尚未生成', meta: nextMeal ? `约 ${recommendationKcal(nextMeal)} kcal` : '生成后会展示在这里', icon: Salad, tone: 'butter', action: () => navigate('/meal/today') },
+    { title: '饮食', eyebrow: nextMeal ? `${mealTimingLabel(now, nextMeal.mealType)} · ${mealName}` : '今日推荐', headline: nextMeal?.items[0]?.name ?? '今日建议尚未生成', meta: nextMeal ? `约 ${recommendationKcal(nextMeal)} kcal` : '生成后会展示在这里', icon: Salad, tone: 'butter', action: () => navigate('/meal/today') },
     { title: '记录', eyebrow: '留下真实数据', headline: '记录身材或一餐', meta: '体重 · 腰围 · 饮食', icon: Plus, tone: 'mint', action: () => onOpenRecord('body') },
     { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由瘦瘦整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?prompt=请生成我的当前目标累计报告') },
   ];
@@ -208,7 +208,7 @@ function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<voi
         return <article className="plan-exercise" key={exercise.id}><ExerciseVisual exercise={media} compact /><div className="plan-exercise__copy"><small>{String(index + 1).padStart(2, '0')} · {exercise.targetArea}</small><h2>{exercise.name}</h2><p>{exercise.sets} 组 × {exercise.seconds} 秒</p><div className="cue"><strong>动作要点</strong>{exercise.steps.map((step) => <span key={step}>{step}</span>)}</div>{exercise.errors.length > 0 && <div className="mistakes"><strong>常见错误</strong>{exercise.errors.map((item) => <span key={item}>{item}</span>)}</div>}</div></article>;
       })}</div>
       {error && <p className="error">{error}</p>}
-      {done ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
+      {done || plan.status === 'COMPLETED' ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
     </> : canGenerate ? <section className="ai-plan-empty"><span><WandSparkles /></span><small>这一天还没有安排</small><h2>交给瘦瘦，拼一份刚刚好的训练</h2><p>会结合当前目标和已有记录，不盲目加量。</p><Link to={`/ai?prompt=${encodeURIComponent(prompt)}`} aria-label="AI 生成训练计划">AI 生成训练计划 <ChevronRight /></Link></section> : <Empty icon={CalendarDays} title="无训练计划" text="这一天没有留下训练安排，休息也算计划的一部分。" />}
   </section>;
 }

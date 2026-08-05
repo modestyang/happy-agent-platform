@@ -26,6 +26,7 @@ describe('workoutSession', () => {
     state = advanceWorkoutSession(state);
     state = advanceWorkoutSession(state);
     expect(state).toMatchObject({ phase: 'REST', remaining: 20, restKind: 'SET' });
+    expect(state.completedSets).toBe(1);
 
     for (let second = 0; second < 20; second += 1) state = advanceWorkoutSession(state);
     expect(state).toMatchObject({ phase: 'EXERCISE', remaining: 2, exerciseIndex: 0, setIndex: 1 });
@@ -42,13 +43,15 @@ describe('workoutSession', () => {
     state = advanceWorkoutSession(state);
     state = advanceWorkoutSession(state);
     expect(state.phase).toBe('COMPLETED');
+    expect(state.completedSets).toBe(2);
   });
 
   it('supports explicit next and previous exercise navigation without crossing boundaries', () => {
     const started = startWorkoutSession(createWorkoutSession(exercises));
     const next = nextWorkoutSession(started);
     expect(next).toMatchObject({ phase: 'EXERCISE', exerciseIndex: 1, setIndex: 0, remaining: 2 });
-    expect(nextWorkoutSession(next).phase).toBe('COMPLETED');
+    expect(nextWorkoutSession(next)).toEqual(next);
+    expect(next.completedSets).toBe(0);
     expect(previousWorkoutSession(next)).toMatchObject({ phase: 'EXERCISE', exerciseIndex: 0, setIndex: 0, remaining: 2 });
     expect(previousWorkoutSession(started)).toEqual(started);
   });

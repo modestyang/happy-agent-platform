@@ -30,5 +30,5 @@ export const api = {
   meal: (mealType: string, items: { name: string; estimatedKcal: number }[]) => request<unknown>('/api/app/meals', { method: 'POST', body: JSON.stringify({ mealType, items }) }),
   completeWorkout: (id: string, completionRatio: number) => request<unknown>(`/api/app/workouts/${id}/complete`, { method: 'POST', body: JSON.stringify({ completionRatio }) }),
   goal: (body: unknown) => request<unknown>('/api/app/goals', { method: 'POST', body: JSON.stringify(body) }),
-  aiMessage: (message: string) => request<unknown>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
+  aiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
 };

@@ -1,7 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Bot, BookOpen, ChevronRight, Dumbbell, Home, Play, Send, Sparkles, UserRound, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Activity, Award, BarChart3, Bot, CalendarDays, Camera, Check, ChevronLeft, ChevronRight,
+  Clock3, Dumbbell, Flame, Home, LogOut, Medal, MessageCirclePlus, Play, Plus, Salad,
+  Search, Send, Sparkles, Target, Trophy, UserRound, Utensils, WandSparkles, X,
+} from 'lucide-react';
 import { ApiError, api } from './api';
+import { ExerciseVisual } from './components/ExerciseVisual';
+import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
 import './app.css';
 
 type Food = { name: string; estimatedKcal: number };
@@ -17,77 +23,258 @@ type Dashboard = {
   ai: { configured: boolean; reason?: string };
 };
 
-function errorText(error: unknown) { return error instanceof Error ? error.message : '网络似乎出了点问题，请重试。'; }
+type RecordTab = 'body' | 'meal';
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
-function Header({ nickname, title = '今天，慢慢变好' }: { nickname: string; title?: string }) {
-  return <div className="topline"><div className="avatar">{nickname.slice(0, 1)}</div><div><p className="eyebrow">PRIVATE FITNESS LOG</p><h1>{title}</h1></div><div className="icon"><Sparkles size={18} /></div></div>;
+const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+const tones = ['温暖直接', '轻松逗趣', '冷静专业'];
+const preferenceOptions = ['中式家常', '少跳跃', '晚餐清淡', '温和提醒'];
+
+function errorText(error: unknown) { return error instanceof Error ? error.message : '网络似乎出了点问题，请重试。'; }
+function dayKey(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+function sameDay(left: Date, right: Date) { return dayKey(left) === dayKey(right); }
+function currentWeek() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return date;
+  });
+}
+function equipmentFor(exercise: Exercise) { return /哑铃|壶铃|弹力带/.test(exercise.name) ? '小器械' : '徒手'; }
+
+function Mascot({ small = false }: { small?: boolean }) {
+  return <div className={`mascot${small ? ' mascot--small' : ''}`} aria-hidden="true"><i /><span>•ᴗ•</span><b /></div>;
+}
+
+function Header({ nickname, title, subtitle }: { nickname: string; title: string; subtitle?: string }) {
+  return <header className="page-head">
+    <div className="avatar" aria-hidden="true">{nickname.slice(0, 1)}</div>
+    <div><p>{subtitle ?? '今天也只做刚刚好的一点'}</p><h1>{title}</h1></div>
+    <Mascot small />
+  </header>;
 }
 
 function Navigation() {
   const { pathname } = useLocation();
-  const items = [{ to: '/', label: '首页', icon: Home }, { to: '/plan', label: '计划', icon: Dumbbell }, { to: '/ai', label: 'AI花爷', icon: Bot }, { to: '/library', label: '动作库', icon: BookOpen }, { to: '/me', label: '我的', icon: UserRound }];
-  return <nav className="bottom-nav">{items.map(({ to, label, icon: Icon }) => <Link key={to} className={`nav-link ${pathname === to ? 'active' : ''}`} to={to}><Icon />{label}</Link>)}</nav>;
+  const items = [
+    { to: '/', label: '今天', icon: Home },
+    { to: '/plan', label: '计划', icon: CalendarDays },
+    { to: '/ai', label: '瘦瘦', icon: Bot, ai: true },
+    { to: '/library', label: '动作', icon: Dumbbell },
+    { to: '/me', label: '我的', icon: UserRound },
+  ];
+  return <nav className="bottom-nav" aria-label="主导航">{items.map(({ to, label, icon: Icon, ai }) => <Link key={to} aria-label={label} className={`nav-link${pathname === to ? ' active' : ''}${ai ? ' nav-link--ai' : ''}`} to={to}><span><Icon /></span><small>{label}</small></Link>)}</nav>;
 }
 
-function Empty({ text }: { text: string }) { return <div className="slim-card"><p className="subtle">{text}</p></div>; }
+function Empty({ icon: Icon = Sparkles, title, text }: { icon?: typeof Sparkles; title: string; text: string }) {
+  return <section className="empty-card"><span><Icon /></span><h2>{title}</h2><p>{text}</p></section>;
+}
 
 function HomePage({ data, reload }: { data: Dashboard; reload: () => Promise<void> }) {
-  const [drawer, setDrawer] = useState(false); const navigate = useNavigate(); const goal = data.goal;
+  const [drawer, setDrawer] = useState<RecordTab>();
+  const navigate = useNavigate();
+  const goal = data.goal;
   const totalKcal = data.meals.flatMap((meal) => meal.items).reduce((sum, item) => sum + item.estimatedKcal, 0);
-  return <section className={`page ${drawer ? 'page-modal' : ''}`}><Header nickname={data.user.nickname} />
-    {goal ? <section className="goal-card"><div className="row"><span>{goal.name}</span><span className="meta">目标 {goal.targetWeightJin} 斤</span></div><div className="weight">{goal.currentWeightJin}<small> 斤</small></div><div className="progress"><i style={{ width: `${goal.progressPercent}%` }} /></div><div className="row"><span className="meta">已完成 {goal.progressPercent}%</span><button className="detail-link" onClick={() => navigate('/me#report')}>查看进度详情 <ChevronRight size={15} /></button></div></section> : <Empty text="还没有进行中的目标" />}
-    <div className="quick-grid"><button className="quick orange" onClick={() => navigate('/plan')}>今日训练<small>{data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 个动作` : '还未安排'}</small></button><button className="quick cream" onClick={() => setDrawer(true)}>今日饮食<small>{totalKcal} kcal 已记录</small></button><button className="quick mint" onClick={() => setDrawer(true)}>我要记录<small>身材 / 饮食</small></button><button className="quick blue" onClick={() => navigate('/me#report')}>我的报告<small>看见长期变化</small></button></div>
-    <h2 className="section-title">今天的节奏</h2>{data.plan ? <section className="slim-card"><p className="eyebrow">TODAY'S SESSION · {data.plan.status}</p><h3 className="plan-name">{data.plan.title}</h3><p className="meta">{data.plan.exercises.length} 个动作 · {data.plan.estimatedMinutes} 分钟</p></section> : <Empty text="今天暂时没有训练计划" />}
-    {drawer && <RecordDrawer initialRecord={data.bodyRecords[0]} onClose={() => setDrawer(false)} onSaved={reload} />}
+  const hour = new Date().getHours();
+  const greeting = hour < 11 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
+  const quickActions = [
+    { title: '训练', detail: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 个动作` : '今天还没安排', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
+    { title: '饮食', detail: totalKcal ? `已记录 ${totalKcal} kcal` : '记下今天吃了什么', icon: Salad, tone: 'butter', action: () => setDrawer('meal') },
+    { title: '记录', detail: '体重 · 腰围 · 一餐', icon: Plus, tone: 'mint', action: () => setDrawer('body') },
+    { title: '报告', detail: data.report ? `当前目标 · ${data.report.score} 分` : '查看当前目标变化', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?prompt=请生成我的当前目标累计报告') },
+  ];
+
+  return <section className={`page home-page${drawer ? ' page-modal' : ''}`}>
+    <header className="home-greeting">
+      <div className="home-greeting__copy"><small>{greeting}，{data.user.nickname}</small><h1>今天，慢慢变好</h1><p>不用追赶谁，照顾好此刻的自己。</p></div>
+      <Mascot />
+    </header>
+    {goal ? <section className="goal-card">
+      <div className="goal-card__top"><span><Target /> 当前目标</span><button aria-label="查看目标进度" onClick={() => navigate('/ai?prompt=分析我的当前目标进度')}><ChevronRight /></button></div>
+      <h2>{goal.name}</h2>
+      <div className="goal-card__numbers"><strong>{goal.currentWeightJin}<small>斤</small></strong><span>目标<br /><b>{goal.targetWeightJin} 斤</b></span></div>
+      <div className="progress" aria-label={`目标已完成 ${goal.progressPercent}%`}><i style={{ width: `${goal.progressPercent}%` }} /></div>
+      <p>已经走完 {goal.progressPercent}% <Sparkles /></p>
+    </section> : <Empty icon={Target} title="设一个刚刚好的目标" text="有方向，但不用给自己太大压力。" />}
+    <section className="home-actions" aria-label="今日快捷功能">{quickActions.map(({ title, detail, icon: Icon, tone, action }) => <button key={title} className={`home-action home-action--${tone}`} aria-label={title} onClick={action}><span><Icon /></span><div><strong>{title}</strong><small>{detail}</small></div><i><ChevronRight /></i></button>)}</section>
+    {drawer && <RecordDrawer initialTab={drawer} initialRecord={data.bodyRecords[0]} onClose={() => setDrawer(undefined)} onSaved={reload} />}
   </section>;
 }
 
-function RecordDrawer({ initialRecord, onClose, onSaved }: { initialRecord?: Dashboard['bodyRecords'][number]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [tab, setTab] = useState<'body' | 'meal'>('body'); const [weightJin, setWeightJin] = useState(initialRecord?.weightJin?.toString() ?? ''); const [waistCm, setWaistCm] = useState(initialRecord?.waistCm?.toString() ?? ''); const [mealType, setMealType] = useState('BREAKFAST'); const [items, setItems] = useState<Food[]>([{ name: '', estimatedKcal: 0 }]); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
+function RecordDrawer({ initialTab, initialRecord, onClose, onSaved }: { initialTab: RecordTab; initialRecord?: Dashboard['bodyRecords'][number]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [tab, setTab] = useState<RecordTab>(initialTab);
+  const [weightJin, setWeightJin] = useState(initialRecord?.weightJin?.toString() ?? '');
+  const [waistCm, setWaistCm] = useState(initialRecord?.waistCm?.toString() ?? '');
+  const [mealType, setMealType] = useState('BREAKFAST');
+  const [items, setItems] = useState<Food[]>([{ name: '', estimatedKcal: 0 }]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const updateItem = (index: number, key: keyof Food, value: string) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: key === 'estimatedKcal' ? Number(value) : value } : item));
-  async function save(event: FormEvent) { event.preventDefault(); setError(''); if (tab === 'body' && !weightJin && !waistCm) { setError('请至少填写体重或腰围。'); return; } if (tab === 'meal' && items.some((item) => !item.name.trim())) { setError('请填写至少一项食物名称。'); return; } setSaving(true); try { if (tab === 'body') await api.bodyRecord({ ...(weightJin ? { weightJin: Number(weightJin) } : {}), ...(waistCm ? { waistCm: Number(waistCm) } : {}) }); else await api.meal(mealType, items); await onSaved(); onClose(); } catch (err) { setError(errorText(err)); } finally { setSaving(false); } }
-  return <div className="drawer-backdrop" role="dialog" aria-label="记录抽屉"><form className="drawer" onSubmit={save}><button type="button" className="quiet" aria-label="关闭记录" onClick={onClose}><X size={18} /></button><div className="handle" /><h2>记录这一刻</h2><div className="tabs"><button type="button" className={tab === 'body' ? 'active' : ''} onClick={() => setTab('body')}>身材记录</button><button type="button" className={tab === 'meal' ? 'active' : ''} onClick={() => setTab('meal')}>饮食记录</button></div>{tab === 'body' ? <><label>体重 (斤)<input type="number" step="0.1" value={weightJin} onChange={(event) => setWeightJin(event.target.value)} /></label><label>腰围 (cm)<input type="number" step="0.1" value={waistCm} onChange={(event) => setWaistCm(event.target.value)} /></label></> : <><label>餐次<select aria-label="餐次" value={mealType} onChange={(event) => setMealType(event.target.value)}><option value="BREAKFAST">早餐</option><option value="LUNCH">午餐</option><option value="DINNER">晚餐</option><option value="SNACK">加餐</option></select></label>{items.map((item, index) => <div className="food-row" key={index}><label>吃了什么<input value={item.name} onChange={(event) => updateItem(index, 'name', event.target.value)} required /></label><label>热量 (kcal)<input type="number" min="0" value={item.estimatedKcal || ''} onChange={(event) => updateItem(index, 'estimatedKcal', event.target.value)} required /></label></div>)}<button type="button" className="chip" onClick={() => setItems((current) => [...current, { name: '', estimatedKcal: 0 }])}>+ 新增食物</button></>}{error && <p className="error">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : tab === 'body' ? '保存身材记录' : '保存饮食记录'}</button></form></div>;
+  async function save(event: FormEvent) {
+    event.preventDefault(); setError('');
+    if (tab === 'body' && !weightJin && !waistCm) { setError('请至少填写体重或腰围。'); return; }
+    if (tab === 'meal' && items.some((item) => !item.name.trim())) { setError('请填写至少一项食物名称。'); return; }
+    setSaving(true);
+    try {
+      if (tab === 'body') await api.bodyRecord({ ...(weightJin ? { weightJin: Number(weightJin) } : {}), ...(waistCm ? { waistCm: Number(waistCm) } : {}) });
+      else await api.meal(mealType, items);
+      await onSaved(); onClose();
+    } catch (err) { setError(errorText(err)); } finally { setSaving(false); }
+  }
+  return <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="记录抽屉"><form className="drawer" onSubmit={save}>
+    <div className="drawer-head"><div><small>留下真实的一笔</small><h2>记录这一刻</h2></div><button type="button" className="icon-button" aria-label="关闭记录" onClick={onClose}><X /></button></div>
+    <div className="tabs"><button type="button" className={tab === 'body' ? 'active' : ''} onClick={() => setTab('body')}>身材记录</button><button type="button" className={tab === 'meal' ? 'active' : ''} onClick={() => setTab('meal')}>饮食记录</button></div>
+    {tab === 'body' ? <div className="record-form-grid"><label>体重 (斤)<input type="number" step="0.1" value={weightJin} onChange={(event) => setWeightJin(event.target.value)} /></label><label>腰围 (cm)<input type="number" step="0.1" value={waistCm} onChange={(event) => setWaistCm(event.target.value)} /></label></div> : <><label>餐次<select aria-label="餐次" value={mealType} onChange={(event) => setMealType(event.target.value)}><option value="BREAKFAST">早餐</option><option value="LUNCH">午餐</option><option value="DINNER">晚餐</option><option value="SNACK">加餐</option></select></label>{items.map((item, index) => <div className="food-row" key={index}><label>吃了什么<input value={item.name} onChange={(event) => updateItem(index, 'name', event.target.value)} required /></label><label>热量 (kcal)<input type="number" min="0" value={item.estimatedKcal || ''} onChange={(event) => updateItem(index, 'estimatedKcal', event.target.value)} required /></label></div>)}<button type="button" className="soft-button" onClick={() => setItems((current) => [...current, { name: '', estimatedKcal: 0 }])}><Plus /> 新增食物</button></>}
+    {error && <p className="error">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : tab === 'body' ? '保存身材记录' : '保存饮食记录'}</button>
+  </form></div>;
 }
 
 function PlanPage({ data }: { data: Dashboard }) {
-  const [done, setDone] = useState(false); const [voiceText, setVoiceText] = useState(''); const [error, setError] = useState(''); const plan = data.plan;
+  const days = useMemo(currentWeek, []);
+  const today = useMemo(() => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; }, []);
+  const [selectedKey, setSelectedKey] = useState(dayKey(today));
+  const [done, setDone] = useState(false);
+  const [voiceText, setVoiceText] = useState('');
+  const [error, setError] = useState('');
+  const selectedDate = days.find((date) => dayKey(date) === selectedKey) ?? today;
+  const plan = sameDay(selectedDate, today) ? data.plan : undefined;
+  const canGenerate = selectedDate.getTime() >= today.getTime();
   async function complete() { if (!plan) return; setError(''); try { await api.completeWorkout(plan.id, 1); setDone(true); navigator.vibrate?.(100); } catch (err) { setError(errorText(err)); } }
   function start() { const text = '开始跟练。保持稳定呼吸，按每个动作的步骤完成。'; if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); else setVoiceText(text); navigator.vibrate?.([50, 40, 50]); }
-  if (!plan) return <section className="page"><Header nickname={data.user.nickname} title="训练计划" /><Empty text="今天还没有可跟练的计划" /></section>;
-  return <section className="page"><Header nickname={data.user.nickname} title="训练计划" /><section className="card orange"><p className="eyebrow">TODAY · {plan.status}</p><h2>{plan.title}</h2><p className="meta">{plan.estimatedMinutes} 分钟 · {plan.exercises.length} 个动作</p></section>{plan.exercises.map((exercise, index) => <section className="card" key={exercise.id}><p className="eyebrow">{String(index + 1).padStart(2, '0')} / {plan.exercises.length} · {exercise.targetArea}</p><h2>{exercise.name}</h2><p className="meta">{exercise.sets} 组 · 每组 {exercise.seconds} 秒</p><h3>动作步骤</h3>{exercise.steps.map((step) => <p className="bullet" key={step}>{step}</p>)}<h3>容易出错</h3>{exercise.errors.map((item) => <p className="bullet" key={item}>{item}</p>)}</section>)}{voiceText && <p className="notice">{voiceText}</p>}{error && <p className="error">{error}</p>}{done ? <p className="notice">已完成，给今天的自己一个赞。</p> : <><button className="primary" onClick={start}><Play size={16} /> 开始跟练</button><button className="quiet" onClick={complete}>完成本次训练</button></>}</section>;
+  const prompt = `请为我生成${selectedDate.getMonth() + 1}月${selectedDate.getDate()}日的训练计划`;
+
+  return <section className="page plan-page"><Header nickname={data.user.nickname} title="本周计划" subtitle="选一天，看看身体要做什么" />
+    <section className="week-strip" role="region" aria-label="本周日期">{days.map((date) => {
+      const selected = dayKey(date) === selectedKey;
+      const isToday = sameDay(date, today);
+      return <button key={dayKey(date)} aria-label={`周${weekNames[date.getDay()]} ${date.getMonth() + 1}月${date.getDate()}日${isToday ? ' 今天' : ''}`} className={selected ? 'is-active' : ''} onClick={() => setSelectedKey(dayKey(date))}><small>{weekNames[date.getDay()]}</small><strong>{date.getDate()}</strong>{isToday && <i />}</button>;
+    })}</section>
+    {plan ? <>
+      <section className="plan-hero"><div><small>{done || plan.status === 'COMPLETED' ? '今天完成啦' : '今天的训练'}</small><h2>{plan.title}</h2><p><Clock3 /> {plan.estimatedMinutes} 分钟 <i /> {plan.exercises.reduce((sum, exercise) => sum + exercise.sets, 0)} 组</p></div><span>{plan.exercises.length}<small>个动作</small></span></section>
+      <div className="plan-exercises">{plan.exercises.map((exercise, index) => {
+        const media = data.exercises.find((item) => item.id === exercise.id) ?? exercise;
+        return <article className="plan-exercise" key={exercise.id}><ExerciseVisual exercise={media} compact /><div className="plan-exercise__copy"><small>{String(index + 1).padStart(2, '0')} · {exercise.targetArea}</small><h2>{exercise.name}</h2><p>{exercise.sets} 组 × {exercise.seconds} 秒</p><div className="cue"><strong>动作要点</strong>{exercise.steps.map((step) => <span key={step}>{step}</span>)}</div>{exercise.errors.length > 0 && <div className="mistakes"><strong>常见错误</strong>{exercise.errors.map((item) => <span key={item}>{item}</span>)}</div>}</div></article>;
+      })}</div>
+      {voiceText && <p className="notice">{voiceText}</p>}{error && <p className="error">{error}</p>}
+      {done ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={start}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
+    </> : canGenerate ? <section className="ai-plan-empty"><span><WandSparkles /></span><small>这一天还没有安排</small><h2>交给瘦瘦，拼一份刚刚好的训练</h2><p>会结合当前目标和已有记录，不盲目加量。</p><Link to={`/ai?prompt=${encodeURIComponent(prompt)}`} aria-label="AI 生成训练计划">AI 生成训练计划 <ChevronRight /></Link></section> : <Empty icon={CalendarDays} title="无训练计划" text="这一天没有留下训练安排，休息也算计划的一部分。" />}
+  </section>;
 }
 
+const aiFeatures = [
+  { title: '今天怎么练', description: '按时间和计划排好顺序', prompt: '根据我的计划，告诉我今天怎么练', icon: Dumbbell, tone: 'tangerine' },
+  { title: '今晚吃什么', description: '结合今天记录推荐晚餐', prompt: '结合我今天的记录，推荐今晚吃什么', icon: Salad, tone: 'butter' },
+  { title: '帮我记一餐', description: '整理食物与热量信息', prompt: '帮我记录刚刚吃的这一餐', icon: Camera, tone: 'mint' },
+  { title: '看看最近状态', description: '训练、饮食和身体一起看', prompt: '帮我看看最近的训练、饮食和身体变化', icon: Activity, tone: 'sky' },
+];
+
 function AiPage({ data }: { data: Dashboard }) {
-  const [messages, setMessages] = useState<{ role: 'user'; content: string }[]>([]); const [value, setValue] = useState(''); const [error, setError] = useState(''); const [sending, setSending] = useState(false); const starters = ['今天怎么练', '今晚吃什么', '帮我记一餐', '看看近期状态'];
-  async function submit(message: string) { if (!message.trim()) return; setMessages((list) => [...list, { role: 'user', content: message }]); setValue(''); setSending(true); setError(''); try { await api.aiMessage(message); } catch (err) { setError(err instanceof ApiError && err.status === 503 ? `AI 服务尚未配置${data.ai.reason ? `：${data.ai.reason}` : ''}。你仍可以浏览训练、饮食和报告数据。` : errorText(err)); } finally { setSending(false); } }
-  return <section className="page"><Header nickname={data.user.nickname} title="AI花爷" /><section className="card ai-card"><p className="eyebrow">YOUR STEADY COACH</p><h2>少一点内耗，多一点可执行。</h2><p className="subtle">花爷只给基于你已记录数据的建议。</p></section>{!data.ai.configured && <p className="notice">AI 当前未配置，浏览和记录功能不受影响。</p>}{messages.length === 0 && <div className="quick-grid">{starters.map((starter, index) => <button key={starter} className={`quick ${['orange', 'cream', 'mint', 'blue'][index]}`} onClick={() => void submit(starter)}>{starter}<small>从这里开始</small></button>)}</div>}{messages.map((message, index) => <section className="card" key={`${message.content}-${index}`}><p className="eyebrow">YOU</p><p>{message.content}</p></section>)}{error && <p className="error">{error}</p>}<div className="fixed-composer"><div className="chips">{['训练安排', '饮食建议', '身体状态'].map((chip) => <button className="chip" key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><input aria-label="问花爷" value={value} onChange={(event) => setValue(event.target.value)} placeholder="说说你现在的状态…" /><button className="send" aria-label="发送" disabled={sending}><Send size={17} /></button></form></div></section>;
+  const [searchParams] = useSearchParams();
+  const preparedPrompt = searchParams.get('prompt') ?? '';
+  const preparedSent = useRef('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [value, setValue] = useState('');
+  const [error, setError] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function submit(message: string) {
+    if (!message.trim() || sending) return;
+    setMessages((list) => [...list, { role: 'user', content: message }]); setValue(''); setSending(true); setError('');
+    try {
+      const response = await api.aiMessage(message);
+      if (response.message) setMessages((list) => [...list, { role: 'assistant', content: response.message }]);
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 503 ? '瘦瘦还没接上大模型，请先在 Agent 工作台配置 Provider。' : errorText(err));
+    } finally { setSending(false); }
+  }
+  useEffect(() => {
+    if (!preparedPrompt || preparedSent.current === preparedPrompt) return;
+    preparedSent.current = preparedPrompt;
+    void submit(preparedPrompt);
+  }, [preparedPrompt]);
+  const isWelcome = messages.length === 0;
+
+  return <section className="page ai-page">
+    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>瘦瘦</h1></div><button aria-label="新建会话" onClick={() => { setMessages([]); setError(''); }}><MessageCirclePlus /></button></header>
+    <div className="ai-scroll">{isWelcome ? <>
+      <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
+      <section className="ai-capabilities" role="region" aria-label="瘦瘦快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
+      {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
+    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={`${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<p>{message.content}</p></div>)}{sending && <div className="typing" aria-label="瘦瘦正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
+    <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input aria-label="问瘦瘦" value={value} onChange={(event) => setValue(event.target.value)} placeholder="告诉瘦瘦你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
+  </section>;
 }
 
 function LibraryPage({ data }: { data: Dashboard }) {
   const [picked, setPicked] = useState<Exercise>();
-  return <section className="page"><Header nickname={data.user.nickname} title="动作库" />{picked ? <><button className="quiet" onClick={() => setPicked(undefined)}>← 返回动作库</button><h2>{picked.name}</h2><p className="subtle">{picked.targetArea} · {picked.sets} 组 · {picked.seconds} 秒</p><div className="steps">{[1, 2, 3, 4].map((step) => <div className="step-art" key={step}>动作步骤 {step}<br /><span className="meta">{picked.steps[step - 1] ?? '稳定控制身体'}</span></div>)}</div><h3>常见错误</h3>{picked.errors.length ? picked.errors.map((item) => <p className="bullet" key={item}>{item}</p>) : <p className="subtle">暂无特别提醒，保持动作稳定即可。</p>}</> : data.exercises.length ? <><div className="chips">{Array.from(new Set(data.exercises.map((item) => item.targetArea))).map((area) => <span className="chip" key={area}>{area}</span>)}</div><div className="quick-grid">{data.exercises.map((exercise) => <button className="exercise" key={exercise.id} onClick={() => setPicked(exercise)}>{exercise.name}<small>{exercise.targetArea}</small></button>)}</div></> : <Empty text="动作库正在整理中" />}</section>;
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('全部');
+  const filters = ['全部', ...Array.from(new Set(data.exercises.map((item) => item.targetArea))), '徒手', '小器械'];
+  const filtered = data.exercises.filter((exercise) => {
+    const normalized = query.trim().toLowerCase();
+    const queryMatches = !normalized || `${exercise.name}${exercise.targetArea}`.toLowerCase().includes(normalized);
+    const tagMatches = filter === '全部' || exercise.targetArea === filter || equipmentFor(exercise) === filter;
+    return queryMatches && tagMatches;
+  });
+
+  return <section className="page library-page"><Header nickname={data.user.nickname} title="动作素材库" subtitle="先看明白，再安心地练" />
+    {picked ? <section className="exercise-detail"><button className="back-button" aria-label="返回动作库" onClick={() => setPicked(undefined)}><ChevronLeft /></button><div className="detail-title"><small>{picked.targetArea} · {equipmentFor(picked)}</small><h2>{picked.name}</h2><p>{picked.sets} 组 × {picked.seconds} 秒</p></div><div className="step-grid">{[1, 2, 3, 4].map((step) => <article key={step}><ExerciseVisual exercise={picked} step={step} /><strong>动作步骤 {step}</strong><p>{picked.steps[step - 1] ?? '稳定控制身体，保持自然呼吸。'}</p></article>)}</div><section className="detail-block"><h3>姿势要点</h3>{picked.steps.map((step) => <p key={step}><Check /> {step}</p>)}</section><section className="detail-block detail-block--warning"><h3>常见错误</h3>{picked.errors.length ? picked.errors.map((item) => <p key={item}><X /> {item}</p>) : <p>暂无特别提醒，保持动作稳定即可。</p>}</section></section> : <>
+      <label className="library-search"><Search /><input type="search" aria-label="搜索动作" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索动作或训练部位" /></label>
+      <div className="filter-tags" aria-label="动作筛选">{filters.map((item) => <button key={item} className={filter === item ? 'is-active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div>
+      <div className="result-title"><strong>{filter === '全部' ? '推荐动作' : filter}</strong><small>{filtered.length} 个</small></div>
+      {filtered.length ? <section className="exercise-grid">{filtered.map((exercise) => <button key={exercise.id} aria-label={`查看${exercise.name}详情`} onClick={() => setPicked(exercise)}><ExerciseVisual exercise={exercise} compact /><span><small>{exercise.targetArea} · {equipmentFor(exercise)}</small><strong>{exercise.name}</strong><em>{exercise.sets} 组 × {exercise.seconds} 秒</em></span><ChevronRight /></button>)}</section> : <Empty icon={Search} title="没有找到这个动作" text="换个关键词或清空筛选试试。" />}
+    </>}
+  </section>;
 }
 
-function MePage({ data }: { data: Dashboard }) {
-  const [logoutError, setLogoutError] = useState(''); const report = data.report;
-  async function logout() { try { await api.logout(); window.location.assign('/'); } catch (err) { setLogoutError(errorText(err)); } }
-  return <section className="page"><Header nickname={data.user.nickname} title="我的" /><section className="card mint"><p className="eyebrow">{data.user.nickname}</p><h2>我的记录</h2><p className="subtle">身体 {data.bodyRecords.length} 条 · 饮食 {data.meals.length} 条</p></section><section id="report" className="card report-card">{report ? <><p className="eyebrow">当前目标累计报告 · {report.status}</p><h2>{report.conclusion}</h2><p className="meta">评分 {report.score}</p><h3>证据</h3>{report.metrics.map((metric) => <p className="subtle" key={metric.label}>{metric.label}：{metric.value}{metric.comparison ? ` · ${metric.comparison}` : ''}</p>)}<h3>下一步动作</h3>{report.actions.map((action) => <p className="bullet" key={action}>{action}</p>)}</> : <Empty text="当前目标还没有足够记录生成报告" />}</section>{logoutError && <p className="error">{logoutError}</p>}<button className="quiet" onClick={() => void logout()}>退出登录</button></section>;
+function MePage({ data, onLoggedOut }: { data: Dashboard; onLoggedOut: () => void }) {
+  const [logoutError, setLogoutError] = useState('');
+  const [tone, setTone] = useState(tones[0]);
+  const [preferences, setPreferences] = useState<string[]>(['晚餐清淡', '温和提醒']);
+  const recordDays = new Set([...data.bodyRecords.map((record) => record.recordedAt.slice(0, 10)), ...data.meals.map((meal) => meal.occurredAt.slice(0, 10))]).size;
+  const areas = Array.from(new Set(data.plan?.exercises.map((exercise) => exercise.targetArea) ?? []));
+  const achievements = [
+    { label: '第一步', earned: data.bodyRecords.length + data.meals.length > 0, icon: Medal },
+    { label: '认真吃饭', earned: data.meals.length >= 3, icon: Utensils },
+    { label: '目标同行', earned: (data.goal?.progressPercent ?? 0) >= 25, icon: Trophy },
+  ];
+  async function logout() { try { await api.logout(); onLoggedOut(); } catch (err) { setLogoutError(errorText(err)); } }
+  function togglePreference(option: string) { setPreferences((current) => current.includes(option) ? current.filter((item) => item !== option) : [...current, option]); }
+
+  return <section className="page profile-page">
+    <header className="profile-cover"><div className="profile-avatar">{data.user.nickname.slice(0, 1)}</div><div><small>和瘦瘦一起认真生活</small><h1>{data.user.nickname}</h1><p>{data.goal?.name ?? '还没有进行中的目标'}</p></div><Sparkles /></header>
+    <section className="profile-config" aria-label="训练配置"><article><Clock3 /><span>本次时长<strong>{data.plan ? `${data.plan.estimatedMinutes} 分钟` : '未安排'}</strong></span></article><article><Dumbbell /><span>动作数量<strong>{data.plan?.exercises.length ?? 0} 个</strong></span></article><article><Target /><span>训练部位<strong>{areas[0] ?? '待安排'}</strong></span></article></section>
+    <div className="section-heading"><div><small>每一次都算数</small><h2>坚持足迹</h2></div><strong>{recordDays}<small>天</small></strong></div>
+    <section className="achievements">{achievements.map(({ label, earned, icon: Icon }) => <article className={earned ? 'is-earned' : ''} key={label}><span><Icon /></span><strong>{label}</strong><small>{earned ? '已点亮' : '继续积累'}</small></article>)}</section>
+    <section className="profile-panel activation-panel"><div className="panel-title"><span><Activity /></span><div><small>本次计划</small><h2>运动点亮图</h2></div></div><BodyActivation areas={areas} /></section>
+    <section className="profile-panel trend-panel"><div className="panel-title"><span><BarChart3 /></span><div><small>客观记录</small><h2>体重 / 体脂趋势</h2></div></div><WeightSparkline records={data.bodyRecords} /><p className="body-fat-empty">体脂暂无数据 · 记录后会和体重一起呈现</p></section>
+    <section className="profile-panel"><div className="panel-title"><span><Bot /></span><div><small>陪伴方式</small><h2>AI 教练语气</h2></div></div><div className="choice-row">{tones.map((item) => <button key={item} className={tone === item ? 'is-active' : ''} onClick={() => setTone(item)}>{tone === item && <Check />}{item}</button>)}</div></section>
+    <section className="profile-panel"><div className="panel-title"><span><Sparkles /></span><div><small>瘦瘦记住的你</small><h2>个人偏好</h2></div></div><div className="preference-tags">{preferenceOptions.map((option) => <button key={option} className={preferences.includes(option) ? 'is-active' : ''} onClick={() => togglePreference(option)}>{preferences.includes(option) && <Check />}{option}</button>)}</div></section>
+    <section className="profile-panel"><div className="panel-title"><span><Award /></span><div><small>真实数据</small><h2>历史记录</h2></div></div><div className="history-list"><p><span>训练历史</span><strong>{data.plan?.status === 'COMPLETED' ? 1 : 0} 次</strong></p><p><span>指标记录</span><strong>{data.bodyRecords.length} 条</strong></p><p><span>饮食记录</span><strong>{data.meals.length} 餐</strong></p></div></section>
+    {logoutError && <p className="error">{logoutError}</p>}<button className="logout-button" onClick={() => void logout()}><LogOut /> 退出登录</button>
+  </section>;
 }
 
 function Login({ onLogin }: { onLogin: () => Promise<void> }) {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [pending, setPending] = useState(false);
   async function submit(event: FormEvent) { event.preventDefault(); setPending(true); setError(''); try { await api.login(username, password); await onLogin(); } catch (err) { setError(errorText(err)); } finally { setPending(false); } }
-  return <div className="desktop"><main className="phone login"><div className="login-mark"><Dumbbell /></div><p className="eyebrow">HAPPY BODY / DAILY LOG</p><h1>把训练和吃饭，<br />做成自己的节奏。</h1><p className="subtle">登录后开始记录今天。</p><form onSubmit={submit}><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{error && <p className="error">{error}</p>}<button className="primary" disabled={pending}>{pending ? '正在登录…' : '登录'}</button></form></main></div>;
+  return <div className="desktop"><main className="phone login"><Mascot /><small>HAPPY BODY · DAILY LOG</small><h1>把训练和吃饭，<br />过成自己的节奏。</h1><p>欢迎回来，今天也不用太用力。</p><form onSubmit={submit}><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{error && <p className="error">{error}</p>}<button className="primary" disabled={pending}>{pending ? '正在登录…' : '登录'}</button></form></main></div>;
 }
 
-function Shell({ data, reload }: { data: Dashboard; reload: () => Promise<void> }) { return <div className="desktop"><main className="phone" aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} reload={reload} />} /><Route path="/plan" element={<PlanPage data={data} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} />} /><Route path="*" element={<HomePage data={data} reload={reload} />} /></Routes><Navigation /></main></div>; }
+function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => Promise<void>; onLoggedOut: () => void }) {
+  return <div className="desktop"><main className="phone" aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} reload={reload} />} /><Route path="/plan" element={<PlanPage data={data} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} reload={reload} />} /></Routes><Navigation /></main></div>;
+}
 
 export function App() {
   const [data, setData] = useState<Dashboard>(); const [auth, setAuth] = useState<'loading' | 'login' | 'ready' | 'error'>('loading'); const [error, setError] = useState('');
   async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); } } }
   useEffect(() => { void load(false); }, []);
-  if (auth === 'loading') return <div className="desktop"><main className="phone status"><div className="spinner" />正在读取你的记录…</main></div>;
+  if (auth === 'loading') return <div className="desktop"><main className="phone status"><Mascot /><div className="spinner" />正在读取你的记录…</main></div>;
   if (auth === 'login') return <Login onLogin={() => load(false)} />;
-  if (auth === 'error' || !data) return <div className="desktop"><main className="phone status"><p>{error || '暂时无法加载数据'}</p><button className="primary" onClick={() => void load(false)}>重新尝试</button></main></div>;
-  return <BrowserRouter><Shell data={data} reload={() => load(true)} /></BrowserRouter>;
+  if (auth === 'error' || !data) return <div className="desktop"><main className="phone status"><Mascot /><p>{error || '暂时无法加载数据'}</p><button className="primary" onClick={() => void load(false)}>重新尝试</button></main></div>;
+  return <BrowserRouter><Shell data={data} reload={() => load(true)} onLoggedOut={() => { setData(undefined); setAuth('login'); }} /></BrowserRouter>;
 }

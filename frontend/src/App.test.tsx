@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,11 +40,33 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('124.8')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /今日训练/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /今日饮食/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /我要记录/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /我的报告/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '训练' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '饮食' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '记录' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '报告' })).toBeInTheDocument();
+    expect(screen.queryByText('今天的节奏')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '计划' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '今天' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '瘦瘦' })).toHaveClass('nav-link--ai');
+    expect(screen.getByRole('link', { name: '动作' })).toBeInTheDocument();
+  });
+
+  it('offers AI generation only for a future date without a plan', async () => {
+    const fetchMock = mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    const calendar = await screen.findByRole('region', { name: '本周日期' });
+    await user.click(within(calendar).getByRole('button', { name: /周五/ }));
+    expect(screen.getByRole('link', { name: /AI 生成训练计划/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: /AI 生成训练计划/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST' })));
+    const calls = fetchMock.mock.calls as unknown as [RequestInfo | URL, RequestInit?][];
+    const aiCall = calls.find(([path]) => path === '/api/app/ai/messages');
+    expect(JSON.parse(String(aiCall?.[1]?.body)).message).toContain('训练计划');
   });
 
   it('logs in with the supplied credentials then loads the app', async () => {
@@ -66,7 +88,7 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText('124.8');
-    await user.click(screen.getByRole('button', { name: /我要记录/ }));
+    await user.click(screen.getByRole('button', { name: '记录' }));
     await user.clear(screen.getByLabelText('体重 (斤)'));
     await user.type(screen.getByLabelText('体重 (斤)'), '123.6');
     await user.clear(screen.getByLabelText('腰围 (cm)'));
@@ -74,7 +96,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '保存身材记录' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/body-records', expect.objectContaining({ method: 'POST', body: JSON.stringify({ weightJin: 123.6, waistCm: 69 }) })));
 
-    await user.click(await screen.findByRole('button', { name: /我要记录/ }));
+    await user.click(await screen.findByRole('button', { name: '记录' }));
     await user.click(screen.getByRole('button', { name: '饮食记录' }));
     await user.type(screen.getByLabelText('吃了什么'), '牛肉面');
     await user.type(screen.getByLabelText('热量 (kcal)'), '520');
@@ -98,7 +120,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByText('124.8');
-    await user.click(screen.getByRole('button', { name: /我要记录/ }));
+    await user.click(screen.getByRole('button', { name: '记录' }));
     await user.click(screen.getByRole('button', { name: '保存身材记录' }));
     await waitFor(() => expect(bootstrapCalls).toBe(2));
 
@@ -115,22 +137,60 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: '完成本次训练' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/workouts/plan-1/complete', expect.objectContaining({ method: 'POST', body: JSON.stringify({ completionRatio: 1 }) })));
 
-    await user.click(screen.getByRole('link', { name: 'AI花爷' }));
+    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '今天怎么练' }) })));
-    expect(await screen.findByText(/AI 服务尚未配置/)).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '根据我的计划，告诉我今天怎么练' }) })));
+    expect(await screen.findByText(/瘦瘦还没接上大模型/)).toBeInTheDocument();
+  });
+
+  it('turns the AI welcome capabilities into a focused conversation', async () => {
+    mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
+    const capabilities = await screen.findByRole('region', { name: '瘦瘦快捷能力' });
+    expect(within(capabilities).getByRole('button', { name: /今天怎么练/ })).toBeInTheDocument();
+    expect(within(capabilities).getByRole('button', { name: /今晚吃什么/ })).toBeInTheDocument();
+    expect(within(capabilities).getByRole('button', { name: /帮我记一餐/ })).toBeInTheDocument();
+    expect(within(capabilities).getByRole('button', { name: /看看最近状态/ })).toBeInTheDocument();
+
+    await user.click(within(capabilities).getByRole('button', { name: /今晚吃什么/ }));
+    expect(screen.queryByRole('region', { name: '瘦瘦快捷能力' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '换一个选择' })).toBeInTheDocument();
   });
 
   it('navigates to the exercise library and exposes its four-step detail', async () => {
     mockFetch();
     render(<App />);
     await screen.findByText('124.8');
-    fireEvent.click(screen.getByRole('link', { name: '动作库' }));
+    fireEvent.click(screen.getByRole('link', { name: '动作' }));
+    expect(await screen.findByRole('searchbox', { name: '搜索动作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument();
     await userEvent.setup().click(await screen.findByRole('button', { name: /哑铃深蹲/ }));
 
     expect(screen.getByText('动作步骤 1')).toBeInTheDocument();
     expect(screen.getByText('动作步骤 4')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '常见错误' })).toBeInTheDocument();
     expect(screen.getByText('暂无特别提醒，保持动作稳定即可。')).toBeInTheDocument();
+  });
+
+  it('shows the focused profile dashboard and keeps logout functional', async () => {
+    const fetchMock = mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '我的' }));
+    expect(await screen.findByRole('heading', { name: '坚持足迹' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '运动点亮图' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '体重 / 体脂趋势' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI 教练语气' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '个人偏好' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '历史记录' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '退出登录' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/local/logout', expect.objectContaining({ method: 'POST' })));
   });
 });

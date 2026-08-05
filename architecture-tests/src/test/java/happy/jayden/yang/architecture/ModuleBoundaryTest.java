@@ -22,4 +22,15 @@ class ModuleBoundaryTest {
     static final ArchRule onlyStarterBoots =
             classes().that().areAnnotatedWith(SpringBootApplication.class)
                     .should().resideInAPackage("happy.jayden.yang");
+
+    @ArchTest
+    static final ArchRule agentScopeTypesStayInsideTheAdapter =
+            noClasses().that().resideOutsideOfPackage("..framework.adapter.agentscope..")
+                    .should().dependOnClassesThat().resideInAnyPackage("io.agentscope..");
+
+    @ArchTest
+    static final ArchRule agentScopePublicApiIsFrameworkNeutral =
+            noClasses().that().arePublic()
+                    .and().resideInAPackage("..framework.adapter.agentscope..")
+                    .should().dependOnClassesThat().resideInAnyPackage("io.agentscope..");
 }

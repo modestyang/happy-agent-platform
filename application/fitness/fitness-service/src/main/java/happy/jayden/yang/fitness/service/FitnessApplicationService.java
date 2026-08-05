@@ -90,6 +90,7 @@ public final class FitnessApplicationService {
         data.meals(),
         data.plan(),
         data.exercises(),
+        data.completedWorkoutCount(),
         report(data, goal),
         new AiStatusDto(
             providerStatus.configured(), providerStatus.configured() ? null : AI_REASON));

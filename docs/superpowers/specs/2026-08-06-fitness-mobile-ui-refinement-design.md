@@ -16,7 +16,7 @@ The interface uses a warm cream canvas, rounded fruit-color panels, bold rounded
 - The active goal card leads with current weight, target weight, and a visible progress ring/bar; its icon button opens goal/report details.
 - Four icon-led cards are titled exactly “训练”、“饮食”、“记录”、“报告”.
 - “今天的节奏” is removed.
-- Training navigates to the plan. Food and Record open the one-layer recording sheet in the appropriate tab. Report opens the current-goal report in Profile.
+- Training navigates to the plan. Food and Record open the one-layer recording sheet in the appropriate tab. Report sends a prepared current-goal report request to 瘦瘦, where the Agent generates the report from real data.
 
 ### Plans
 
@@ -56,4 +56,3 @@ Icon-only controls have accessible names, buttons retain visible focus, dialogs 
 ## Verification
 
 Vitest asserts the five-tab labels, C-positioned AI navigation, exact home card titles, removal of obsolete content, calendar empty states, AI welcome-to-conversation transition, four-step exercise detail, profile sections, and existing write/API flows. TypeScript, ESLint, production build, and browser inspection at mobile width complete acceptance.
-

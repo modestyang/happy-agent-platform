@@ -90,6 +90,7 @@ class FitnessExperienceIntegrationTest {
             .andExpect(jsonPath("$.bodyRecords.length()").value(8))
             .andExpect(jsonPath("$.meals.length()").value(8))
             .andExpect(jsonPath("$.plan.exercises.length()").value(4))
+            .andExpect(jsonPath("$.completedWorkoutCount").value(0))
             .andExpect(jsonPath("$.exercises[0].illustrationMode").value("FOUR_STEP_IMAGES"))
             .andExpect(jsonPath("$.exercises[0].imageUrls.length()").value(4))
             .andExpect(jsonPath("$.report.status").value("READY"))
@@ -148,7 +149,8 @@ class FitnessExperienceIntegrationTest {
         .andExpect(jsonPath("$.goal.name").value("秋季体能计划"))
         .andExpect(jsonPath("$.bodyRecords[0].weightJin").value(145.8))
         .andExpect(jsonPath("$.meals[0].items[0].name").value("番茄牛肉饭"))
-        .andExpect(jsonPath("$.plan.status").value("COMPLETED"));
+        .andExpect(jsonPath("$.plan.status").value("COMPLETED"))
+        .andExpect(jsonPath("$.completedWorkoutCount").value(1));
   }
 
   @Test

@@ -1,0 +1,48 @@
+# Fitness 移动端体验切片验收记录
+
+日期：2026-08-06  
+分支：`feat/fitness-mobile-ui-refinement`
+
+## 范围
+
+- 正式项目：`/Users/modest/IdeaProjects/happy-agent-platform`
+- Demo：`/Users/modest/IdeaProjects/fitness`，全程只读参考
+- 页面：今天、计划、瘦瘦、动作、我的
+
+## 自动验证
+
+| 检查 | 结果 |
+|---|---|
+| Vitest 页面与交互回归 | 13/13 通过 |
+| TypeScript | 通过 |
+| ESLint | 通过 |
+| Vite production build | 通过 |
+| Maven 全模块 verify | 通过 |
+| PostgreSQL Testcontainers 真实链路 | 通过 |
+| `git diff --check` | 通过 |
+
+后端集成测试覆盖登录、bootstrap、身体与饮食写入、训练完成、目标创建、重启后数据与会话保留、参数校验、未配置 AI 的明确错误以及登出失效。新增训练历史累计字段同时验证初始值与完成训练后的持久值。
+
+## 代码审查结论
+
+第一轮独立 CR 无 Critical，识别的真实数据口径、AI 请求竞态、跨午夜日期、记录抽屉可访问性和状态语义问题均已修复并增加回归测试。用户已明确报告由瘦瘦 Agent 生成，因此没有采用将报告恢复为 Profile 独立区块的冲突建议。
+
+第二轮独立 CR 确认五 Tab UI 与非 AI 数据流可以进行初步验收；完成训练后的数据刷新、当前 AI 会话 24 小时客户端恢复、偏好/语气客户端持久化和报告卡片错误分数均已修正。该轮同时识别出 Agent Runtime 尚未接入 Fitness `AiConversation`，因此本记录不代表整个正式产品端到端验收通过。
+
+## 本地体验
+
+- 地址：`http://127.0.0.1:5176/`
+- 用户名：`user`
+- 密码：`demo123`
+- 后端：`http://127.0.0.1:8080`
+- PostgreSQL：项目已有持久卷，重启应用不会丢失记录
+
+瘦瘦当前会展示明确依赖提示，不返回伪造 AI 内容。现有 `AiConversation` 仍未连接 Agent Runtime；仅在 Agent 工作台配置 Provider 还不足以产生真实回复，需完成运行时接线、按日期计划生成落库、Agent 侧会话/记忆与偏好上下文后再做正式 AI 验收。
+
+## 不在本 UI 切片内的正式能力缺口
+
+- Fitness `AiConversation` 到 Agent Builder Framework Adapter 的运行时调用链。
+- Agent 生成训练计划后的按日期落库与周计划查询。
+- 服务端会话、记忆与偏好上下文；当前页面仅保留 24 小时客户端当前会话，不展示历史会话。
+- 饮食照片识别、每日饮食推荐与反馈闭环、完整跟练计时播报。
+- 正式动作 GIF/图片素材；当前优先显示数据库图片，种子文字图会被本地姿势 SVG 兜底替换。

@@ -103,7 +103,8 @@ public final class FitnessDtos {
       List<BodyRecordDto> bodyRecords,
       List<MealDto> meals,
       PlanDto plan,
-      List<ExerciseDto> exercises) {}
+      List<ExerciseDto> exercises,
+      long completedWorkoutCount) {}
 
   public record BootstrapDto(
       UserDto user,
@@ -112,6 +113,7 @@ public final class FitnessDtos {
       List<MealDto> meals,
       PlanDto plan,
       List<ExerciseDto> exercises,
+      long completedWorkoutCount,
       ReportDto report,
       AiStatusDto ai) {}
 

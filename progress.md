@@ -12,3 +12,9 @@
 - 最终前端验证：Vitest 9/9、TypeScript、ESLint、Vite production build 全部通过。
 - 最终后端回归：`./mvnw -pl starter -am verify -q` 退出码 0，包含 Testcontainers PostgreSQL 与 5 项 FitnessExperience 集成测试。
 - 本地正式分支前端运行于 `http://127.0.0.1:5176/`，后端复用 `http://127.0.0.1:8080`。
+- 第一轮独立 CR 的有效问题已关闭：今日饮食不再累计历史数据、跨时区打卡按本地日统计、训练历史改用数据库累计、AI 新会话隔离旧响应、计划跨午夜刷新、记录抽屉移动到手机根层并补齐焦点管理。
+- 第二轮回归覆盖增至 Vitest 13/13（含 AI 会话 24 小时过期）；TypeScript、ESLint、Vite production build 再次通过。
+- 后端 bootstrap 新增 `completedWorkoutCount` 真实字段，并由 Testcontainers 验证完成训练后跨 Spring Context 仍为 1；完整 Maven verify 退出码 0。
+- 正式后端已用当前构建重启，沿用项目 PostgreSQL 持久卷；登录与 bootstrap 经 Vite 代理均返回 200，`completedWorkoutCount` 来自真实数据库，前端正式服务继续运行于 `http://127.0.0.1:5176/`。
+- 第二轮独立 CR 确认五 Tab UI/非 AI 切片可初步验收，同时识别 Agent Runtime 尚未接入 `AiConversation` 的正式产品阻塞项；验收记录已明确区分 UI 切片与完整端到端能力。
+- 已继续关闭本轮可修复项：训练完成后立即 reload 真实累计数；当前 AI 会话在客户端保留 24 小时并跨 Tab 恢复；语气和偏好跨 Tab/刷新保留；首页报告不再展示非 AI 确定性分数。

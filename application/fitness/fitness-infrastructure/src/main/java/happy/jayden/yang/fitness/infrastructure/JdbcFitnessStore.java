@@ -115,7 +115,19 @@ public final class JdbcFitnessStore implements FitnessStore {
             userId);
     PlanDto plan = latestPlan(userId);
     List<ExerciseDto> exercises = exerciseDetails(plan.id());
-    return new BootstrapData(user, goal, records, meals, plan, exercises);
+    Long completedWorkoutCount =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM workout_plans WHERE user_id=? AND status='COMPLETED'",
+            Long.class,
+            userId);
+    return new BootstrapData(
+        user,
+        goal,
+        records,
+        meals,
+        plan,
+        exercises,
+        completedWorkoutCount == null ? 0 : completedWorkoutCount);
   }
 
   @Override

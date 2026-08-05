@@ -1,8 +1,6 @@
 package happy.jayden.yang.agentbuilder.infrastructure.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +15,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ToolSchemaRuntimeAlignmentTest {
@@ -44,7 +41,7 @@ class ToolSchemaRuntimeAlignmentTest {
   }
 
   @Test
-  void invokesNestedRecordContainingEverySupportedJavaTimeType() throws Exception {
+  void invokesNestedRecordContainingSupportedJavaTimeTypes() throws Exception {
     var registration = scanner().scanRegistration(new JavaTimeTools());
 
     var result =
@@ -60,42 +57,22 @@ class ToolSchemaRuntimeAlignmentTest {
                             "2026-08-05T01:02:03Z",
                             "date",
                             "2026-08-05",
-                            "local_date_time",
-                            "2026-08-05T09:10:11",
                             "offset_date_time",
                             "2026-08-05T09:10:11+08:00"))),
                 new ToolExecutionContext("user-2", "run-2", Set.of(), "operation-2"));
 
-    assertEquals(
-        "2026-08-05T01:02:03Z|2026-08-05|2026-08-05T09:10:11|2026-08-05T09:10:11+08:00", result);
+    assertEquals("2026-08-05T01:02:03Z|2026-08-05|2026-08-05T09:10:11+08:00", result);
   }
 
   @Test
-  void generatesLocalDateTimePatternThatAcceptsOnlyNoOffsetShape() {
-    var descriptor = scanner().scan(new JavaTimeTools());
-    var localDateTime =
-        property(
-            property(property(descriptor.inputSchema().document(), "request"), "window"),
-            "local_date_time");
-
-    assertEquals("string", localDateTime.get("type"));
-    assertFalse(localDateTime.containsKey("format"));
-    var pattern = (String) localDateTime.get("pattern");
-    assertNotNull(pattern);
-    assertTrue(Pattern.matches(pattern, "2026-08-05T09:10:11"));
-    assertTrue(Pattern.matches(pattern, "2026-08-05T09:10:11.123456789"));
-    assertFalse(Pattern.matches(pattern, "2026-08-05T09:10:11Z"));
-    assertFalse(Pattern.matches(pattern, "2026-08-05 09:10:11"));
-  }
-
-  @Test
-  void rejectsOffsetBearingExampleForLocalDateTimeContract() {
+  void rejectsLocalDateTimeBecausePortableJsonSchemaCannotValidateItsCalendarSemantics() {
     var exception =
         assertThrows(
             IllegalArgumentException.class,
-            () -> scanner().scanRegistration(new InvalidLocalDateTimeExampleTools()));
+            () -> scanner().scanRegistration(new UnsupportedLocalDateTimeTools()));
 
-    assertTrue(exception.getMessage().contains("does not match pattern"));
+    assertTrue(exception.getMessage().contains("LocalDateTime is not supported"));
+    assertTrue(exception.getMessage().contains("use OffsetDateTime or Instant"));
   }
 
   @Test
@@ -179,11 +156,6 @@ class ToolSchemaRuntimeAlignmentTest {
           Instant instant,
       @AgentToolParam(name = "date", description = "本地日期", example = "2026-08-05") LocalDate date,
       @AgentToolParam(
-              name = "local_date_time",
-              description = "本地日期时间",
-              example = "2026-08-05T09:10:11")
-          LocalDateTime localDateTime,
-      @AgentToolParam(
               name = "offset_date_time",
               description = "偏移日期时间",
               example = "2026-08-05T09:10:11+08:00")
@@ -194,7 +166,7 @@ class ToolSchemaRuntimeAlignmentTest {
               name = "window",
               description = "日期时间窗口",
               example =
-                  "{\"instant\":\"2026-08-05T01:02:03Z\",\"date\":\"2026-08-05\",\"local_date_time\":\"2026-08-05T09:10:11\",\"offset_date_time\":\"2026-08-05T09:10:11+08:00\"}")
+                  "{\"instant\":\"2026-08-05T01:02:03Z\",\"date\":\"2026-08-05\",\"offset_date_time\":\"2026-08-05T09:10:11+08:00\"}")
           JavaTimeWindow window) {}
 
   static final class JavaTimeTools {
@@ -214,20 +186,14 @@ class ToolSchemaRuntimeAlignmentTest {
                 name = "request",
                 description = "嵌套日期时间请求",
                 example =
-                    "{\"window\":{\"instant\":\"2026-08-05T01:02:03Z\",\"date\":\"2026-08-05\",\"local_date_time\":\"2026-08-05T09:10:11\",\"offset_date_time\":\"2026-08-05T09:10:11+08:00\"}}")
+                    "{\"window\":{\"instant\":\"2026-08-05T01:02:03Z\",\"date\":\"2026-08-05\",\"offset_date_time\":\"2026-08-05T09:10:11+08:00\"}}")
             JavaTimeRequest request) {
       var window = request.window();
-      return window.instant()
-          + "|"
-          + window.date()
-          + "|"
-          + window.localDateTime()
-          + "|"
-          + window.offsetDateTime();
+      return window.instant() + "|" + window.date() + "|" + window.offsetDateTime();
     }
   }
 
-  static final class InvalidLocalDateTimeExampleTools {
+  static final class UnsupportedLocalDateTimeTools {
     @AgentTool(
         key = "fitness.invalid_local_date_time",
         version = 1,
@@ -243,7 +209,7 @@ class ToolSchemaRuntimeAlignmentTest {
         @AgentToolParam(
                 name = "local_date_time",
                 description = "本地日期时间",
-                example = "2026-08-05T09:10:11Z")
+                example = "2026-13-40T25:61:61")
             LocalDateTime localDateTime) {
       return localDateTime.toString();
     }

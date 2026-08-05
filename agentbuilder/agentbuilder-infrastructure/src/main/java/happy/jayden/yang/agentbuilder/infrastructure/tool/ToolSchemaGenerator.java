@@ -35,9 +35,6 @@ import java.util.regex.PatternSyntaxException;
 
 final class ToolSchemaGenerator {
 
-  private static final String LOCAL_DATE_TIME_PATTERN =
-      "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?$";
-
   private final ObjectMapper exampleMapper =
       new ObjectMapper()
           .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
@@ -112,21 +109,24 @@ final class ToolSchemaGenerator {
     }
 
     var raw = rawClass(type);
+    if (raw == LocalDateTime.class) {
+      throw new IllegalArgumentException(
+          "LocalDateTime is not supported for Tool schemas at "
+              + location
+              + "; use OffsetDateTime or Instant");
+    }
     if (raw == String.class
         || raw == char.class
         || raw == Character.class
         || raw == UUID.class
         || raw == Instant.class
         || raw == LocalDate.class
-        || raw == LocalDateTime.class
         || raw == OffsetDateTime.class) {
       var result = typed("string");
       if (raw == UUID.class) {
         result.put("format", "uuid");
       } else if (raw == LocalDate.class) {
         result.put("format", "date");
-      } else if (raw == LocalDateTime.class) {
-        result.put("pattern", LOCAL_DATE_TIME_PATTERN);
       } else if (raw == Instant.class || raw == OffsetDateTime.class) {
         result.put("format", "date-time");
       }

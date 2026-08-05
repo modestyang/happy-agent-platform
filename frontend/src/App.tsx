@@ -9,6 +9,7 @@ import { ApiError, api } from './api';
 import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
+import { WorkoutPlayer } from './components/WorkoutPlayer';
 import './app.css';
 
 type Food = { name: string; estimatedKcal: number };
@@ -180,19 +181,18 @@ function RecordDrawer({ initialTab, initialRecord, onClose, onSaved }: { initial
 }
 
 function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<void> }) {
+  const navigate = useNavigate();
   const today = useToday();
   const todayKey = dayKey(today);
   const days = useMemo(() => currentWeek(today), [todayKey]);
   const [selectedKey, setSelectedKey] = useState(dayKey(today));
   const [done, setDone] = useState(false);
-  const [voiceText, setVoiceText] = useState('');
   const [error, setError] = useState('');
   const selectedDate = days.find((date) => dayKey(date) === selectedKey) ?? today;
   const plan = sameDay(selectedDate, today) ? data.plan : undefined;
   const canGenerate = selectedDate.getTime() >= today.getTime();
   useEffect(() => { setSelectedKey(todayKey); }, [todayKey]);
   async function complete() { if (!plan) return; setError(''); try { await api.completeWorkout(plan.id, 1); await reload(); setDone(true); navigator.vibrate?.(100); } catch (err) { setError(errorText(err)); } }
-  function start() { const text = '开始跟练。保持稳定呼吸，按每个动作的步骤完成。'; if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); else setVoiceText(text); navigator.vibrate?.([50, 40, 50]); }
   const prompt = `请为我生成${selectedDate.getMonth() + 1}月${selectedDate.getDate()}日的训练计划`;
 
   return <section className="page plan-page"><Header nickname={data.user.nickname} title="本周计划" subtitle="选一天，看看身体要做什么" />
@@ -207,8 +207,8 @@ function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<voi
         const media = data.exercises.find((item) => item.id === exercise.id) ?? exercise;
         return <article className="plan-exercise" key={exercise.id}><ExerciseVisual exercise={media} compact /><div className="plan-exercise__copy"><small>{String(index + 1).padStart(2, '0')} · {exercise.targetArea}</small><h2>{exercise.name}</h2><p>{exercise.sets} 组 × {exercise.seconds} 秒</p><div className="cue"><strong>动作要点</strong>{exercise.steps.map((step) => <span key={step}>{step}</span>)}</div>{exercise.errors.length > 0 && <div className="mistakes"><strong>常见错误</strong>{exercise.errors.map((item) => <span key={item}>{item}</span>)}</div>}</div></article>;
       })}</div>
-      {voiceText && <p className="notice">{voiceText}</p>}{error && <p className="error">{error}</p>}
-      {done ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={start}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
+      {error && <p className="error">{error}</p>}
+      {done ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
     </> : canGenerate ? <section className="ai-plan-empty"><span><WandSparkles /></span><small>这一天还没有安排</small><h2>交给瘦瘦，拼一份刚刚好的训练</h2><p>会结合当前目标和已有记录，不盲目加量。</p><Link to={`/ai?prompt=${encodeURIComponent(prompt)}`} aria-label="AI 生成训练计划">AI 生成训练计划 <ChevronRight /></Link></section> : <Empty icon={CalendarDays} title="无训练计划" text="这一天没有留下训练安排，休息也算计划的一部分。" />}
   </section>;
 }
@@ -340,7 +340,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
     restoreFocus.current?.focus();
     setRecordTab(undefined);
   }, []);
-  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
+  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
 export function App() {

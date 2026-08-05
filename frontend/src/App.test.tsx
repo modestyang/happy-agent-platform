@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -204,6 +204,69 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '根据我的计划，告诉我今天怎么练' }) })));
     expect(await screen.findByText(/瘦瘦还没接上大模型/)).toBeInTheDocument();
+  });
+
+  it('opens an immersive workout player and starts synchronized voice guidance', async () => {
+    const speak = vi.fn();
+    const cancel = vi.fn();
+    class Utterance {
+      text: string;
+      lang = '';
+      rate = 1;
+      constructor(text: string) { this.text = text; }
+    }
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('speechSynthesis', { speak, cancel });
+    mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+
+    expect(await screen.findByRole('heading', { name: '上肢力量 · B' })).toBeInTheDocument();
+    expect(screen.getByText('训练预览')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '开始训练' }));
+    expect(screen.getByText('准备开始')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(speak).toHaveBeenCalled();
+    expect(speak.mock.calls.at(-1)?.[0]).toMatchObject({ text: expect.stringContaining('3') });
+  });
+
+  it('pauses the workout clock and records completion exactly once', async () => {
+    const shortDashboard = {
+      ...dashboard,
+      plan: { ...dashboard.plan, estimatedMinutes: 1, exercises: [{ ...dashboard.plan.exercises[0], sets: 1, seconds: 2 }] },
+    };
+    const speak = vi.fn();
+    class Utterance { text: string; constructor(text: string) { this.text = text; } }
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn() });
+    const fetchMock = mockFetch({ '/api/app/bootstrap': shortDashboard });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: '开始训练' }));
+    await act(async () => { vi.advanceTimersByTime(3000); });
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '剩余 2 秒');
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停训练' }));
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '剩余 2 秒');
+    fireEvent.click(screen.getByRole('button', { name: '继续训练' }));
+    await act(async () => { vi.advanceTimersByTime(2000); await Promise.resolve(); });
+
+    expect(screen.getByRole('heading', { name: /今天的训练/ })).toBeInTheDocument();
+    const completionCalls = (fetchMock.mock.calls as unknown as [RequestInfo | URL, RequestInit?][]).filter(([path]) => path === '/api/app/workouts/plan-1/complete');
+    expect(completionCalls).toHaveLength(1);
+    expect(completionCalls[0]?.[1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ completionRatio: 1 }) }));
   });
 
   it('turns the AI welcome capabilities into a focused conversation', async () => {

@@ -5,6 +5,7 @@ import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
 import happy.jayden.yang.agentbuilder.core.runtime.RunResult;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
+import happy.jayden.yang.agentbuilder.core.tool.ToolSchemaCodec;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.Event;
 import io.agentscope.core.agent.EventType;
@@ -341,7 +342,7 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
                       throw new IllegalArgumentException(
                           "trusted execution context fields are not accepted as model arguments");
                     }
-                    ToolOutputCodec.validateInput(
+                    ToolSchemaCodec.validateInput(
                         arguments, tool.descriptor().inputSchema().document());
                     var trusted =
                         param
@@ -354,7 +355,7 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
                     }
                     var result = tool.handler().invoke(arguments, trusted);
                     var json =
-                        ToolOutputCodec.encode(result, tool.descriptor().outputSchema().document());
+                        ToolSchemaCodec.encode(result, tool.descriptor().outputSchema().document());
                     emit(
                         RunEvent.Type.TOOL_RESULT, Map.of("toolName", getName(), "result", result));
                     return ToolResultBlock.text(json)
@@ -367,7 +368,7 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
           ? invocation
           : invocation.retryWhen(
               Retry.max(retries)
-                  .filter(error -> !(error instanceof ToolOutputCodec.InvalidToolOutputException)));
+                  .filter(error -> !(error instanceof ToolSchemaCodec.InvalidToolValueException)));
     }
 
     private long safeRetryCount() {

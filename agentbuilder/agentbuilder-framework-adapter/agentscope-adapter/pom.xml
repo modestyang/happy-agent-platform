@@ -22,6 +22,14 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>happy.jayden.yang</groupId>
+            <artifactId>agentbuilder-core</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-core</artifactId>
             <version>${agentscope.version}</version>

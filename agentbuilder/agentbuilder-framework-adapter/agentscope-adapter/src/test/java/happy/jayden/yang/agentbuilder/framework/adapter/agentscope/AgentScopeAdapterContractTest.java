@@ -17,6 +17,7 @@ import happy.jayden.yang.agentbuilder.core.defaults.PublishedResolvedConfigSourc
 import happy.jayden.yang.agentbuilder.core.defaults.ResolvedAgentConfig;
 import happy.jayden.yang.agentbuilder.core.defaults.RetryPolicy;
 import happy.jayden.yang.agentbuilder.core.defaults.RuntimeLimits;
+import happy.jayden.yang.agentbuilder.core.runtime.FrameworkAdapterContract;
 import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import happy.jayden.yang.agentbuilder.core.runtime.RunFailureCode;
 import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
@@ -53,13 +54,92 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
-class AgentScopeAdapterContractTest {
+class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
   private static final String CHECKSUM = "a".repeat(64);
 
   @AfterAll
   static void releaseFrameworkRuntime() {
     io.agentscope.core.shutdown.GracefulShutdownManager.getInstance().resetForTesting();
     Schedulers.shutdownNow();
+  }
+
+  @Override
+  protected ConformanceEvidence conformanceEvidence() {
+    var hookOrder = new ArrayList<String>();
+    var observedContext =
+        new java.util.concurrent.atomic.AtomicReference<
+            happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext>();
+    var transport = new ScriptedModelTransport("draft", "lookup", Map.of("query", "today"), "done");
+    var events =
+        new AgentScopeAdapter(transport)
+            .run(
+                request(
+                    hookOrder,
+                    (arguments, context) -> {
+                      observedContext.set(context);
+                      return Map.of("workouts", 1);
+                    }))
+            .collectList()
+            .block();
+    var skillTransport = new SkillLoadingModelTransport();
+    var skillEvents =
+        new AgentScopeAdapter(skillTransport).run(request(new ArrayList<>())).collectList().block();
+    var invalid =
+        terminal(
+            new AgentScopeAdapter(
+                    new ScriptedModelTransport("draft", "lookup", Map.of("query", "today"), "done"))
+                .run(request(new ArrayList<>(), (arguments, context) -> Map.of("workouts", "bad")))
+                .collectList()
+                .block());
+    var mandatory =
+        terminal(
+            new AgentScopeAdapter(
+                    new ScriptedModelTransport("draft", "lookup", Map.of("query", "today"), "done"))
+                .run(
+                    requestWithTool(
+                        tool((arguments, context) -> Map.of("workouts", 1)),
+                        config(),
+                        List.of(
+                            new RunRequest.Hook(
+                                "mandatory",
+                                HookDefinition.Phase.PRE_MODEL,
+                                1,
+                                true,
+                                HookDefinition.FailurePolicy.FAIL_CLOSED,
+                                ignored -> {
+                                  throw new IllegalStateException("mandatory");
+                                }))))
+                .collectList()
+                .block());
+    var cancellingTransport = ScriptedModelTransport.neverEnding();
+    new AgentScopeAdapter(cancellingTransport)
+        .run(request(new ArrayList<>()))
+        .take(java.time.Duration.ofMillis(100))
+        .blockLast();
+    var strictSchema =
+        transport.toolSchemas.stream()
+            .filter(schema -> schema.getName().equals("lookup"))
+            .findFirst()
+            .orElseThrow()
+            .getParameters();
+    return new ConformanceEvidence(
+        new AgentScopeAdapter(transport).capabilities(),
+        strictSchema,
+        transport.systemPrompt(),
+        "",
+        skillEvents,
+        hookOrder,
+        events,
+        transport.modelArguments(),
+        observedContext.get(),
+        Map.of(
+            happy.jayden.yang.agentbuilder.core.runtime.RunFailureCode.TOOL, invalid,
+            happy.jayden.yang.agentbuilder.core.runtime.RunFailureCode.HOOK, mandatory),
+        cancellingTransport.cancelled.get() ? 1 : 0);
+  }
+
+  private static RunEvent terminal(List<RunEvent> events) {
+    return events.get(events.size() - 1);
   }
 
   @Test

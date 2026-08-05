@@ -1,4 +1,4 @@
-package happy.jayden.yang.agentbuilder.framework.adapter.agentscope;
+package happy.jayden.yang.agentbuilder.core.tool;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,26 +10,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** Serializes tool results as JSON and validates the supported JSON Schema contract. */
-final class ToolOutputCodec {
+/** Shared Jackson-tree codec for validating neutral tool schemas at every framework boundary. */
+public final class ToolSchemaCodec {
   private static final ObjectMapper MAPPER =
       new ObjectMapper()
           .registerModule(new JavaTimeModule())
           .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-  private ToolOutputCodec() {}
+  private ToolSchemaCodec() {}
 
-  static String encode(Object value, Map<String, Object> schema) {
+  public static String encode(Object value, Map<String, Object> schema) {
     var node = MAPPER.valueToTree(value);
     validate(node, schema, "$result");
     try {
       return MAPPER.writeValueAsString(value);
     } catch (JsonProcessingException error) {
-      throw new InvalidToolOutputException("tool output is not JSON serializable", error);
+      throw new InvalidToolValueException("tool output is not JSON serializable", error);
     }
   }
 
-  static void validateInput(Object value, Map<String, Object> schema) {
+  public static void validateInput(Object value, Map<String, Object> schema) {
     validate(MAPPER.valueToTree(value), schema, "$arguments");
   }
 
@@ -153,15 +153,15 @@ final class ToolOutputCodec {
   }
 
   private static void invalid(String path, String message) {
-    throw new InvalidToolOutputException(path + " " + message);
+    throw new InvalidToolValueException(path + " " + message);
   }
 
-  static final class InvalidToolOutputException extends RuntimeException {
-    private InvalidToolOutputException(String message) {
+  public static final class InvalidToolValueException extends RuntimeException {
+    private InvalidToolValueException(String message) {
       super(message);
     }
 
-    private InvalidToolOutputException(String message, Throwable cause) {
+    private InvalidToolValueException(String message, Throwable cause) {
       super(message, cause);
     }
   }

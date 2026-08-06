@@ -100,6 +100,10 @@ public final class FitnessApplicationService {
             providerStatus.configured(), providerStatus.configured() ? null : AI_REASON));
   }
 
+  public UUID authenticateSession(String sessionToken) {
+    return authenticate(sessionToken);
+  }
+
   public BodyRecordDto createBodyRecord(String sessionToken, CreateBodyRecordRequest request) {
     if (request == null || (request.weightJin() == null && request.waistCm() == null)) {
       throw new InvalidRequestException("weightJin 和 waistCm 至少填写一个");

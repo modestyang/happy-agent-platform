@@ -32,6 +32,9 @@
 | 后端完整验证超过一次命令等待窗口 | 1 | 继续轮询同一 Maven 会话，最终退出码 0 |
 | 工作台服务 RED 命令使用 artifactId 作为 `-pl` 目标，嵌套 reactor 未识别 | 1 | 改用模块相对路径 `agentbuilder/agentbuilder-service`，不重复原命令 |
 | 工作台服务首轮 GREEN 中发布测试仍被校验拦截 | 1 | 追踪到 MemoryPort 只提供 Tool，草稿引用的 Framework/Model/Prompt/Memory/Skill/Hook 均不存在；补齐夹具，不削弱生产校验 |
+| Admin API RED 测试容器在初始化脚本前退出 | 1 | 容器日志明确显示复制进去的数据库密码文件不可读；与现有 Fitness 测试对比后补 `setReadable(true, false)` |
+| Admin Controller 首轮 GREEN 返回 400 而非进入业务方法 | 1 | MockMvc detail 指出未启用 `-parameters` 且 `@PathVariable` 未声明名称；按现有 Controller 模式显式标注所有变量名 |
+| Admin 集成测试最后一项看到 Provider 已配置 | 1 | 三个测试共享同一 Testcontainers 数据库且 JUnit 顺序未定义，凭据测试先运行；固定为读取初始状态→写入发布→冲突的显式顺序 |
 
 ## Agent 管理工作台（当前阶段）
 
@@ -43,8 +46,8 @@
 
 1. [complete] 审计正式 Agent Builder 模块、数据库迁移、OpenAPI 与 demo 管理台视觉基线。
 2. [complete] 固化工作台可运行切片的设计与实施计划。
-3. [in_progress] TDD 实现 Agent 草稿、组件目录、Provider 配置、发布校验、运行记录后端 API。
-4. [pending] TDD 实现 `/admin` 路由、控制台主视图、组件目录、配置编辑和状态反馈。
+3. [complete] TDD 实现 Agent 草稿、组件目录、Provider 配置、发布校验、运行记录后端 API。
+4. [in_progress] TDD 实现 `/admin` 路由、控制台主视图、组件目录、配置编辑和状态反馈。
 5. [pending] 修正计划动作卡片左右等高并进行 390px 视觉复验。
 6. [pending] 完成前后端回归、真实数据库/API 验收、桌面浏览器视觉验收与文档归档。
 

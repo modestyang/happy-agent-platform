@@ -22,3 +22,4 @@
 - 已检查用户最新计划页截图，确认不对称来自图片维持 4:5 比例而右侧内容更高；后续改为左右随卡片等高。
 - 工作台服务完成 TDD：RED 为缺失服务契约，GREEN 覆盖未配置 Provider、不可用组件、发布门禁和 revision 更新；新增 Agent 草稿/组件投影/凭据/Run/Trace 的 V4 迁移。
 - 工作台 JDBC 完成 TDD：Testcontainers 覆盖幂等种子、数据库快照、草稿乐观锁、不可变发布和 AES-GCM 凭据不泄漏；Agent Builder infrastructure 全测试通过。
+- 工作台认证 API 完成 TDD：复用现有登录会话，覆盖数据库快照、草稿更新、校验、发布、Provider 密钥写入和 revision 冲突；与 Fitness 既有 5 项集成测试联合回归通过。

@@ -11,6 +11,11 @@ happy:
   fitness:
     local-seed:
       enabled: true
+  agent:
+    workbench:
+      local-seed:
+        enabled: true
+      master-key-file: ${HAPPY_AGENT_MASTER_KEY_FILE:./deploy/secrets/agent-master-key}
 
 server:
   port: ${SERVER_PORT:8080}

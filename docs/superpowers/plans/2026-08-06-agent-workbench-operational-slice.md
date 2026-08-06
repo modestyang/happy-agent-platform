@@ -127,7 +127,7 @@ git commit -m "feat(agentbuilder): persist workbench state securely"
 - Consumes Task 1 service and Task 2 JDBC store.
 - Produces `/api/admin/workbench`, draft patch/validate/publish, Provider credential and run detail routes.
 
-- [ ] **Step 1: Write failing authenticated API tests**
+- [x] **Step 1: Write failing authenticated API tests**
 
 ```java
 @Test void workbenchRequiresSessionAndReturnsDatabaseSeed() throws Exception {
@@ -138,16 +138,16 @@ git commit -m "feat(agentbuilder): persist workbench state securely"
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `./mvnw -q -pl starter -am -Dtest=AdminWorkbenchIntegrationTest test`  
 Expected: FAIL with 404 because the controller does not exist.
 
-- [ ] **Step 3: Implement thin controller and stable errors**
+- [x] **Step 3: Implement thin controller and stable errors**
 
 Validate the session through the existing Fitness application service before every operation. Map invalid session to 401, validation failure to 422, missing row to 404 and stale revision to 409. Credential payload is accepted as `char[]` and cleared after persistence.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `./mvnw -q -pl starter -am -Dtest='AdminWorkbenchIntegrationTest,FitnessExperienceIntegrationTest' test`  
 Expected: both workbench and existing fitness journeys pass.

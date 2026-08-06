@@ -10,6 +10,7 @@ import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
 import { WorkoutPlayer } from './components/WorkoutPlayer';
+import { AdminWorkbench } from './admin/AdminWorkbench';
 import './app.css';
 
 type Food = { name: string; estimatedKcal: number };
@@ -343,7 +344,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
   return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
-export function App() {
+function MobileApp() {
   const [data, setData] = useState<Dashboard>(); const [auth, setAuth] = useState<'loading' | 'login' | 'ready' | 'error'>('loading'); const [error, setError] = useState('');
   async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); throw err; } } }
   useEffect(() => { void load(false); }, []);
@@ -351,4 +352,8 @@ export function App() {
   if (auth === 'login') return <Login onLogin={() => load(false)} />;
   if (auth === 'error' || !data) return <div className="desktop"><main className="phone status"><Mascot /><p>{error || '暂时无法加载数据'}</p><button className="primary" onClick={() => void load(false)}>重新尝试</button></main></div>;
   return <BrowserRouter><Shell data={data} reload={() => load(true)} onLoggedOut={() => { setData(undefined); setAuth('login'); }} /></BrowserRouter>;
+}
+
+export function App() {
+  return window.location.pathname.startsWith('/admin') ? <AdminWorkbench /> : <MobileApp />;
 }

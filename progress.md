@@ -23,3 +23,6 @@
 - 工作台服务完成 TDD：RED 为缺失服务契约，GREEN 覆盖未配置 Provider、不可用组件、发布门禁和 revision 更新；新增 Agent 草稿/组件投影/凭据/Run/Trace 的 V4 迁移。
 - 工作台 JDBC 完成 TDD：Testcontainers 覆盖幂等种子、数据库快照、草稿乐观锁、不可变发布和 AES-GCM 凭据不泄漏；Agent Builder infrastructure 全测试通过。
 - 工作台认证 API 完成 TDD：复用现有登录会话，覆盖数据库快照、草稿更新、校验、发布、Provider 密钥写入和 revision 冲突；与 Fitness 既有 5 项集成测试联合回归通过。
+- `/admin` 工作台首轮完成：总览、Agent 草稿、组件中心、模型服务、运行记录与调试台全部消费真实 API；Provider 密钥输入保存后清空，空记录与不可用状态不使用 Mock 伪装。
+- 计划动作卡片已改为 Grid Stretch；浏览器读取首张卡片左右内容区高度均为 233.39px，视觉上下边沿对齐。
+- 前端完整回归增至 28/28，通过 TypeScript、ESLint 与 Vite production build；浏览器已验证真实数据库种子、发布门禁阻塞信息与组件状态原因。

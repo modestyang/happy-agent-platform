@@ -171,7 +171,7 @@ git commit -m "feat(starter): expose authenticated workbench API"
 - Consumes Task 3 APIs only through `api.admin.*`.
 - Produces `/admin` views for overview, Agent configuration, component catalog, Provider, runs and Playground.
 
-- [ ] **Step 1: Write failing route and behavior tests**
+- [x] **Step 1: Write failing route and behavior tests**
 
 ```tsx
 it('renders database workbench and saves a revised Agent draft', async () => {
@@ -185,16 +185,16 @@ it('renders database workbench and saves a revised Agent draft', async () => {
 });
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `npm --prefix frontend test -- --run src/admin/AdminWorkbench.test.tsx`  
 Expected: FAIL because `/admin` and the component do not exist.
 
-- [ ] **Step 3: Implement the demo-aligned visual system and real states**
+- [x] **Step 3: Implement the demo-aligned visual system and real states**
 
 Use a narrow icon sidebar, white rounded shell, off-white/blue-grey canvas, navy type and sparse semantic accents. The Provider form clears its secret input after save. Advanced bindings remain collapsible. Loading, empty, unavailable, conflict and success states are distinct.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `npm --prefix frontend test -- --run src/admin/AdminWorkbench.test.tsx && npm --prefix frontend run typecheck`  
 Expected: route and management interaction tests pass.
@@ -214,19 +214,19 @@ git commit -m "feat(frontend): build database-backed agent workbench"
 - Keeps the existing Plan page DOM and changes only layout behavior.
 - Produces equal top/bottom edges for `.exercise-visual` and `.plan-exercise__copy` at phone widths.
 
-- [ ] **Step 1: Add the failing layout contract assertion**
+- [x] **Step 1: Add the failing layout contract assertion**
 
 Assert every plan item still has exactly one media region and one always-visible copy region; use browser inspection as the visual red/green gate.
 
-- [ ] **Step 2: Verify the current 390px screenshot is RED**
+- [x] **Step 2: Verify the current 390px screenshot is RED**
 
 Open `/plan` at 390 × 844 and record that the image bottom ends above the right error panel.
 
-- [ ] **Step 3: Implement equal-height grid stretch**
+- [x] **Step 3: Implement equal-height grid stretch**
 
 Set the card to `align-items: stretch`; remove the fixed aspect ratio from the compact visual; set the visual wrapper to `height: 100%` while preserving SVG `object-fit: contain`/centered drawing.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run: `npm --prefix frontend test -- --run src/App.test.tsx`  
 Expected: all mobile UI tests pass and 390px browser inspection shows aligned bottoms.

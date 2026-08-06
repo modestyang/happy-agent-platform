@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
@@ -62,6 +63,18 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: '今天' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '瘦瘦' })).toHaveClass('nav-link--ai');
     expect(screen.getByRole('link', { name: '动作' })).toBeInTheDocument();
+  });
+
+  it('uses the modern sans-serif display stack for the mobile app', async () => {
+    mockFetch();
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '今天，慢慢变好' })).toBeInTheDocument();
+    const loadedCss = readFileSync('src/app.css', 'utf8');
+    expect(loadedCss).toContain('Avenir Next');
+    expect(loadedCss).not.toMatch(/Hannotate SC|Yuanti SC|FZLanTingHeiS-DB-GB/);
+    expect(loadedCss).toContain('letter-spacing: -.025em;');
+    expect(loadedCss).toMatch(/\.primary, \.soft-button \{[^}]*font-weight: 700;/);
   });
 
   it('opens today meal recommendations instead of the meal record drawer', async () => {

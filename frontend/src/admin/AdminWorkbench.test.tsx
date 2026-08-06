@@ -59,7 +59,7 @@ describe('AdminWorkbench', () => {
     await user.type(input, '花爷健身教练');
     await user.click(screen.getByRole('button', { name: '保存草稿' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/agents/fitness.coach/draft', expect.objectContaining({ method: 'PATCH', headers: { 'If-Match': '1' } })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/agents/fitness.coach/draft', expect.objectContaining({ method: 'PATCH', headers: expect.objectContaining({ 'Content-Type': 'application/json', 'If-Match': '1' }) })));
     await user.click(screen.getByRole('button', { name: '检查发布条件' }));
     expect(await screen.findByText('Provider 阿里云百炼尚未配置凭据')).toBeInTheDocument();
   });

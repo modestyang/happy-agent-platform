@@ -12,9 +12,9 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    ...init,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
   });
   const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {

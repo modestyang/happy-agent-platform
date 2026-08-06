@@ -104,6 +104,11 @@ public final class FitnessApplicationService {
     return authenticate(sessionToken);
   }
 
+  /** Loads data for a trusted in-process Agent Tool context. */
+  public BootstrapData loadForTool(UUID userId) {
+    return store.loadBootstrap(java.util.Objects.requireNonNull(userId, "userId"), LocalDate.now(USER_ZONE));
+  }
+
   public BodyRecordDto createBodyRecord(String sessionToken, CreateBodyRecordRequest request) {
     if (request == null || (request.weightJin() == null && request.waistCm() == null)) {
       throw new InvalidRequestException("weightJin 和 waistCm 至少填写一个");

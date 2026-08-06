@@ -3,6 +3,7 @@ package happy.jayden.yang.fitness;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.fitness.infrastructure.JdbcAgentProviderStatus;
 import happy.jayden.yang.fitness.infrastructure.JdbcFitnessStore;
+import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyUnavailableException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
@@ -57,6 +58,11 @@ public class FitnessExperienceConfig {
       AgentProviderStatus providerStatus,
       AiConversation aiConversation) {
     return new FitnessApplicationService(store, passwordVerifier, providerStatus, aiConversation);
+  }
+
+  @Bean
+  FitnessTools fitnessTools(FitnessApplicationService fitnessApplicationService) {
+    return new FitnessTools(fitnessApplicationService);
   }
 
   @Bean

@@ -3,8 +3,13 @@ package happy.jayden.yang.agentbuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.AdminWorkbenchLocalSeed;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminWorkbenchStore;
+import happy.jayden.yang.agentbuilder.infrastructure.tool.DefaultToolRegistry;
+import happy.jayden.yang.agentbuilder.infrastructure.tool.SpringToolCatalogScanner;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
+import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
+import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import java.nio.file.Path;
+import java.util.List;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +35,16 @@ public class AdminWorkbenchConfig {
   @Bean
   AdminWorkbenchService adminWorkbenchService(JdbcAdminWorkbenchStore store) {
     return new AdminWorkbenchService(store);
+  }
+
+  @Bean
+  SpringToolCatalogScanner springToolCatalogScanner() {
+    return new SpringToolCatalogScanner("local-dev", List.of());
+  }
+
+  @Bean
+  ToolRegistry toolRegistry(SpringToolCatalogScanner scanner, FitnessTools fitnessTools) {
+    return new DefaultToolRegistry(scanner.scanRegistrations(List.of(fitnessTools)));
   }
 
   @Bean

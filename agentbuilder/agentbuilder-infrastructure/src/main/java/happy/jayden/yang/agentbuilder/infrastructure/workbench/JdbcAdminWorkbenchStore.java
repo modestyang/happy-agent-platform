@@ -225,29 +225,29 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "fitness.profile.query",
         "读取用户档案",
         "读取基础信息、目标与偏好",
-        "UNAVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "reason", "等待 Fitness Tool Bean 接线"));
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
     seedComponent(
         "TOOL",
         "fitness.workout.query",
         "读取训练记录",
         "按日期读取训练计划和完成记录",
-        "UNAVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "reason", "等待 Fitness Tool Bean 接线"));
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
     seedComponent(
         "TOOL",
         "fitness.meal.query",
         "读取饮食记录",
         "读取历史饮食和当日推荐",
-        "UNAVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "reason", "等待 Fitness Tool Bean 接线"));
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
     seedComponent(
         "TOOL",
         "fitness.plan.generate",
-        "写入训练计划",
-        "生成并保存某日训练计划",
-        "UNAVAILABLE",
-        Map.of("risk", "MEDIUM", "sideEffect", "WRITE", "reason", "等待 Fitness Tool Bean 接线"));
+        "生成训练计划建议",
+        "生成当前目标的训练计划建议，不直接写入数据库",
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
     seedComponent(
         "SKILL",
         "fitness.plan.skill",
@@ -281,7 +281,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
       String status,
       Map<String, Object> config) {
     jdbc.update(
-        "INSERT INTO agent_component_projection(component_type,component_key,version,display_name,description,status,tags,config,source_checksum) VALUES (?,?,1,?,?,?,ARRAY['fitness'],?::jsonb,?) ON CONFLICT(component_type,component_key,version) DO NOTHING",
+        "INSERT INTO agent_component_projection(component_type,component_key,version,display_name,description,status,tags,config,source_checksum) VALUES (?,?,1,?,?,?,ARRAY['fitness'],?::jsonb,?) ON CONFLICT(component_type,component_key,version) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,status=EXCLUDED.status,tags=EXCLUDED.tags,config=EXCLUDED.config",
         type,
         key,
         displayName,

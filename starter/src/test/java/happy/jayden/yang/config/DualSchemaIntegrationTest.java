@@ -115,6 +115,6 @@ class DualSchemaIntegrationTest {
         .isEqualTo(3L);
     assertThat(
             agentJdbc.queryForObject("select count(*) from agent.agent_schema_history", Long.class))
-        .isEqualTo(3L);
+        .isEqualTo(4L);
   }
 }

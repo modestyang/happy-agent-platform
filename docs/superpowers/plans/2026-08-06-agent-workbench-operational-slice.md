@@ -33,7 +33,7 @@
 - Produces `AdminWorkbenchPort.snapshot()`, `findDraft(String)`, `updateDraft(String, DraftUpdate, long)`, `saveCredential(String, char[])`, `publish(String)` and `run(UUID)`.
 - Produces DTO records `WorkbenchSnapshot`, `AgentDraftView`, `ComponentView`, `ProviderView`, `RunView`, `ValidationView`, `DraftUpdate`, `CredentialUpdate`.
 
-- [ ] **Step 1: Write the failing service tests**
+- [x] **Step 1: Write the failing service tests**
 
 ```java
 @Test void validationBlocksAnUnconfiguredProvider() {
@@ -48,16 +48,16 @@
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `./mvnw -q -pl agentbuilder-service -am -Dtest=AdminWorkbenchServiceTest test`  
 Expected: FAIL because the workbench service package does not exist.
 
-- [ ] **Step 3: Implement closed records, validation and V4 schema**
+- [x] **Step 3: Implement closed records, validation and V4 schema**
 
 The migration creates `agent_drafts`, `agent_component_projection`, `agent_provider_credentials`, `agent_runs` and `agent_run_events`. JSON columns use object/array checks; revisions are positive; provider ciphertext/IV/AAD are non-null only after configuration.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `./mvnw -q -pl agentbuilder-service -am test`  
 Expected: all service/core tests pass.

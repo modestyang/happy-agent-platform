@@ -39,6 +39,8 @@ public final class FitnessPorts {
         UUID userId, UUID workoutId, CompleteWorkoutRequest request);
 
     GoalState createGoal(UUID userId, CreateGoalRequest request);
+
+    BootstrapData loadForAi(UUID userId);
   }
 
   public interface PasswordVerifier {

@@ -220,6 +220,11 @@ public final class JdbcFitnessStore implements FitnessStore {
     return new GoalState(id, request.name().trim(), current, request.targetWeightJin(), "ACTIVE");
   }
 
+  @Override
+  public BootstrapData loadForAi(UUID userId) {
+    return loadBootstrap(userId, LocalDate.now(USER_ZONE));
+  }
+
   public void seedLocalExperience(String passwordHash) {
     UUID userId = UUID.fromString("10000000-0000-0000-0000-000000000001");
     jdbc.update(

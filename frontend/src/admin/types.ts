@@ -43,6 +43,14 @@ export type WorkbenchComponent = {
   config: Record<string, unknown>;
 };
 
+export type WorkbenchComponentUpdate = {
+  displayName: string;
+  description: string;
+  status: ComponentStatus;
+  tags: string[];
+  config: Record<string, unknown>;
+};
+
 export type Provider = {
   providerKey: string;
   displayName: string;

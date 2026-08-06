@@ -6,6 +6,7 @@ import {
   Search, Send, Sparkles, Target, Trophy, UserRound, Utensils, WandSparkles, X,
 } from 'lucide-react';
 import { ApiError, api } from './api';
+import { ChatMarkdown } from './components/ChatMarkdown';
 import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
@@ -264,7 +265,7 @@ function AiPage({ data }: { data: Dashboard }) {
       <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
       <section className="ai-capabilities" role="region" aria-label="瘦瘦快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
       {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
-    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={`${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<p>{message.content}</p></div>)}{sending && <div className="typing" aria-label="瘦瘦正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
+    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={`${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<div className="message-body"><ChatMarkdown text={message.content} /></div></div>)}{sending && <div className="typing" aria-label="瘦瘦正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
     <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input aria-label="问瘦瘦" value={value} onChange={(event) => setValue(event.target.value)} placeholder="告诉瘦瘦你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
   </section>;
 }

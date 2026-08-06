@@ -5,6 +5,11 @@ import happy.jayden.yang.agentbuilder.infrastructure.workbench.AdminWorkbenchLoc
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminWorkbenchStore;
 import happy.jayden.yang.agentbuilder.infrastructure.tool.DefaultToolRegistry;
 import happy.jayden.yang.agentbuilder.infrastructure.tool.SpringToolCatalogScanner;
+import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcHookRepository;
+import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcModelRepository;
+import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcPromptRepository;
+import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcProviderRepository;
+import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcSkillRepository;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
@@ -46,6 +51,12 @@ public class AdminWorkbenchConfig {
   ToolRegistry toolRegistry(SpringToolCatalogScanner scanner, FitnessTools fitnessTools) {
     return new DefaultToolRegistry(scanner.scanRegistrations(List.of(fitnessTools)));
   }
+
+  @Bean JdbcProviderRepository providerCatalog(@Qualifier("agentDataSource") DataSource dataSource, ObjectMapper mapper) { return new JdbcProviderRepository(dataSource, mapper); }
+  @Bean JdbcModelRepository modelCatalog(@Qualifier("agentDataSource") DataSource dataSource, ObjectMapper mapper) { return new JdbcModelRepository(dataSource, mapper); }
+  @Bean JdbcSkillRepository skillCatalog(@Qualifier("agentDataSource") DataSource dataSource, ObjectMapper mapper) { return new JdbcSkillRepository(dataSource, mapper); }
+  @Bean JdbcPromptRepository promptCatalog(@Qualifier("agentDataSource") DataSource dataSource, ObjectMapper mapper) { return new JdbcPromptRepository(dataSource, mapper); }
+  @Bean JdbcHookRepository hookCatalog(@Qualifier("agentDataSource") DataSource dataSource, ObjectMapper mapper) { return new JdbcHookRepository(dataSource, mapper); }
 
   @Bean
   @ConditionalOnProperty(

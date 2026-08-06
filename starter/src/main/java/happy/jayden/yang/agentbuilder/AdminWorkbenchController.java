@@ -3,6 +3,8 @@ package happy.jayden.yang.agentbuilder;
 import static happy.jayden.yang.fitness.LocalAuthController.SESSION_COOKIE;
 
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.AgentDraftView;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ComponentUpdate;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ComponentView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.DraftUpdate;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ProviderView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.PublicationView;
@@ -53,6 +55,16 @@ public class AdminWorkbenchController {
     authenticate(sessionToken);
     var revised = workbench.updateDraft(agentKey, update, revision(ifMatch));
     return ResponseEntity.ok().eTag(Long.toString(revised.revision())).body(revised);
+  }
+
+  @PatchMapping("/components/{type}/{componentKey}")
+  ComponentView updateComponent(
+      @CookieValue(name = SESSION_COOKIE, required = false) String sessionToken,
+      @PathVariable("type") String type,
+      @PathVariable("componentKey") String componentKey,
+      @RequestBody ComponentUpdate request) {
+    authenticate(sessionToken);
+    return workbench.updateComponent(type, componentKey, request);
   }
 
   @PostMapping("/agents/{agentKey}/validate")

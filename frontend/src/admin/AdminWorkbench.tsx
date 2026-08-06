@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Activity, AlertTriangle, Bell, Blocks, Bot, Check, CheckCircle2, ChevronRight, CircleDashed,
   Cloud, Code2, Cpu, Database, FlaskConical, Gauge, KeyRound, LayoutDashboard, LoaderCircle,
@@ -7,7 +7,16 @@ import {
 } from 'lucide-react';
 
 import { ApiError, api } from '../api';
-import type { AgentDraft, AgentDraftUpdate, Provider, ValidationResult, WorkbenchComponent, WorkbenchSnapshot } from './types';
+import { ChatMarkdown } from '../components/ChatMarkdown';
+import type {
+  AgentDraft,
+  AgentDraftUpdate,
+  Provider,
+  ValidationResult,
+  WorkbenchComponent,
+  WorkbenchComponentUpdate,
+  WorkbenchSnapshot,
+} from './types';
 import './admin.css';
 
 type View = 'overview' | 'agents' | 'components' | 'providers' | 'runs' | 'playground';
@@ -86,7 +95,16 @@ export function AdminWorkbench() {
         <div className="admin-content">
           {view === 'overview' && <Overview snapshot={snapshot} onNavigate={setView} />}
           {view === 'agents' && currentAgent && <AgentEditor agent={currentAgent} components={snapshot.components} providers={snapshot.providers} onAgent={(agent) => setSnapshot((current) => current ? { ...current, agents: current.agents.map((item) => item.agentKey === agent.agentKey ? agent : item) } : current)} onNotice={setNotice} />}
-          {view === 'components' && <ComponentCatalog components={snapshot.components} query={search} />}
+          {view === 'components' && (
+            <ComponentCatalog
+              components={snapshot.components}
+              query={search}
+              onComponents={(components) =>
+                setSnapshot((current) => current ? { ...current, components: components } : current)
+              }
+              onNotice={setNotice}
+            />
+          )}
           {view === 'providers' && <ProviderSettings providers={snapshot.providers} onProvider={(provider) => setSnapshot((current) => current ? { ...current, providers: current.providers.map((item) => item.providerKey === provider.providerKey ? provider : item), overview: { ...current.overview, configuredProviders: current.providers.filter((item) => item.configured || item.providerKey === provider.providerKey).length } } : current)} onNotice={setNotice} />}
           {view === 'runs' && <RunHistory snapshot={snapshot} />}
           {view === 'playground' && <Playground snapshot={snapshot} onNavigate={setView} />}
@@ -133,6 +151,8 @@ function AgentEditor({ agent, components, providers, onAgent, onNotice }: { agen
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const componentName = (key: string) => components.find((item) => item.componentKey === key)?.displayName ?? key;
+  const providerModels = componentOptions(components, 'MODEL', draft.modelKey)
+    .filter((item) => item.config.providerKey === draft.providerKey || item.componentKey === draft.modelKey);
 
   function set<K extends keyof AgentDraftUpdate>(key: K, value: AgentDraftUpdate[K]) { setDraft((current) => ({ ...current, [key]: value })); }
   function toggle(key: 'toolKeys' | 'skillKeys' | 'hookKeys', value: string) { set(key, draft[key].includes(value) ? draft[key].filter((item) => item !== value) : [...draft[key], value]); }
@@ -144,7 +164,7 @@ function AgentEditor({ agent, components, providers, onAgent, onNotice }: { agen
     <PageHeading eyebrow="Agent Builder" title="Agent 配置" description="非必要参数保留平台默认值，先把角色、模型与能力边界说明白。" action={<span className="admin-revision">草稿 revision {revision}</span>} />
     <form className="admin-editor" onSubmit={save}>
       <section className="admin-card admin-form-card"><div className="admin-section-title"><span><Bot /></span><div><h2>基础信息</h2><p>它是谁，以及应该如何帮助用户。</p></div></div><div className="admin-form-grid"><label>Agent 名称<input aria-label="Agent 名称" value={draft.name} onChange={(event) => set('name', event.target.value)} /></label><label className="is-wide">描述<textarea aria-label="Agent 描述" rows={3} value={draft.description} onChange={(event) => set('description', event.target.value)} /></label></div></section>
-      <section className="admin-card admin-form-card"><div className="admin-section-title"><span><Cpu /></span><div><h2>运行核心</h2><p>框架与模型通过适配层组合，业务应用不直接依赖具体框架。</p></div></div><div className="admin-form-grid"><label>Agent 框架<select aria-label="Agent 框架" value={draft.frameworkKey} onChange={(event) => set('frameworkKey', event.target.value)}>{componentOptions(components, 'FRAMEWORK', draft.frameworkKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>模型服务<select aria-label="模型服务" value={draft.providerKey} onChange={(event) => set('providerKey', event.target.value)}>{providers.map((item) => <option value={item.providerKey} key={item.providerKey}>{item.displayName}{item.configured ? '' : '（未配置）'}</option>)}</select></label><label>模型<select aria-label="模型" value={draft.modelKey} onChange={(event) => set('modelKey', event.target.value)}>{componentOptions(components, 'MODEL', draft.modelKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>提示词<select aria-label="提示词" value={draft.promptKey} onChange={(event) => set('promptKey', event.target.value)}>{componentOptions(components, 'PROMPT', draft.promptKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>记忆<select aria-label="记忆" value={draft.memoryKey} onChange={(event) => set('memoryKey', event.target.value)}>{componentOptions(components, 'MEMORY', draft.memoryKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>最大工具调用次数<input aria-label="最大工具调用次数" type="number" min="1" max="50" value={draft.maxToolCalls} onChange={(event) => set('maxToolCalls', Number(event.target.value))} /></label><label className="is-wide admin-range">温度 <b>{draft.temperature.toFixed(1)}</b><input aria-label="温度" type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => set('temperature', Number(event.target.value))} /><small>更低更稳定 · 更高更灵活</small></label></div></section>
+      <section className="admin-card admin-form-card"><div className="admin-section-title"><span><Cpu /></span><div><h2>运行核心</h2><p>先选择模型服务，再从该服务商支持的模型中选择模型。</p></div></div><div className="admin-form-grid"><label>Agent 框架<select aria-label="Agent 框架" value={draft.frameworkKey} onChange={(event) => set('frameworkKey', event.target.value)}>{componentOptions(components, 'FRAMEWORK', draft.frameworkKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>模型服务<select aria-label="模型服务" value={draft.providerKey} onChange={(event) => { const providerKey = event.target.value; const firstModel = components.find((item) => item.type === 'MODEL' && item.config.providerKey === providerKey); setDraft((current) => ({ ...current, providerKey, modelKey: firstModel?.componentKey ?? current.modelKey })); }}>{providers.map((item) => <option value={item.providerKey} key={item.providerKey}>{item.displayName}{item.configured ? '' : '（未配置）'}</option>)}</select></label><label>模型<select aria-label="模型" value={draft.modelKey} onChange={(event) => set('modelKey', event.target.value)}>{providerModels.map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>提示词<select aria-label="提示词" value={draft.promptKey} onChange={(event) => set('promptKey', event.target.value)}>{componentOptions(components, 'PROMPT', draft.promptKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>记忆<select aria-label="记忆" value={draft.memoryKey} onChange={(event) => set('memoryKey', event.target.value)}>{componentOptions(components, 'MEMORY', draft.memoryKey).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label><label>最大工具调用次数<input aria-label="最大工具调用次数" type="number" min="1" max="50" value={draft.maxToolCalls} onChange={(event) => set('maxToolCalls', Number(event.target.value))} /></label><label className="is-wide admin-range">温度 <b>{draft.temperature.toFixed(1)}</b><input aria-label="温度" type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => set('temperature', Number(event.target.value))} /><small>更低更稳定 · 更高更灵活</small></label></div></section>
       <section className="admin-card admin-form-card"><div className="admin-section-title"><span><Blocks /></span><div><h2>能力装配</h2><p>只展示代码或目录中已登记的能力；不可用项会阻止发布。</p></div></div>{(['TOOL', 'SKILL', 'HOOK'] as const).map((type) => { const key = type === 'TOOL' ? 'toolKeys' : type === 'SKILL' ? 'skillKeys' : 'hookKeys'; const items = components.filter((item) => item.type === type); const Icon = typeMeta[type].icon; return <div className="admin-capability-group" key={type}><h3>{typeMeta[type].label}<small>{draft[key].length} 已选择</small></h3>{items.length ? <div>{items.map((item) => <button type="button" className={draft[key].includes(item.componentKey) ? 'is-selected' : ''} aria-pressed={draft[key].includes(item.componentKey)} key={item.componentKey} onClick={() => toggle(key, item.componentKey)}><span>{draft[key].includes(item.componentKey) ? <Check /> : <Icon />}</span><b>{item.displayName}</b><small>{statusText(item.status)}</small></button>)}</div> : <p className="admin-inline-empty">当前没有登记的{typeMeta[type].label}</p>}</div>; })}</section>
       {validation && <section className={`admin-validation ${validation.valid ? 'is-valid' : 'is-invalid'}`}><span>{validation.valid ? <CheckCircle2 /> : <AlertTriangle />}</span><div><strong>{validation.valid ? '发布条件已满足' : '暂时不能发布'}</strong>{validation.errors.map((item) => <p key={item}>{item}</p>)}{validation.warnings.map((item) => <p key={item}>提醒：{item}</p>)}</div></section>}
       {error && <p className="admin-form-error"><AlertTriangle />{error}</p>}
@@ -153,17 +173,254 @@ function AgentEditor({ agent, components, providers, onAgent, onNotice }: { agen
   </>;
 }
 
-function ComponentCatalog({ components, query }: { components: WorkbenchComponent[]; query: string }) {
+function ComponentCatalog({
+  components,
+  query,
+  onComponents,
+  onNotice,
+}: {
+  components: WorkbenchComponent[];
+  query: string;
+  onComponents: (components: WorkbenchComponent[]) => void;
+  onNotice: (notice: string) => void;
+}) {
   const types = ['ALL', ...Array.from(new Set(components.map((item) => item.type)))];
   const [type, setType] = useState('ALL');
   const [selected, setSelected] = useState<WorkbenchComponent>();
+  const [pending, setPending] = useState('');
+  const [formError, setFormError] = useState('');
+  const [form, setForm] = useState<WorkbenchComponentUpdate>({
+    displayName: '',
+    description: '',
+    status: 'DRAFT',
+    tags: [],
+    config: {},
+  });
+  const [configText, setConfigText] = useState('{}');
   const normalized = query.trim().toLowerCase();
-  const filtered = components.filter((item) => (type === 'ALL' || item.type === type) && (!normalized || `${item.displayName}${item.description}${item.tags.join('')}`.toLowerCase().includes(normalized)));
-  return <>
-    <PageHeading eyebrow="可组合能力" title="组件中心" description="Tool、Skill、Hook、Provider 与运行框架使用一致的登记与状态模型。" />
-    <div className="admin-component-tabs">{types.map((item) => <button key={item} aria-pressed={type === item} className={type === item ? 'is-active' : ''} onClick={() => setType(item)}>{item === 'ALL' ? '全部' : typeMeta[item]?.label ?? item}<small>{item === 'ALL' ? components.length : components.filter((component) => component.type === item).length}</small></button>)}</div>
-    <section className="admin-component-layout"><div className="admin-component-list" role="region" aria-label="组件目录">{filtered.map((item) => { const Icon = typeMeta[item.type]?.icon ?? Blocks; const reason = item.config.reason; return <button key={item.componentKey} className={selected?.componentKey === item.componentKey ? 'is-selected' : ''} onClick={() => setSelected(item)}><span className={`admin-component-icon admin-component-icon--${item.type.toLowerCase()}`}><Icon /></span><div><small>{typeMeta[item.type]?.label ?? item.type} · v{item.version}</small><strong>{item.displayName}</strong><p>{item.description}</p>{reason != null && <em>{String(reason)}</em>}<footer>{item.tags.map((tag) => <i key={tag}>{tag}</i>)}<b className={`admin-status admin-status--${item.status.toLowerCase()}`}>{statusText(item.status)}</b></footer></div><ChevronRight /></button>; })}{!filtered.length && <div className="admin-empty"><Search /><strong>没有匹配的组件</strong><p>换一个类型或搜索词试试。</p></div>}</div><aside className="admin-component-detail">{selected ? <><span className={`admin-component-icon admin-component-icon--${selected.type.toLowerCase()}`}>{(() => { const Icon = typeMeta[selected.type]?.icon ?? Blocks; return <Icon />; })()}</span><small>{typeMeta[selected.type]?.label ?? selected.type}</small><h2>{selected.displayName}</h2><p>{selected.description}</p><dl><div><dt>唯一标识</dt><dd>{selected.componentKey}</dd></div><div><dt>状态</dt><dd>{statusText(selected.status)}</dd></div><div><dt>版本</dt><dd>v{selected.version}</dd></div></dl>{Object.keys(selected.config).length > 0 && <div className="admin-config-preview"><strong>登记信息</strong>{Object.entries(selected.config).map(([key, value]) => <p key={key}><span>{key}</span><b>{String(value)}</b></p>)}</div>}</> : <div className="admin-empty"><Blocks /><strong>选择一个组件</strong><p>这里会展示其标识、版本与可用状态。</p></div>}</aside></section>
-  </>;
+  const filtered = components.filter(
+    (item) =>
+      (type === 'ALL' || item.type === type) &&
+      (!normalized ||
+        `${item.displayName}${item.description}${item.tags.join('')}`
+          .toLowerCase()
+          .includes(normalized)),
+  );
+  const editable = selected && selected.type !== 'TOOL';
+
+  return (
+    <>
+      <PageHeading
+        eyebrow="可组合能力"
+        title="组件中心"
+        description="Tool、Skill、Hook、Provider 与运行框架使用一致的登记与状态模型。"
+      />
+      <div className="admin-component-tabs">
+        {types.map((item) => (
+          <button
+            key={item}
+            aria-pressed={type === item}
+            className={type === item ? 'is-active' : ''}
+            onClick={() => setType(item)}
+          >
+            {item === 'ALL' ? '全部' : typeMeta[item]?.label ?? item}
+            <small>{item === 'ALL' ? components.length : components.filter((component) => component.type === item).length}</small>
+          </button>
+        ))}
+      </div>
+      <section className="admin-component-layout">
+        <div className="admin-component-list" role="region" aria-label="组件目录">
+          {filtered.map((item) => {
+            const Icon = typeMeta[item.type]?.icon ?? Blocks;
+            const reason = item.config.reason;
+            return (
+              <button
+                key={item.componentKey}
+                className={selected?.componentKey === item.componentKey ? 'is-selected' : ''}
+                onClick={() => {
+                  setSelected(item);
+                  setForm({
+                    displayName: item.displayName,
+                    description: item.description,
+                    status: item.status,
+                    tags: item.tags,
+                    config: item.config,
+                  });
+                  setConfigText(JSON.stringify(item.config, null, 2));
+                  setFormError('');
+                }}
+              >
+                <span className={`admin-component-icon admin-component-icon--${item.type.toLowerCase()}`}>
+                  <Icon />
+                </span>
+                <div>
+                  <small>
+                    {typeMeta[item.type]?.label ?? item.type} · v{item.version}
+                  </small>
+                  <strong>{item.displayName}</strong>
+                  <p>{item.description}</p>
+                  {reason != null && <em>{String(reason)}</em>}
+                  <footer>
+                    {item.tags.map((tag) => (
+                      <i key={tag}>{tag}</i>
+                    ))}
+                    <b className={`admin-status admin-status--${item.status.toLowerCase()}`}>{statusText(item.status)}</b>
+                  </footer>
+                </div>
+                <ChevronRight />
+              </button>
+            );
+          })}
+          {!filtered.length && (
+            <div className="admin-empty">
+              <Search />
+              <strong>没有匹配的组件</strong>
+              <p>换一个类型或搜索词试试。</p>
+            </div>
+          )}
+        </div>
+        <aside className="admin-component-detail">
+          {selected ? (
+            <div>
+              <span className={`admin-component-icon admin-component-icon--${selected.type.toLowerCase()}`}>
+                {(() => {
+                  const Icon = typeMeta[selected.type]?.icon ?? Blocks;
+                  return <Icon />;
+                })()}
+              </span>
+              <small>{typeMeta[selected.type]?.label ?? selected.type}</small>
+              <h2>{selected.displayName}</h2>
+              <p>{selected.description}</p>
+              <dl>
+                <div>
+                  <dt>唯一标识</dt>
+                  <dd>{selected.componentKey}</dd>
+                </div>
+                <div>
+                  <dt>状态</dt>
+                  <dd>{statusText(selected.status)}</dd>
+                </div>
+                <div>
+                  <dt>版本</dt>
+                  <dd>v{selected.version}</dd>
+                </div>
+              </dl>
+              {editable ? (
+                <section className="admin-card admin-form-card">
+                  <label>
+                    显示名称
+                    <input
+                      value={form.displayName}
+                      onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+                    />
+                  </label>
+                  <label className="is-wide">
+                    说明
+                    <textarea
+                      rows={3}
+                      value={form.description}
+                      onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    状态
+                    <select
+                      value={form.status}
+                      onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
+                    >
+                      <option value="AVAILABLE">AVAILABLE</option>
+                      <option value="DRAFT">DRAFT</option>
+                      <option value="UNAVAILABLE">UNAVAILABLE</option>
+                      <option value="DISABLED">DISABLED</option>
+                      <option value="DEPRECATED">DEPRECATED</option>
+                    </select>
+                  </label>
+                  <label>
+                    标签
+                    <input
+                      value={form.tags.join(',')}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          tags: event.target.value
+                            .split(',')
+                            .map((entry) => entry.trim())
+                            .filter((entry) => entry.length > 0),
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="is-wide">
+                    配置 JSON
+                    <textarea rows={8} value={configText} onChange={(event) => setConfigText(event.target.value)} />
+                  </label>
+                  {formError && (
+                    <p className="admin-form-error">
+                      <AlertTriangle />
+                      {formError}
+                    </p>
+                  )}
+                  <footer>
+                    <button
+                      className="admin-primary"
+                      disabled={Boolean(pending)}
+                      onClick={async () => {
+                        if (!selected) return;
+                        setPending(selected.componentKey);
+                        setFormError('');
+                        try {
+                          const parsed = JSON.parse(configText);
+                          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                            throw new SyntaxError('配置必须是 JSON 对象');
+                          }
+                          const updated = await api.admin.saveComponent(selected.type, selected.componentKey, {
+                            ...form,
+                            config: parsed,
+                          });
+                          onComponents(
+                            components.map((item) =>
+                              item.type === selected.type && item.componentKey === selected.componentKey && item.version === selected.version
+                                ? updated
+                                : item,
+                            ),
+                          );
+                          setForm((current) => ({ ...current, config: parsed }));
+                          setConfigText(JSON.stringify(parsed, null, 2));
+                          setSelected(updated);
+                          onNotice('组件配置已保存');
+                        } catch (caught) {
+                          if (caught instanceof SyntaxError) {
+                            setFormError('配置 JSON 解析失败，请检查格式。');
+                          } else {
+                            setFormError(messageOf(caught));
+                          }
+                        } finally {
+                          setPending('');
+                        }
+                      }}
+                    >
+                      {pending === selected.componentKey ? <LoaderCircle className="is-spin" /> : <Save />} 保存配置
+                    </button>
+                  </footer>
+                </section>
+              ) : (
+                <div className="admin-empty">
+                  <strong>工具组件暂不支持编辑</strong>
+                  <p>如需调整工具行为，请在代码侧更新工具实现后刷新工作台。</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="admin-empty">
+              <Blocks />
+              <strong>选择一个组件</strong>
+              <p>这里会展示其标识、版本与可用状态。</p>
+            </div>
+          )}
+        </aside>
+      </section>
+    </>
+  );
 }
 
 function ProviderSettings({ providers, onProvider, onNotice }: { providers: Provider[]; onProvider: (provider: Provider) => void; onNotice: (notice: string) => void }) {
@@ -184,7 +441,68 @@ function RunHistory({ snapshot }: { snapshot: WorkbenchSnapshot }) {
 function Playground({ snapshot, onNavigate }: { snapshot: WorkbenchSnapshot; onNavigate: (view: View) => void }) {
   const providerReady = snapshot.providers.some((item) => item.configured);
   const toolsReady = snapshot.components.filter((item) => item.type === 'TOOL').some((item) => item.status === 'AVAILABLE');
-  return <><PageHeading eyebrow="安全调试" title="Agent 调试台" description="仅在运行依赖真实就绪后允许发起测试，不伪造模型回复。" />
-    <section className="admin-playground"><div className="admin-playground__chat"><header><span><Bot /></span><div><strong>{snapshot.agents[0]?.name ?? 'Agent'}</strong><small>{providerReady && toolsReady ? '可以开始调试' : '运行依赖尚未就绪'}</small></div><i className={providerReady && toolsReady ? 'is-online' : ''} /></header><div className="admin-playground__body"><div className="admin-empty"><CircleDashed /><strong>等待一次真实对话</strong><p>调试记录将与发布版本绑定，并写入 Run 与 Trace。</p></div></div><footer><input disabled placeholder="完成配置后可以发送测试问题" /><button disabled>发送</button></footer></div><aside className="admin-card admin-runtime-check"><small>运行前检查</small><h2>{providerReady && toolsReady ? '依赖已经就绪' : '还有依赖未完成'}</h2><p className={providerReady ? 'is-ok' : ''}>{providerReady ? <CheckCircle2 /> : <AlertTriangle />} Provider 凭据</p><p className={toolsReady ? 'is-ok' : ''}>{toolsReady ? <CheckCircle2 /> : <AlertTriangle />} 可用业务 Tool</p><p className={snapshot.agents[0]?.publishedVersion ? 'is-ok' : ''}>{snapshot.agents[0]?.publishedVersion ? <CheckCircle2 /> : <AlertTriangle />} 已发布 Agent 版本</p><button className="admin-primary" onClick={() => onNavigate(providerReady ? 'components' : 'providers')}>去完成配置 <ChevronRight /></button></aside></section>
+  const [message, setMessage] = useState('');
+  const [trace, setTrace] = useState<Array<{ role: string; content: string }>>([]);
+  const [sendError, setSendError] = useState('');
+  const [sending, setSending] = useState(false);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const running = providerReady && toolsReady && snapshot.agents[0]?.publishedVersion;
+  const readyText = running ? '可以开始调试' : '运行依赖尚未就绪';
+  const readyClass = running ? 'is-online' : '';
+  const agentName = snapshot.agents[0]?.name ?? 'AI';
+
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+  }, [trace, sending]);
+
+  async function send() {
+    const payload = message.trim();
+    if (!payload || sending || !running) return;
+    setSendError('');
+    setSending(true);
+    setTrace((current) => [...current, { role: 'user', content: payload }]);
+    setMessage('');
+    try {
+      const response = await api.appAiMessage(payload);
+      setTrace((current) => [...current, { role: 'assistant', content: response.message }]);
+    } catch (caught) {
+      setSendError(messageOf(caught));
+      setTrace((current) => [...current, { role: 'assistant', content: `调用失败：${messageOf(caught)}` }]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return <>
+    <PageHeading eyebrow="安全调试" title="Agent 调试台" description="仅在运行依赖真实就绪后允许发起测试，不伪造模型回复。" />
+    <section className="admin-playground">
+      <div className="admin-playground__chat">
+        <header><span><Bot /></span><div><strong>{snapshot.agents[0]?.name ?? 'Agent'}</strong><small>{readyText}</small></div><i className={readyClass} /></header>
+        <div className="admin-playground__body" ref={bodyRef}>
+          {trace.length ? (
+            trace.map((item, index) => (
+              <div key={`${item.role}-${index}`} className={`admin-playground__bubble ${item.role === 'user' ? 'is-user' : 'is-assistant'}`}>
+                <small>{item.role === 'user' ? '你' : agentName}</small>
+                <ChatMarkdown text={item.content} className="admin-md" />
+              </div>
+            ))
+          ) : (
+            <div className="admin-empty"><CircleDashed /><strong>等待一次真实对话</strong><p>调试记录将与发布版本绑定，并写入 Run 与 Trace。</p></div>
+          )}
+          {sending && (
+            <div className="admin-playground__bubble is-assistant is-thinking">
+              <small>{agentName}</small>
+              <p><LoaderCircle className="is-spin" /> 正在思考…</p>
+            </div>
+          )}
+          {sendError && <p className="admin-form-error"><AlertTriangle />{sendError}</p>}
+        </div>
+        <footer>
+          <input value={message} onChange={(event) => setMessage(event.target.value)} disabled={!running || sending} placeholder={running ? '请输入测试问题，例如：请帮我生成一段本周训练复盘' : '完成配置后可以发送测试问题'} onKeyDown={(event) => event.key === 'Enter' && void send()} />
+          <button className={running ? 'admin-primary' : ''} disabled={!running || sending || !message.trim()} onClick={() => void send()}>{sending ? <LoaderCircle className="is-spin" /> : <Rocket />} 发送</button>
+        </footer>
+      </div>
+      <aside className="admin-card admin-runtime-check"><small>运行前检查</small><h2>{running ? '依赖已经就绪' : '还有依赖未完成'}</h2><p className={providerReady ? 'is-ok' : ''}>{providerReady ? <CheckCircle2 /> : <AlertTriangle />} Provider 凭据</p><p className={toolsReady ? 'is-ok' : ''}>{toolsReady ? <CheckCircle2 /> : <AlertTriangle />} 可用业务 Tool</p><p className={snapshot.agents[0]?.publishedVersion ? 'is-ok' : ''}>{snapshot.agents[0]?.publishedVersion ? <CheckCircle2 /> : <AlertTriangle />} 已发布 Agent 版本</p><button className="admin-primary" onClick={() => onNavigate(providerReady ? 'components' : 'providers')}>去完成配置 <ChevronRight /></button></aside>
+    </section>
   </>;
 }

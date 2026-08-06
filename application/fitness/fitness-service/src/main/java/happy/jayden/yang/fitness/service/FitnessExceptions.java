@@ -32,5 +32,17 @@ public final class FitnessExceptions {
     public DependencyUnavailableException() {
       super("已配置 Provider，但当前体验服务尚未连接 Agent 运行时");
     }
+
+    public DependencyUnavailableException(String detail) {
+      super("已配置 Provider，但当前体验服务尚未连接 Agent 运行时。" + detail);
+    }
+
+    public DependencyUnavailableException(String detail, Throwable cause) {
+      super("已配置 Provider，但当前体验服务尚未连接 Agent 运行时。" + detail, cause);
+    }
+
+    public DependencyUnavailableException(Throwable cause) {
+      super("已配置 Provider，但当前体验服务尚未连接 Agent 运行时", cause);
+    }
   }
 }

@@ -9,7 +9,10 @@ import happy.jayden.yang.agentbuilder.core.component.ComponentKey;
 import happy.jayden.yang.agentbuilder.core.component.ComponentRef;
 import happy.jayden.yang.agentbuilder.core.component.ComponentVersion;
 import happy.jayden.yang.agentbuilder.infrastructure.security.AesGcmCredentialCipher;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort;
+import java.sql.Array;
+import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -25,8 +28,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   private static final String MASK = "••••••••";
-  private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
+  private static final TypeReference<List<Object>> RAW_LIST = new TypeReference<>() {};
   private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() {};
+  private static final Map<String, Object> CORRUPTED_MARKER =
+      Map.of("reason", "stored workbench payload is invalid");
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
@@ -46,16 +51,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     var components =
         jdbc.query(
             "SELECT component_type,component_key,display_name,description,version,status,tags,config::text FROM agent_component_projection ORDER BY component_type,component_key,version DESC",
-            (rs, row) ->
-                new ComponentView(
-                    rs.getString("component_type"),
-                    rs.getString("component_key"),
-                    rs.getString("display_name"),
-                    rs.getString("description"),
-                    rs.getInt("version"),
-                    rs.getString("status"),
-                    List.of((String[]) rs.getArray("tags").getArray()),
-                    read(rs.getString("config"), OBJECT_MAP)));
+            componentViewMapper());
     var providers = providers();
     var runs = recentRuns();
     var configuredProviders = (int) providers.stream().filter(ProviderView::configured).count();
@@ -103,6 +99,29 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
       throw new Conflict("Agent 草稿已经被其他操作更新，请刷新后重试");
     }
     return findDraft(agentKey).orElseThrow(() -> new NotFound("Agent 草稿不存在"));
+  }
+
+  @Override
+  public ComponentView updateComponent(
+      String type, String componentKey, AdminWorkbenchDtos.ComponentUpdate update) {
+    var changed =
+        jdbc.update(
+            "UPDATE agent_component_projection "
+                + "SET display_name=?, description=?, status=?, tags=?::text[], config=?::jsonb, updated_at=CURRENT_TIMESTAMP "
+                + "WHERE component_type=? AND component_key=? AND version=(SELECT max(version) FROM agent_component_projection x WHERE x.component_type= ? AND x.component_key= ?) ",
+            update.displayName(),
+            update.description(),
+            update.status(),
+            update.tags().toArray(new String[0]),
+            write(update.config()),
+            type,
+            componentKey,
+            type,
+            componentKey);
+    if (changed == 0) {
+      throw new NotFound("组件不存在");
+    }
+    return findComponent(type, componentKey);
   }
 
   @Override
@@ -295,7 +314,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     return jdbc.query(
         "SELECT c.component_key,c.display_name,c.config::text,CASE WHEN p.provider_key IS NULL THEN FALSE ELSE TRUE END AS configured FROM agent_component_projection c LEFT JOIN agent_provider_credentials p ON p.provider_key=c.component_key WHERE c.component_type='PROVIDER' ORDER BY c.component_key",
         (rs, row) -> {
-          var config = read(rs.getString("config"), OBJECT_MAP);
+          var config = safeReadMap(rs.getString("config"), "provider", rs.getString("component_key"));
           var configured = rs.getBoolean("configured");
           return new ProviderView(
               rs.getString("component_key"),
@@ -350,25 +369,59 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   }
 
   private RowMapper<AgentDraftView> draftMapper() {
+    return (rs, row) -> {
+      String agentKey = rs.getString("agent_key");
+      return new AgentDraftView(
+          agentKey,
+          rs.getString("name"),
+          rs.getString("description"),
+          rs.getString("status"),
+          rs.getString("framework_key"),
+          rs.getString("provider_key"),
+          rs.getString("model_key"),
+          rs.getString("prompt_key"),
+          safeReadStringList(rs.getString("tool_keys"), "draft.tool_keys", agentKey),
+          safeReadStringList(rs.getString("skill_keys"), "draft.skill_keys", agentKey),
+          safeReadStringList(rs.getString("hook_keys"), "draft.hook_keys", agentKey),
+          rs.getString("memory_key"),
+          rs.getDouble("temperature"),
+          rs.getInt("max_tool_calls"),
+          rs.getInt("current_published_version"),
+          rs.getLong("revision"),
+          rs.getTimestamp("updated_at").toInstant());
+    };
+  }
+
+  private ComponentView findComponent(String type, String componentKey) {
+    return jdbc
+        .query(
+            "SELECT component_type,component_key,display_name,description,version,status,tags,config::text "
+                + "FROM agent_component_projection "
+                + "WHERE component_type=? AND component_key=? AND version=(SELECT max(version) FROM agent_component_projection x WHERE x.component_type=? AND x.component_key=?)",
+            componentViewMapper(),
+            type,
+            componentKey,
+            type,
+            componentKey)
+        .stream()
+        .findFirst()
+        .orElseThrow(() -> new NotFound("组件不存在"));
+  }
+
+  private RowMapper<ComponentView> componentViewMapper() {
     return (rs, row) ->
-        new AgentDraftView(
-            rs.getString("agent_key"),
-            rs.getString("name"),
+        new ComponentView(
+            rs.getString("component_type"),
+            rs.getString("component_key"),
+            rs.getString("display_name"),
             rs.getString("description"),
+            rs.getInt("version"),
             rs.getString("status"),
-            rs.getString("framework_key"),
-            rs.getString("provider_key"),
-            rs.getString("model_key"),
-            rs.getString("prompt_key"),
-            read(rs.getString("tool_keys"), STRING_LIST),
-            read(rs.getString("skill_keys"), STRING_LIST),
-            read(rs.getString("hook_keys"), STRING_LIST),
-            rs.getString("memory_key"),
-            rs.getDouble("temperature"),
-            rs.getInt("max_tool_calls"),
-            rs.getInt("current_published_version"),
-            rs.getLong("revision"),
-            rs.getTimestamp("updated_at").toInstant());
+            readTags(rs.getArray("tags"), row),
+            safeReadMap(
+                rs.getString("config"),
+                rs.getString("component_type"),
+                rs.getString("component_key")));
   }
 
   private String write(Object value) {
@@ -384,6 +437,51 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
       return mapper.readValue(value, type);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("stored workbench payload is invalid", exception);
+    }
+  }
+
+  private Map<String, Object> safeReadMap(String value, String type, String key) {
+    try {
+      return Map.copyOf(read(value, OBJECT_MAP));
+    } catch (IllegalArgumentException | IllegalStateException exception) {
+      return CORRUPTED_MARKER;
+    }
+  }
+
+  private List<String> safeReadStringList(String value, String type, String key) {
+    try {
+      return readObjectListAsStringList(value);
+    } catch (IllegalArgumentException | IllegalStateException exception) {
+      return List.of();
+    }
+  }
+
+  private List<String> readObjectListAsStringList(String value) {
+    List<Object> values = read(value, RAW_LIST);
+    var converted = new ArrayList<String>(values.size());
+    for (var item : values) {
+      if (item == null) continue;
+      converted.add(String.valueOf(item));
+    }
+    return List.copyOf(converted);
+  }
+
+  private List<String> readTags(Array tagsArray, int row) {
+    if (tagsArray == null) return List.of();
+    try {
+      Object array = tagsArray.getArray();
+      if (array == null) return List.of();
+      if (array instanceof String[] tags) return List.copyOf(List.of(tags));
+      if (array instanceof Object[] tags) {
+        var values = new ArrayList<String>(tags.length);
+        for (var tag : tags) {
+          if (tag != null) values.add(String.valueOf(tag));
+        }
+        return List.copyOf(values);
+      }
+      return List.of();
+    } catch (Exception exception) {
+      return List.of("INVALID_TAGS");
     }
   }
 }

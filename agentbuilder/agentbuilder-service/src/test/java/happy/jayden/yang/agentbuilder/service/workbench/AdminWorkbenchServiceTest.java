@@ -175,6 +175,20 @@ class AdminWorkbenchServiceTest {
     }
 
     @Override
+    public ComponentView updateComponent(
+        String type, String componentKey, ComponentUpdate update) {
+      return new ComponentView(
+          type,
+          componentKey,
+          update.displayName(),
+          update.description(),
+          1,
+          update.status(),
+          update.tags(),
+          update.config());
+    }
+
+    @Override
     public PublicationView publish(AgentDraftView draft) {
       publishedDrafts.add(draft);
       return new PublicationView(draft.agentKey(), 1, Instant.now());

@@ -92,6 +92,21 @@ public final class AdminWorkbenchDtos {
     }
   }
 
+  public record ComponentUpdate(
+      String displayName,
+      String description,
+      String status,
+      List<String> tags,
+      Map<String, Object> config) {
+    public ComponentUpdate {
+      text(displayName, "displayName");
+      text(description, "description");
+      text(status, "status");
+      tags = stringsAllowEmpty(tags, "tags");
+      config = Map.copyOf(Objects.requireNonNull(config, "config"));
+    }
+  }
+
   public record ProviderView(
       String providerKey,
       String displayName,

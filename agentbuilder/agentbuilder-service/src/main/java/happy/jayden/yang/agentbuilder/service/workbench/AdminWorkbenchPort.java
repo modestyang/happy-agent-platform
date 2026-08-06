@@ -12,6 +12,8 @@ public interface AdminWorkbenchPort {
 
   AgentDraftView updateDraft(String agentKey, DraftUpdate update, long expectedRevision);
 
+  ComponentView updateComponent(String type, String componentKey, ComponentUpdate update);
+
   ProviderView saveCredential(String providerKey, char[] credential);
 
   PublicationView publish(AgentDraftView draft);

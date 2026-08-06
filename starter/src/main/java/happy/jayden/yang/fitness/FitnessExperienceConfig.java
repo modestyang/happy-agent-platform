@@ -5,12 +5,12 @@ import happy.jayden.yang.fitness.infrastructure.JdbcAgentProviderStatus;
 import happy.jayden.yang.fitness.infrastructure.JdbcFitnessStore;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
-import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyUnavailableException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -45,10 +45,13 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
-  AiConversation aiConversation() {
-    return (userId, message) -> {
-      throw new DependencyUnavailableException();
-    };
+  AiConversation aiConversation(
+      FitnessStore store,
+      @Qualifier("agentDataSource") DataSource dataSource,
+      ObjectMapper objectMapper,
+      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
+          String masterKeyFile) {
+    return new AgentRuntimeConversation(store, dataSource, objectMapper, masterKeyFile);
   }
 
   @Bean

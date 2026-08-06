@@ -1,4 +1,4 @@
-import type { AgentDraft, AgentDraftUpdate, AgentRun, Provider, Publication, ValidationResult, WorkbenchSnapshot } from './admin/types';
+import type { AgentDraft, AgentDraftUpdate, AgentRun, Provider, Publication, ValidationResult, WorkbenchComponent, WorkbenchComponentUpdate, WorkbenchSnapshot } from './admin/types';
 
 export class ApiError extends Error {
   constructor(
@@ -11,11 +11,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    });
+  } catch {
+    throw new ApiError('后端服务连接失败，请确认后端服务已启动并可访问', 0);
+  }
   const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
     const problem = payload as { detail?: string; message?: string; code?: string };
@@ -40,5 +45,7 @@ export const api = {
     publish: (agentKey: string) => request<Publication>(`/api/admin/agents/${agentKey}/publish`, { method: 'POST' }),
     saveProviderCredential: (providerKey: string, apiKey: string) => request<Provider>(`/api/admin/providers/${providerKey}/credential`, { method: 'PUT', body: JSON.stringify({ apiKey }) }),
     run: (runId: string) => request<AgentRun>(`/api/admin/runs/${runId}`),
+    saveComponent: (type: string, key: string, update: WorkbenchComponentUpdate) => request<WorkbenchComponent>(`/api/admin/components/${type}/${key}`, { method: 'PATCH', body: JSON.stringify(update) }),
   },
+  appAiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
 };

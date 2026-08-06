@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,5 +124,15 @@ class JdbcAdminWorkbenchStoreTest {
         1,
         new JdbcTemplate(dataSource)
             .queryForObject("SELECT count(*) FROM agent_versions", Integer.class));
+  }
+
+  @Test
+  void snapshotToleratesNonCanonicalJsonPayloads() {
+    new JdbcTemplate(dataSource)
+        .update("UPDATE agent_drafts SET tool_keys='[1,2,3]' WHERE agent_key='fitness.coach'");
+
+    var snapshot = store.snapshot();
+
+    assertEquals(List.of("1", "2", "3"), snapshot.agents().get(0).toolKeys());
   }
 }

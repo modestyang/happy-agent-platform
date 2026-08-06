@@ -24,6 +24,13 @@ public final class AdminWorkbenchService {
     return port.updateDraft(agentKey, Objects.requireNonNull(update, "update"), expectedRevision);
   }
 
+  public ComponentView updateComponent(String type, String componentKey, ComponentUpdate update) {
+    if (type == null || type.isBlank() || componentKey == null || componentKey.isBlank()) {
+      throw new IllegalArgumentException("type 和 componentKey 必填");
+    }
+    return port.updateComponent(type.trim(), componentKey.trim(), Objects.requireNonNull(update, "update"));
+  }
+
   public ValidationView validate(String agentKey) {
     var draft =
         port.findDraft(agentKey).orElseThrow(() -> new AdminWorkbenchPort.NotFound("Agent 草稿不存在"));

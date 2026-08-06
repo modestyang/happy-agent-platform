@@ -26,3 +26,5 @@
 - `/admin` 工作台首轮完成：总览、Agent 草稿、组件中心、模型服务、运行记录与调试台全部消费真实 API；Provider 密钥输入保存后清空，空记录与不可用状态不使用 Mock 伪装。
 - 计划动作卡片已改为 Grid Stretch；浏览器读取首张卡片左右内容区高度均为 233.39px，视觉上下边沿对齐。
 - 前端完整回归增至 28/28，通过 TypeScript、ESLint 与 Vite production build；浏览器已验证真实数据库种子、发布门禁阻塞信息与组件状态原因。
+- 真实浏览器验收发现并修复 `If-Match` 覆盖 JSON Content-Type 的请求封装缺陷；回归测试完成 RED/GREEN，草稿 revision 1→2 且刷新后仍为 2。
+- 全量 `./mvnw verify -q` 退出码 0；管理台首轮验收记录已归档，未配置 Provider 与尚未接线的 Tool/Skill/Hook 均作为真实限制列明。

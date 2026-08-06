@@ -245,7 +245,7 @@ git commit -m "fix(frontend): align plan exercise columns"
 **Interfaces:**
 - Produces reproducible local credentials, URLs, test evidence and known runtime dependency states.
 
-- [ ] **Step 1: Run the full automated suite**
+- [x] **Step 1: Run the full automated suite**
 
 ```bash
 npm --prefix frontend test -- --run
@@ -255,7 +255,7 @@ npm --prefix frontend run build
 git diff --check
 ```
 
-- [ ] **Step 2: Run API and browser acceptance**
+- [x] **Step 2: Run API and browser acceptance**
 
 Log in, read `/api/admin/workbench`, save a harmless draft description revision, reload and verify persistence; inspect `/admin` at 1280 and 1440 widths and `/plan` at 390 width. Do not save or fabricate a Provider key.
 

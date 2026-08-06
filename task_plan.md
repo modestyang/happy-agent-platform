@@ -49,7 +49,7 @@
 3. [complete] TDD 实现 Agent 草稿、组件目录、Provider 配置、发布校验、运行记录后端 API。
 4. [complete] TDD 实现 `/admin` 路由、控制台主视图、组件目录、配置编辑和状态反馈。
 5. [complete] 修正计划动作卡片左右等高并进行 390px 视觉复验。
-6. [in_progress] 完成前后端回归、真实数据库/API 验收、桌面浏览器视觉验收与文档归档。
+6. [complete] 完成前后端回归、真实数据库/API 验收、桌面浏览器视觉验收与文档归档。
 
 ### Decisions
 

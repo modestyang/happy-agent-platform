@@ -6,4 +6,5 @@ target/
 frontend/node_modules/
 frontend/dist/
 coverage/
+deploy/secrets/
 .DS_Store

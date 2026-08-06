@@ -80,7 +80,7 @@ git commit -m "feat(agentbuilder): define workbench service contract"
 - Consumes the Task 1 port/records and `AesGcmCredentialCipher`.
 - Produces PostgreSQL-backed optimistic draft updates, masked Provider state, immutable version publication and trace reads.
 
-- [ ] **Step 1: Write failing Testcontainers tests**
+- [x] **Step 1: Write failing Testcontainers tests**
 
 ```java
 @Test void credentialIsEncryptedAndNeverReturned() {
@@ -95,16 +95,16 @@ git commit -m "feat(agentbuilder): define workbench service contract"
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `./mvnw -q -pl agentbuilder-infrastructure -am -Dtest=JdbcAdminWorkbenchStoreTest test`  
 Expected: FAIL because the JDBC implementation does not exist.
 
-- [ ] **Step 3: Implement JDBC, encryption and idempotent local seed**
+- [x] **Step 3: Implement JDBC, encryption and idempotent local seed**
 
 The seed inserts one fitness Agent plus component projection rows with `ON CONFLICT DO NOTHING`; Provider starts unconfigured. `saveCredential` creates a component-bound AES-GCM cipher and clears the received char buffer.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run: `./mvnw -q -pl agentbuilder-infrastructure -am test`  
 Expected: repository, encryption and migration tests pass.

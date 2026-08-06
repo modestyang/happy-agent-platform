@@ -18,3 +18,5 @@
 - 正式后端已用当前构建重启，沿用项目 PostgreSQL 持久卷；登录与 bootstrap 经 Vite 代理均返回 200，`completedWorkoutCount` 来自真实数据库，前端正式服务继续运行于 `http://127.0.0.1:5176/`。
 - 第二轮独立 CR 确认五 Tab UI/非 AI 切片可初步验收，同时识别 Agent Runtime 尚未接入 `AiConversation` 的正式产品阻塞项；验收记录已明确区分 UI 切片与完整端到端能力。
 - 已继续关闭本轮可修复项：训练完成后立即 reload 真实累计数；当前 AI 会话在客户端保留 24 小时并跨 Tab 恢复；语气和偏好跨 Tab/刷新保留；首页报告不再展示非 AI 确定性分数。
+- 已开始正式 Agent 管理工作台阶段：确认 `/admin` 尚未实现，现有 Agent Builder 类型/Repository 可复用，demo 仅用于视觉参考。
+- 已检查用户最新计划页截图，确认不对称来自图片维持 4:5 比例而右侧内容更高；后续改为左右随卡片等高。

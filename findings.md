@@ -8,3 +8,8 @@
 - demo 的动作图不是外部版权素材，而是代码生成的 SVG 姿态插画；可在正式项目里用独立组件承载，并优先显示后端 `imageUrls`。
 - 正式前端基准测试为 6/6 通过，后续可以通过新增失败测试执行 TDD。
 - 浏览器验收确认数据库的 `imageUrls` 目前是含文字的 SVG 占位图，不是真实动作素材；正式页面应识别该占位格式并使用代码姿态插画兜底，避免大段占位文字溢出卡片。
+- 正式前端当前没有 `/admin` 路由或管理台组件；`App.tsx` 仅承载移动端五个 Tab。
+- Agent Builder 已有 Framework/Provider/Model/Skill/Hook/Memory/Prompt/Output/Evaluation 的强类型、JDBC Repository、默认配置解析和两套框架适配器，但 `starter` 尚未暴露任何管理 API。
+- `agent` schema 当前有版本、评测/探测任务、幂等与强类型组件表，没有 Agent 草稿、运行/Trace 的可操作读模型。
+- demo 管理台的可复用视觉语言是：浅蓝灰画布、窄侧栏、白色实体卡片、深海军蓝文本、克制蓝/绿/琥珀状态色；不复制其 demo repository 和权限假数据。
+- 用户截图要求计划卡片左侧动作图容器与右侧标题、要点、错误区整体等高；应由 grid stretch 和图片容器 `height:100%` 实现，而不是固定图片比例。

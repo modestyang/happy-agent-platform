@@ -8,7 +8,8 @@ This file provides guidance to the AI agent when working with code in this repos
 - `starter` is the only executable module; its boot jar uses the `exec` classifier
   (`starter/target/starter-0.0.1-SNAPSHOT-exec.jar`).
 - Full local stack: `deploy/local-run.sh` (calls `deploy/local-up.sh` first). It generates
-  secrets into `deploy/.local/`, starts PostgreSQL via Docker, builds, and runs Vite on :5173.
+  secrets into `deploy/.local/`, starts PostgreSQL via Docker, builds, and runs Vite at
+  `http://127.0.0.1:5173` (the only local frontend entry point).
   Backend logs go to `deploy/.local/backend.log`, not stdout.
 - Backend alone requires `FITNESS_DB_PASSWORD` and `AGENT_DB_PASSWORD` (see
   `deploy/.local/app.env`) and profile `local`. Agent credential master key is read from

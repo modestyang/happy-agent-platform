@@ -1,11 +1,16 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AdminWorkbench } from './AdminWorkbench';
 
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
+}
+
 const snapshot = {
-  overview: { agentCount: 1, platformStatus: 'NEEDS_CONFIGURATION', availableComponents: 5, configuredProviders: 0, runCount: 0 },
+  overview: { agentCount: 1, platformStatus: 'NEEDS_CONFIGURATION', availableComponents: 2, configuredProviders: 0, runCount: 0 },
   agents: [{
     agentKey: 'fitness.coach', name: '瘦瘦健身教练', description: '陪伴用户完成训练与饮食管理', status: 'DRAFT',
     frameworkKey: 'framework.agentscope', providerKey: 'provider.bailian', modelKey: 'model.qwen-plus',
@@ -21,73 +26,149 @@ const snapshot = {
   runs: [],
 };
 
-function mockFetch() {
-  const revised = { ...snapshot.agents[0], name: '花爷健身教练', revision: 2 };
+const run = {
+  runId: '49818bff-fa18-4d0c-8ec7-b0178daa60d8', agentKey: 'fitness.coach', agentVersion: 4,
+  status: 'SUCCEEDED', startedAt: '2026-08-06T19:23:52Z', completedAt: '2026-08-06T19:23:54Z',
+  durationMs: 1574, toolCalls: 0, promptTokens: 12, completionTokens: 34, costUsd: 0.001,
+  modelKey: 'qwen-plus', errorCode: null,
+};
+
+function mockFetch(overrides: Record<string, unknown> = {}) {
+  const routes: Record<string, unknown> = {
+    '/api/admin/workbench': snapshot,
+    ...overrides,
+  };
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path === '/api/admin/workbench') return new Response(JSON.stringify(snapshot), { status: 200 });
-    if (path === '/api/admin/agents/fitness.coach/draft') return new Response(JSON.stringify(revised), { status: 200 });
-    if (path === '/api/admin/agents/fitness.coach/validate') return new Response(JSON.stringify({ valid: false, errors: ['Provider 阿里云百炼尚未配置凭据'], warnings: [] }), { status: 200 });
-    if (path === '/api/admin/providers/provider.bailian/credential') return new Response(JSON.stringify({ ...snapshot.providers[0], configured: true, maskedCredential: '••••••••' }), { status: 200 });
+    const url = String(input);
+    const path = url.startsWith('/api/admin/runs?') ? '/api/admin/runs' : url;
+    const payload = routes[path] ?? routes[url];
+    if (payload !== undefined) return new Response(JSON.stringify(payload), { status: 200 });
     return new Response('{}', { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
 
+function renderAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AdminWorkbench />
+    </MemoryRouter>,
+  );
+}
+
 describe('AdminWorkbench', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-  it('renders a database-backed operational overview without fake success data', async () => {
+  it('renders the operational overview from the database snapshot without fake success data', async () => {
     mockFetch();
-    render(<AdminWorkbench />);
+    renderAt('/admin');
 
     expect(await screen.findByRole('heading', { name: 'Agent 工作台' })).toBeInTheDocument();
     expect(screen.getByText('瘦瘦健身教练')).toBeInTheDocument();
     expect(screen.getByText('需要完成配置')).toBeInTheDocument();
     expect(screen.getByText('暂无运行记录')).toBeInTheDocument();
+    expect(screen.getByText('等待 Fitness Tool Bean 接线')).toBeInTheDocument();
   });
 
-  it('edits a draft with optimistic concurrency and shows validation blockers', async () => {
-    const fetchMock = mockFetch();
-    const user = userEvent.setup();
-    render(<AdminWorkbench />);
+  it('shows an error screen with retry when the workbench is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down'); }));
+    renderAt('/admin');
 
-    await user.click(await screen.findByRole('button', { name: 'Agent 配置' }));
-    const input = screen.getByLabelText('Agent 名称');
-    await user.clear(input);
-    await user.type(input, '花爷健身教练');
-    await user.click(screen.getByRole('button', { name: '保存草稿' }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/agents/fitness.coach/draft', expect.objectContaining({ method: 'PATCH', headers: expect.objectContaining({ 'Content-Type': 'application/json', 'If-Match': '1' }) })));
-    await user.click(screen.getByRole('button', { name: '检查发布条件' }));
-    expect(await screen.findByText('Provider 阿里云百炼尚未配置凭据')).toBeInTheDocument();
+    expect(await screen.findByText('工作台暂时无法打开')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument();
   });
 
-  it('filters the component catalog and exposes unavailable reasons', async () => {
-    mockFetch();
-    const user = userEvent.setup();
-    render(<AdminWorkbench />);
+  it('lists real runs with status and token metrics', async () => {
+    mockFetch({ '/api/admin/runs': { items: [run], totalElements: 1, totalPages: 1, page: 0, size: 20 } });
+    renderAt('/admin/runs');
 
-    await user.click(await screen.findByRole('button', { name: '组件中心' }));
-    await user.click(screen.getByRole('button', { name: '工具1' }));
-    const catalog = screen.getByRole('region', { name: '组件目录' });
-    expect(within(catalog).getByText('健身计划工具')).toBeInTheDocument();
-    expect(within(catalog).getByText('等待 Fitness Tool Bean 接线')).toBeInTheDocument();
-    expect(within(catalog).queryByText('AgentScope')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '运行记录' })).toBeInTheDocument();
+    const table = document.querySelector('.admin-table') as HTMLElement;
+    expect(await within(table).findByText('fitness.coach')).toBeInTheDocument();
+    expect(within(table).getByText('成功')).toBeInTheDocument();
+    expect(within(table).getByText('46')).toBeInTheDocument();
   });
 
   it('saves a provider credential without echoing the secret', async () => {
-    const fetchMock = mockFetch();
+    const fetchMock = mockFetch({
+      '/api/admin/providers/provider.bailian/credential': { ...snapshot.providers[0], configured: true, maskedCredential: '••••••••' },
+    });
     const user = userEvent.setup();
-    render(<AdminWorkbench />);
+    renderAt('/admin/providers');
 
-    await user.click(await screen.findByRole('button', { name: '模型服务' }));
-    await user.type(screen.getByLabelText('API Key'), 'sk-test-secret');
-    await user.click(screen.getByRole('button', { name: '保存密钥' }));
+    await user.type(await screen.findByLabelText('API Key'), 'sk-test-secret');
+    await user.click(screen.getByRole('button', { name: /保存密钥/ }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/providers/provider.bailian/credential', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ apiKey: 'sk-test-secret' }) })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/providers/provider.bailian/credential',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ apiKey: 'sk-test-secret' }) }),
+    ));
     expect(screen.queryByDisplayValue('sk-test-secret')).not.toBeInTheDocument();
-    expect(await screen.findByText('密钥已安全保存')).toBeInTheDocument();
+    expect(await screen.findByText('密钥已加密保存')).toBeInTheDocument();
+  });
+
+  it('locks the playground until runtime dependencies are ready', async () => {
+    mockFetch();
+    renderAt('/admin/playground');
+
+    expect(await screen.findByRole('heading', { name: /调试台/ })).toBeInTheDocument();
+    expect(await screen.findByText('还有依赖未完成')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('完成前置准备后解锁')).toBeDisabled();
+  });
+
+  it('clears the model detail while the skills catalog is loading', async () => {
+    let snapshotRequests = 0;
+    let resolveSkillsSnapshot: ((value: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
+      snapshotRequests += 1;
+      if (snapshotRequests < 3) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
+      return new Promise<Response>((resolve) => { resolveSkillsSnapshot = resolve; });
+    }));
+    const user = userEvent.setup();
+    renderAt('/admin/models');
+
+    await user.click(await screen.findByRole('button', { name: /通义千问 Plus/ }));
+    expect(screen.getByRole('heading', { name: '通义千问 Plus' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('link', { name: '技能' }));
+
+    expect(await screen.findByText('正在拉取组件目录…')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
+
+    resolveSkillsSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
+    expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
+  });
+
+  it('sends a playground message through the real AI endpoint and renders the reply', async () => {
+    const readySnapshot = {
+      ...snapshot,
+      agents: [{ ...snapshot.agents[0], publishedVersion: 4, status: 'ACTIVE' }],
+      providers: [{ ...snapshot.providers[0], configured: true, maskedCredential: '••••' }],
+      components: snapshot.components.map((item) => ({ ...item, status: 'AVAILABLE' })),
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/admin/workbench') return new Response(JSON.stringify(readySnapshot), { status: 200 });
+      if (url === '/api/app/ai/messages' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ message: '今天也要好好吃饭。' }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/admin/playground');
+
+    const input = await screen.findByPlaceholderText('请输入测试问题');
+    await user.type(input, '晚饭吃什么');
+    await user.click(screen.getByRole('button', { name: /发送/ }));
+
+    expect(await screen.findByText('今天也要好好吃饭。')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/app/ai/messages',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '晚饭吃什么' }) }),
+    );
   });
 });

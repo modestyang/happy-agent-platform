@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -140,6 +140,69 @@ describe('AdminWorkbench', () => {
     resolveSkillsSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
     expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
+  });
+
+  it('shows loading synchronously when the selected component belongs to the previous route', async () => {
+    let snapshotRequests = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
+      snapshotRequests += 1;
+      if (snapshotRequests < 3) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
+      return new Promise<Response>(() => {});
+    }));
+    const user = userEvent.setup();
+    renderAt('/admin/models');
+
+    await user.click(await screen.findByRole('button', { name: /通义千问 Plus/ }));
+    fireEvent.click(screen.getByRole('link', { name: '技能' }));
+
+    expect(screen.getByText('正在拉取组件目录…')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the skills route when the earlier model catalog request resolves late', async () => {
+    let snapshotRequests = 0;
+    let resolveModelSnapshot: ((value: Response) => void) | undefined;
+    let resolveSkillsSnapshot: ((value: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
+      snapshotRequests += 1;
+      if (snapshotRequests === 1) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
+      return new Promise<Response>((resolve) => {
+        if (snapshotRequests === 2) resolveModelSnapshot = resolve;
+        else resolveSkillsSnapshot = resolve;
+      });
+    }));
+    renderAt('/admin/models');
+
+    expect(await screen.findByText('正在拉取组件目录…')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: '技能' }));
+    resolveModelSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '技能' })).toBeInTheDocument());
+    expect(screen.queryByText('通义千问 Plus')).not.toBeInTheDocument();
+    resolveSkillsSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
+    expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
+  });
+
+  it('shows the catalog error and retries loading the current route', async () => {
+    let snapshotRequests = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
+      snapshotRequests += 1;
+      if (snapshotRequests === 1) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
+      if (snapshotRequests === 2) return Promise.reject(new TypeError('catalog offline'));
+      return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
+    }));
+    const user = userEvent.setup();
+    renderAt('/admin/skills');
+
+    expect(await screen.findByText('组件目录加载失败')).toBeInTheDocument();
+    expect(screen.getByText('后端服务连接失败，请确认后端服务已启动并可访问')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '重新加载' }));
+
+    expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
+    expect(snapshotRequests).toBe(3);
   });
 
   it('sends a playground message through the real AI endpoint and renders the reply', async () => {

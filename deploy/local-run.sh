@@ -4,16 +4,22 @@ set -euo pipefail
 deploy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_dir="$(cd "${deploy_dir}/.." && pwd)"
 
+is_project_path() {
+  local path="$1"
+  [[ "${path}" == "${project_dir}" || "${path}" == "${project_dir}/"* ]]
+}
+
 port_owned_by_project() {
   local port="$1"
-  local pid cwd
+  local pid cwd command
   while IFS= read -r pid; do
     [[ -n "${pid}" ]] || continue
     cwd="$(lsof -a -p "${pid}" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
-    if [[ "${cwd}" == "${project_dir}" ]]; then
+    command="$(ps -p "${pid}" -o command=)"
+    if is_project_path "${cwd}" || [[ "${command}" == *"${project_dir}/"* ]]; then
       return 0
     fi
-    echo "错误：端口 ${port} 已被其他进程占用（PID ${pid}）：$(ps -p "${pid}" -o command=)" >&2
+    echo "错误：端口 ${port} 已被其他进程占用（PID ${pid}）：${command}" >&2
     return 1
   done < <(lsof -nP -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
   return 2

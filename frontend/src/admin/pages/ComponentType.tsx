@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Save, Search, AlertTriangle, LoaderCircle, Check } from 'lucide-react';
 
 import { admin, type WorkbenchComponent, type WorkbenchComponentUpdate } from '../api';
@@ -28,8 +28,10 @@ export function ComponentType({ type, label }: { type: string; label: string }) 
   const [query, setQuery] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(true);
+  const requestId = useRef(0);
 
-  useEffect(() => {
+  async function loadComponents() {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setComponents([]);
     setSelected(undefined);
@@ -37,17 +39,21 @@ export function ComponentType({ type, label }: { type: string; label: string }) 
     setQuery('');
     setError('');
     setSuccess('');
-    let mounted = true;
-    admin.snapshot().then((snapshot) => {
-      if (!mounted) return;
+    try {
+      const snapshot = await admin.snapshot();
+      if (currentRequest !== requestId.current) return;
       setComponents(snapshot.components.filter((item) => item.type === type));
       setLoading(false);
-    }).catch((caught) => {
-      if (!mounted) return;
+    } catch (caught) {
+      if (currentRequest !== requestId.current) return;
       setError(messageOf(caught));
       setLoading(false);
-    });
-    return () => { mounted = false; };
+    }
+  }
+
+  useEffect(() => {
+    void loadComponents();
+    return () => { requestId.current += 1; };
   }, [type]);
 
   const filtered = useMemo(() => components.filter((item) => {
@@ -75,7 +81,13 @@ export function ComponentType({ type, label }: { type: string; label: string }) 
     finally { setPending(''); }
   }
 
-  if (loading) return <PageHeading eyebrow="加载中" title={label} description="正在拉取组件目录…" />;
+  const staleRouteState = selected?.type !== undefined && selected.type !== type;
+  if (loading || staleRouteState) return <PageHeading eyebrow="加载中" title={label} description="正在拉取组件目录…" />;
+
+  if (error) return <>
+    <PageHeading eyebrow="可组合能力" title={label} description={`登记可被 Agent 引用的 ${label} 组件，每个组件拥有独立版本与状态。`} />
+    <div className="admin-empty"><AlertTriangle /><strong>组件目录加载失败</strong><p>{error}</p><button className="admin-primary" onClick={() => void loadComponents()}>重新加载</button></div>
+  </>;
 
   return <>
     <PageHeading eyebrow="可组合能力" title={label} description={`登记可被 Agent 引用的 ${label} 组件，每个组件拥有独立版本与状态。`} />

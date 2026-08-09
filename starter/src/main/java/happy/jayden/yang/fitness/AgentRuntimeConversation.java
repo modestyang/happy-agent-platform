@@ -48,6 +48,7 @@ import org.springframework.web.client.ResourceAccessException;
 final class AgentRuntimeConversation implements AiConversation {
 
   private static final String TARGET_AGENT = "fitness.coach";
+  private static final String MANDATORY_SAFETY_HOOK = "fitness.safety";
   private static final String PUBLISHED_AGENT_SQL =
       "SELECT version,configuration::text FROM agent_versions WHERE agent_key=?"
           + " AND status='PUBLISHED' ORDER BY version DESC LIMIT 1";
@@ -134,17 +135,25 @@ final class AgentRuntimeConversation implements AiConversation {
               return result;
             });
 
-    List<AgentHook> hooks = resolvedHooks(config);
-    for (AgentHook hook : hooks) {
-      HookDecision decision = hook.beforeRun(execution);
-      if (decision.action() == HookDecision.Action.BLOCK) {
-        return recordBlocked(
-            runId, startedAt, sequence, toolCalls[0], config, execution, hooks, decision);
-      }
-    }
-
     char[] apiKey = null;
+    List<AgentHook> hooks = List.of();
     try {
+      AgentHook safetyHook = mandatorySafetyHook();
+      hooks = List.of(safetyHook);
+      HookDecision safetyDecision = safetyHook.beforeRun(execution);
+      if (safetyDecision.action() == HookDecision.Action.BLOCK) {
+        return recordBlocked(
+            runId, startedAt, sequence, toolCalls[0], config, execution, hooks, safetyDecision);
+      }
+      hooks = resolvedHooks(config, safetyHook);
+      for (AgentHook hook : hooks) {
+        if (hook == safetyHook) continue;
+        HookDecision decision = hook.beforeRun(execution);
+        if (decision.action() == HookDecision.Action.BLOCK) {
+          return recordBlocked(
+              runId, startedAt, sequence, toolCalls[0], config, execution, hooks, decision);
+        }
+      }
       List<SkillResult> skillFacts = executeSkills(config, execution, runId, sequence);
       apiKey =
           credentials.decryptPublishedSnapshot(
@@ -287,9 +296,23 @@ final class AgentRuntimeConversation implements AiConversation {
     return new AiMessageResponse(decision.message());
   }
 
-  private List<AgentHook> resolvedHooks(RuntimeConfig config) {
+  private AgentHook mandatorySafetyHook() {
+    return capabilities
+        .hook(MANDATORY_SAFETY_HOOK)
+        .orElseThrow(
+            () ->
+                new DependencyUnavailableException(
+                    "必需安全 Hook fitness.safety 没有已注册的运行时 handler"));
+  }
+
+  private List<AgentHook> resolvedHooks(RuntimeConfig config, AgentHook safetyHook) {
+    if (!config.hookKeys().contains(MANDATORY_SAFETY_HOOK)) {
+      throw new DependencyUnavailableException("已发布 Agent 缺少必需安全 Hook fitness.safety");
+    }
     var hooks = new ArrayList<AgentHook>();
+    hooks.add(safetyHook);
     for (String hookKey : config.hookKeys()) {
+      if (MANDATORY_SAFETY_HOOK.equals(hookKey)) continue;
       hooks.add(
           capabilities
               .hook(hookKey)

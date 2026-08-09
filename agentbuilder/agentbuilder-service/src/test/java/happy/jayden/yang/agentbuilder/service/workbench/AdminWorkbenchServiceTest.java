@@ -94,6 +94,53 @@ class AdminWorkbenchServiceTest {
   }
 
   @Test
+  void validationRejectsPublishingWhenMandatorySafetyHookIsRemovedFromTheDraft() {
+    var withoutSafety =
+        new AgentDraftView(
+            "fitness.coach",
+            "瘦瘦健身教练",
+            "根据真实健身数据提供陪伴与建议",
+            "DRAFT",
+            "agentscope",
+            "bailian",
+            "qwen-plus",
+            "fitness.coach.prompt",
+            List.of("fitness.plan.generate"),
+            List.of("fitness.plan.skill"),
+            List.of(),
+            "fitness.daily-memory",
+            0.5,
+            8,
+            0,
+            1,
+            Instant.parse("2026-08-06T00:00:00Z"));
+    var port = new MemoryPort(withoutSafety, true, "AVAILABLE");
+    var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
+
+    var validation = service.validate("fitness.coach");
+
+    assertFalse(validation.valid());
+    assertTrue(validation.errors().contains("必需安全 Hook fitness.safety 尚未绑定"));
+    assertThrows(
+        AdminWorkbenchPort.ValidationFailure.class, () -> service.publish("fitness.coach"));
+    assertTrue(port.publishedDrafts.isEmpty());
+  }
+
+  @Test
+  void validationRejectsModelWhoseConfiguredProviderDoesNotMatchTheDraft() {
+    var port = new MemoryPort(draft(), true, "AVAILABLE", "other-provider");
+    var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
+
+    var validation = service.validate("fitness.coach");
+
+    assertFalse(validation.valid());
+    assertTrue(validation.errors().contains("模型 qwen-plus 未绑定当前 Provider bailian"));
+    assertThrows(
+        AdminWorkbenchPort.ValidationFailure.class, () -> service.publish("fitness.coach"));
+    assertTrue(port.publishedDrafts.isEmpty());
+  }
+
+  @Test
   void toolsAreReadOnlyFromTheWorkbenchEvenWhenTheirCatalogRowExists() {
     var service =
         new AdminWorkbenchService(
@@ -140,12 +187,22 @@ class AdminWorkbenchServiceTest {
     private AgentDraftView draft;
     private final boolean configured;
     private final String componentStatus;
+    private final String modelProviderKey;
     private final List<AgentDraftView> publishedDrafts = new ArrayList<>();
 
     private MemoryPort(AgentDraftView draft, boolean configured, String componentStatus) {
+      this(draft, configured, componentStatus, "bailian");
+    }
+
+    private MemoryPort(
+        AgentDraftView draft,
+        boolean configured,
+        String componentStatus,
+        String modelProviderKey) {
       this.draft = draft;
       this.configured = configured;
       this.componentStatus = componentStatus;
+      this.modelProviderKey = modelProviderKey;
     }
 
     @Override
@@ -155,7 +212,7 @@ class AdminWorkbenchServiceTest {
           List.of(draft),
           List.of(
               component("FRAMEWORK", "agentscope", componentStatus),
-              component("MODEL", "qwen-plus", componentStatus),
+              component("MODEL", "qwen-plus", componentStatus, Map.of("providerKey", modelProviderKey)),
               component("PROMPT", "fitness.coach.prompt", componentStatus),
               component("MEMORY", "fitness.daily-memory", componentStatus),
               component("TOOL", "fitness.plan.generate", componentStatus),
@@ -173,8 +230,13 @@ class AdminWorkbenchServiceTest {
     }
 
     private static ComponentView component(String type, String key, String status) {
+      return component(type, key, status, Map.of("source", "test"));
+    }
+
+    private static ComponentView component(
+        String type, String key, String status, Map<String, Object> config) {
       return new ComponentView(
-          type, key, key, "测试组件 " + key, 1, status, List.of("fitness"), Map.of("source", "test"));
+          type, key, key, "测试组件 " + key, 1, status, List.of("fitness"), config);
     }
 
     @Override

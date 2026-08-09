@@ -1161,6 +1161,7 @@ class FitnessExperienceIntegrationTest {
       JdbcAdminWorkbenchStore workbench =
           new JdbcAdminWorkbenchStore(agentDataSource, objectMapper, masterKey);
       new AdminWorkbenchLocalSeed(workbench).seed();
+      resetChatAgentDraft(agentJdbc);
       workbench.reconcileRuntimeCapabilities(
           new happy.jayden.yang.agentbuilder.FitnessSkillRegistry(
               new happy.jayden.yang.agentbuilder.FitnessSafetyHook()));
@@ -1174,6 +1175,9 @@ class FitnessExperienceIntegrationTest {
           "{\"providerKey\":\"bailian\",\"model\":\"published-chat-model\"}");
       workbench.saveCredential("bailian", "published-chat-key".toCharArray());
       workbench.publish(workbench.findDraft("fitness.coach").orElseThrow());
+      agentJdbc.update(
+          "UPDATE agent_versions SET configuration=jsonb_set(configuration, '{hookKeys}', '[]'::jsonb)"
+              + " WHERE agent_key='fitness.coach'");
 
       AgentRuntimeConversation conversation =
           new AgentRuntimeConversation(
@@ -1802,6 +1806,13 @@ class FitnessExperienceIntegrationTest {
         UUID.randomUUID(),
         version,
         configuration);
+  }
+
+  private static void resetChatAgentDraft(JdbcTemplate jdbc) {
+    jdbc.update(
+        "UPDATE agent_drafts SET name='瘦瘦健身教练',description='结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。',status='DRAFT',framework_key='agentscope',provider_key='bailian',model_key='qwen-plus',prompt_key='fitness.coach.prompt',tool_keys='[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,skill_keys='[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,hook_keys='[\"fitness.safety\"]'::jsonb,memory_key='fitness.daily-memory',temperature=0.5,max_tool_calls=8,updated_at=CURRENT_TIMESTAMP WHERE agent_key='fitness.coach'");
+    jdbc.update(
+        "UPDATE agent_component_projection SET status='AVAILABLE' WHERE (component_type,component_key) IN (('FRAMEWORK','agentscope'),('PROMPT','fitness.coach.prompt'),('MEMORY','fitness.daily-memory'),('TOOL','fitness.profile.query'),('TOOL','fitness.workout.query'),('TOOL','fitness.meal.query'),('TOOL','fitness.meal.feedback_context'),('TOOL','fitness.plan.generate'),('SKILL','fitness.meal.skill'),('SKILL','fitness.plan.skill'),('HOOK','fitness.safety'))");
   }
 
   private static String publishedCurrentGoalRuntimeSnapshot(String providerKey, String modelKey) {

@@ -84,6 +84,24 @@ describe('AdminWorkbench', () => {
     expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
   });
 
+  it('keeps the mandatory safety Hook selected in the Agent editor', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        agents: [{ ...snapshot.agents[0], hookKeys: ['fitness.safety'] }],
+        components: [
+          ...snapshot.components,
+          { type: 'HOOK', componentKey: 'fitness.safety', displayName: '健身安全护栏', description: '急症先拦截', version: 1, status: 'AVAILABLE', tags: ['安全'], config: { mandatory: true } },
+        ],
+      },
+    });
+    renderAt('/admin/agents/fitness.coach');
+
+    const safetyHook = await screen.findByRole('button', { name: /健身安全护栏/ });
+    expect(safetyHook).toHaveAttribute('aria-pressed', 'true');
+    expect(safetyHook).toBeDisabled();
+  });
+
   it('saves a provider credential without echoing the secret', async () => {
     const fetchMock = mockFetch({
       '/api/admin/providers/provider.bailian/credential': { ...snapshot.providers[0], configured: true, maskedCredential: '••••••••' },
@@ -108,6 +126,23 @@ describe('AdminWorkbench', () => {
 
     expect(await screen.findByRole('heading', { name: /调试台/ })).toBeInTheDocument();
     expect(await screen.findByText('还有依赖未完成')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('完成前置准备后解锁')).toBeDisabled();
+  });
+
+  it('locks the playground when the published model is bound to another Provider', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        agents: [{ ...snapshot.agents[0], publishedVersion: 4, status: 'ACTIVE' }],
+        providers: [{ ...snapshot.providers[0], configured: true, maskedCredential: '••••••••' }],
+        components: snapshot.components.map((item) => item.type === 'MODEL'
+          ? { ...item, status: 'AVAILABLE', config: { providerKey: 'provider.other' } }
+          : { ...item, status: 'AVAILABLE' }),
+      },
+    });
+    renderAt('/admin/playground');
+
+    expect(await screen.findByText(/模型未绑定当前 Provider/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText('完成前置准备后解锁')).toBeDisabled();
   });
 
@@ -204,7 +239,9 @@ describe('AdminWorkbench', () => {
       ...snapshot,
       agents: [{ ...snapshot.agents[0], publishedVersion: 4, status: 'ACTIVE' }],
       providers: [{ ...snapshot.providers[0], configured: true, maskedCredential: '••••' }],
-      components: snapshot.components.map((item) => ({ ...item, status: 'AVAILABLE' })),
+      components: snapshot.components.map((item) => item.type === 'MODEL'
+        ? { ...item, status: 'AVAILABLE', config: { providerKey: 'provider.bailian' } }
+        : { ...item, status: 'AVAILABLE' }),
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

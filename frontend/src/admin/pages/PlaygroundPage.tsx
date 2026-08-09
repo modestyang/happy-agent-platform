@@ -25,15 +25,20 @@ export function PlaygroundPage() {
     admin.snapshot().then((snapshot) => {
       const agent = snapshot.agents.find((item) => item.agentKey === AGENT_KEY);
       const providerReady = Boolean(agent && snapshot.providers.some((item) => item.providerKey === agent.providerKey && item.configured));
+      const model = agent && snapshot.components.find((item) => item.type === 'MODEL' && item.componentKey === agent.modelKey);
+      const modelProvider = model?.config.providerKey;
+      const modelAligned = Boolean(agent && typeof modelProvider === 'string' && modelProvider === agent.providerKey);
       const required = agent ? [
         ...agent.toolKeys.map((key) => ['TOOL', key]),
         ...agent.skillKeys.map((key) => ['SKILL', key]),
         ...agent.hookKeys.map((key) => ['HOOK', key]),
       ] : [];
       const capabilitiesReady = required.every(([type, key]) => snapshot.components.some((item) => item.type === type && item.componentKey === key && item.status === 'AVAILABLE'));
-      setReady(Boolean(providerReady && capabilitiesReady && agent && agent.publishedVersion > 0));
+      setReady(Boolean(providerReady && modelAligned && capabilitiesReady && agent && agent.publishedVersion > 0));
       setPublishedVersion(agent?.publishedVersion ?? 0);
       if (!providerReady) setReadyReason(' Provider 凭据未配置');
+      else if (!model) setReadyReason(' 未找到已绑定模型');
+      else if (!modelAligned) setReadyReason(' 模型未绑定当前 Provider');
       else if (!capabilitiesReady) setReadyReason(' 已绑定 Tool、Skill 或 Hook 尚不可用');
       else if (!agent || agent.publishedVersion === 0) setReadyReason(' 尚未发布');
     }).catch((caught) => setReadyReason(String(caught)));

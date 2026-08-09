@@ -10,6 +10,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 public final class AdminWorkbenchService {
+  private static final String MANDATORY_SAFETY_HOOK = "fitness.safety";
+
   private final AdminWorkbenchPort port;
   private final RuntimeCapabilityRegistry runtimeCapabilities;
 
@@ -55,11 +57,18 @@ public final class AdminWorkbenchService {
 
     requireComponent(snapshot, errors, "FRAMEWORK", draft.frameworkKey());
     requireComponent(snapshot, errors, "MODEL", draft.modelKey());
+    requireModelProviderAlignment(snapshot, errors, draft.modelKey(), draft.providerKey());
     requireComponent(snapshot, errors, "PROMPT", draft.promptKey());
     requireComponent(snapshot, errors, "MEMORY", draft.memoryKey());
     draft.toolKeys().forEach(key -> requireComponent(snapshot, errors, "TOOL", key));
     draft.skillKeys().forEach(key -> requireComponent(snapshot, errors, "SKILL", key));
-    draft.hookKeys().forEach(key -> requireComponent(snapshot, errors, "HOOK", key));
+    if (!draft.hookKeys().contains(MANDATORY_SAFETY_HOOK)) {
+      errors.add("必需安全 Hook fitness.safety 尚未绑定");
+    }
+    requireComponent(snapshot, errors, "HOOK", MANDATORY_SAFETY_HOOK);
+    draft.hookKeys().stream()
+        .filter(key -> !MANDATORY_SAFETY_HOOK.equals(key))
+        .forEach(key -> requireComponent(snapshot, errors, "HOOK", key));
     if (draft.toolKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Tool");
     if (draft.skillKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Skill");
     return new ValidationView(errors.isEmpty(), errors, warnings);
@@ -102,6 +111,23 @@ public final class AdminWorkbenchService {
     else if (requiresRuntimeHandler(type) && !runtimeCapabilities.hasHandler(type, key)) {
       errors.add("组件 " + key + " 没有已注册的运行时 handler");
     }
+  }
+
+  private static void requireModelProviderAlignment(
+      WorkbenchSnapshot snapshot, List<String> errors, String modelKey, String providerKey) {
+    if (modelKey == null || modelKey.isBlank() || providerKey == null || providerKey.isBlank()) return;
+    snapshot.components().stream()
+        .filter(item -> item.type().equals("MODEL") && item.componentKey().equals(modelKey))
+        .findFirst()
+        .ifPresent(
+            model -> {
+              Object configuredProvider = model.config().get("providerKey");
+              if (!(configuredProvider instanceof String value) || value.isBlank()) {
+                errors.add("模型 " + modelKey + " 未声明 providerKey");
+              } else if (!providerKey.equals(value)) {
+                errors.add("模型 " + modelKey + " 未绑定当前 Provider " + providerKey);
+              }
+            });
   }
 
   private static boolean requiresRuntimeHandler(String type) {

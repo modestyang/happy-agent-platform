@@ -16,6 +16,12 @@ function componentOptions(components: WorkbenchComponent[], type: string) {
   return components.filter((item) => item.type === type);
 }
 
+const MANDATORY_SAFETY_HOOK = 'fitness.safety';
+
+function withMandatorySafetyHook(hookKeys: string[]) {
+  return hookKeys.includes(MANDATORY_SAFETY_HOOK) ? hookKeys : [...hookKeys, MANDATORY_SAFETY_HOOK];
+}
+
 export function AgentEditor() {
   const { agentKey } = useParams<{ agentKey: string }>();
   const navigate = useNavigate();
@@ -47,7 +53,7 @@ export function AgentEditor() {
       setDraft({
         name: found.name, description: found.description, frameworkKey: found.frameworkKey,
         providerKey: found.providerKey, modelKey: found.modelKey, promptKey: found.promptKey,
-        toolKeys: found.toolKeys, skillKeys: found.skillKeys, hookKeys: found.hookKeys,
+        toolKeys: found.toolKeys, skillKeys: found.skillKeys, hookKeys: withMandatorySafetyHook(found.hookKeys),
         memoryKey: found.memoryKey, temperature: found.temperature, maxToolCalls: found.maxToolCalls,
       });
       setRevision(found.revision);
@@ -64,6 +70,7 @@ export function AgentEditor() {
     setDraft((current) => current ? { ...current, [key]: value } : current);
   }
   function toggle(key: 'toolKeys' | 'skillKeys' | 'hookKeys', value: string) {
+    if (key === 'hookKeys' && value === MANDATORY_SAFETY_HOOK) return;
     setDraft((current) => current ? { ...current, [key]: current[key].includes(value) ? current[key].filter((item) => item !== value) : [...current[key], value] } : current);
   }
 
@@ -140,7 +147,10 @@ export function AgentEditor() {
         const label = type === 'TOOL' ? '工具' : type === 'SKILL' ? '技能' : 'Hook';
         return <div className="admin-capability-group" key={type}>
           <h3><Icon /> {label}<small>{draft[key].length} 已选择</small></h3>
-          {items.length ? <div>{items.map((item) => <button type="button" className={draft[key].includes(item.componentKey) ? 'is-selected' : ''} aria-pressed={draft[key].includes(item.componentKey)} key={item.componentKey} onClick={() => toggle(key, item.componentKey)}><span>{draft[key].includes(item.componentKey) ? <Check /> : <Icon />}</span><b>{item.displayName}</b><small>{item.status}</small></button>)}</div> : <p className="admin-inline-empty">当前没有登记的{label}</p>}
+          {items.length ? <div>{items.map((item) => {
+            const mandatory = type === 'HOOK' && item.componentKey === MANDATORY_SAFETY_HOOK;
+            return <button type="button" className={draft[key].includes(item.componentKey) ? 'is-selected' : ''} aria-pressed={draft[key].includes(item.componentKey)} key={item.componentKey} disabled={mandatory} onClick={() => toggle(key, item.componentKey)}><span>{draft[key].includes(item.componentKey) ? <Check /> : <Icon />}</span><b>{item.displayName}</b><small>{mandatory ? 'MANDATORY' : item.status}</small></button>;
+          })}</div> : <p className="admin-inline-empty">当前没有登记的{label}</p>}
         </div>;
       })}
     </section>

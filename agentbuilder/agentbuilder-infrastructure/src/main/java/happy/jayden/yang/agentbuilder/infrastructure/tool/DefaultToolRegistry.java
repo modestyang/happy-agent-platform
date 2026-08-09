@@ -8,6 +8,7 @@ import happy.jayden.yang.agentbuilder.core.tool.AgentToolHandler;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedToolSet;
 import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
+import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import happy.jayden.yang.agentbuilder.core.tool.ToolLifecycleStatus;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistration;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
@@ -23,10 +24,12 @@ import java.util.Objects;
 public final class DefaultToolRegistry implements ToolRegistry {
 
   private final Map<String, ToolRegistration> registrations;
+  private final Map<String, ToolRegistration> newestByToolKey;
 
   public DefaultToolRegistry(Collection<ToolRegistration> registrations) {
     Objects.requireNonNull(registrations, "registrations");
     var index = new HashMap<String, ToolRegistration>();
+    var newest = new HashMap<String, ToolRegistration>();
     var runtimeNames = new HashMap<String, ToolDescriptor>();
     for (var registration : registrations) {
       Objects.requireNonNull(registration, "registrations item");
@@ -50,8 +53,16 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 + " and "
                 + identity(registration.descriptor()));
       }
+      newest.merge(
+          registration.descriptor().toolKey(),
+          registration,
+          (existing, candidate) ->
+              existing.descriptor().contractVersion() >= candidate.descriptor().contractVersion()
+                  ? existing
+                  : candidate);
     }
     this.registrations = Map.copyOf(index);
+    this.newestByToolKey = Map.copyOf(newest);
   }
 
   @Override
@@ -74,6 +85,18 @@ public final class DefaultToolRegistry implements ToolRegistry {
       }
     }
     return new ResolvedToolSet(resolved);
+  }
+
+  @Override
+  public Object invoke(String toolKey, Map<String, Object> input, ToolExecutionContext context)
+      throws Exception {
+    Objects.requireNonNull(toolKey, "toolKey");
+    Objects.requireNonNull(input, "input");
+    var registration = newestByToolKey.get(toolKey);
+    if (registration == null) {
+      throw new IllegalArgumentException("unknown Tool " + toolKey);
+    }
+    return secured(registration).invoke(Map.copyOf(input), context);
   }
 
   private static ResolvedTool resolve(ToolRegistration registration, ToolBinding binding) {

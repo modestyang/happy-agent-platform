@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,7 +20,7 @@ class AdminWorkbenchServiceTest {
   @Test
   void validationBlocksAnUnconfiguredProviderAndUnavailableBinding() {
     var port = new MemoryPort(draft(), false, "DRAFT");
-    var service = new AdminWorkbenchService(port);
+    var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
 
     var validation = service.validate("fitness.coach");
 
@@ -31,7 +32,7 @@ class AdminWorkbenchServiceTest {
   @Test
   void publishDelegatesOnlyAfterValidationPasses() {
     var port = new MemoryPort(draft(), true, "AVAILABLE");
-    var service = new AdminWorkbenchService(port);
+    var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
 
     var publication = service.publish("fitness.coach");
 
@@ -42,7 +43,7 @@ class AdminWorkbenchServiceTest {
   @Test
   void publishNeverWritesWhenValidationFails() {
     var port = new MemoryPort(draft(), false, "AVAILABLE");
-    var service = new AdminWorkbenchService(port);
+    var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
 
     var failure =
         assertThrows(
@@ -55,7 +56,7 @@ class AdminWorkbenchServiceTest {
   @Test
   void draftUpdatesPreserveOptimisticRevisionContract() {
     var port = new MemoryPort(draft(), true, "AVAILABLE");
-    var service = new AdminWorkbenchService(port);
+    var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
     var update =
         new DraftUpdate(
             "更温柔的瘦瘦",
@@ -75,6 +76,43 @@ class AdminWorkbenchServiceTest {
 
     assertEquals("更温柔的瘦瘦", updated.name());
     assertEquals(2, updated.revision());
+  }
+
+  @Test
+  void validationBlocksAvailableSkillsAndHooksWithoutMatchingRuntimeHandlers() {
+    var port = new MemoryPort(draft(), true, "AVAILABLE");
+    var service = new AdminWorkbenchService(port, (type, key) -> false);
+
+    var validation = service.validate("fitness.coach");
+
+    assertFalse(validation.valid());
+    assertTrue(validation.errors().contains("组件 fitness.plan.skill 没有已注册的运行时 handler"));
+    assertTrue(validation.errors().contains("组件 fitness.safety 没有已注册的运行时 handler"));
+    assertThrows(
+        AdminWorkbenchPort.ValidationFailure.class, () -> service.publish("fitness.coach"));
+    assertTrue(port.publishedDrafts.isEmpty());
+  }
+
+  @Test
+  void toolsAreReadOnlyFromTheWorkbenchEvenWhenTheirCatalogRowExists() {
+    var service =
+        new AdminWorkbenchService(
+            new MemoryPort(draft(), true, "AVAILABLE"), allRuntimeCapabilities());
+
+    var failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                service.updateComponent(
+                    "TOOL",
+                    "fitness.plan.generate",
+                    new ComponentUpdate("x", "x", "AVAILABLE", List.of(), Map.of())));
+
+    assertEquals("Tool 仅可由应用代码登记，工作台只读", failure.getMessage());
+  }
+
+  private static RuntimeCapabilityRegistry allRuntimeCapabilities() {
+    return (type, key) -> true;
   }
 
   private static AgentDraftView draft() {
@@ -175,8 +213,7 @@ class AdminWorkbenchServiceTest {
     }
 
     @Override
-    public ComponentView updateComponent(
-        String type, String componentKey, ComponentUpdate update) {
+    public ComponentView updateComponent(String type, String componentKey, ComponentUpdate update) {
       return new ComponentView(
           type,
           componentKey,

@@ -8,19 +8,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.agentbuilder.core.component.ComponentKey;
 import happy.jayden.yang.agentbuilder.core.component.ComponentRef;
 import happy.jayden.yang.agentbuilder.core.component.ComponentVersion;
+import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
 import happy.jayden.yang.agentbuilder.infrastructure.security.AesGcmCredentialCipher;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort;
-import java.sql.Array;
-import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.sql.Array;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Base64;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -240,9 +241,51 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         .findFirst();
   }
 
+  /**
+   * Projects the current process's Skill/Hook handlers into the workbench catalog.
+   *
+   * <p>The database remains operator-editable, but an {@code AVAILABLE} flag cannot outlive a
+   * missing in-process handler. We intentionally leave every other component type untouched so
+   * startup does not overwrite administrator-maintained catalog metadata.
+   */
+  public void reconcileRuntimeCapabilities(RuntimeCapabilityRegistry runtimeCapabilities) {
+    java.util.Objects.requireNonNull(runtimeCapabilities, "runtimeCapabilities");
+    var capabilities =
+        jdbc.query(
+            "SELECT component_type,component_key,version,config::text FROM agent_component_projection"
+                + " WHERE component_type IN ('SKILL','HOOK')",
+            (rs, row) ->
+                new RuntimeCapabilityRow(
+                    rs.getString("component_type"),
+                    rs.getString("component_key"),
+                    rs.getInt("version"),
+                    safeReadMap(
+                        rs.getString("config"),
+                        rs.getString("component_type"),
+                        rs.getString("component_key"))));
+    for (var capability : capabilities) {
+      boolean ready = runtimeCapabilities.hasHandler(capability.type(), capability.key());
+      var config = new LinkedHashMap<String, Object>(capability.config());
+      config.put("runtimeReady", ready);
+      if (ready) {
+        config.remove("runtimeReason");
+      } else {
+        config.put("runtimeReason", "运行时 handler 未注册");
+      }
+      jdbc.update(
+          "UPDATE agent_component_projection SET status=?,config=?::jsonb,updated_at=CURRENT_TIMESTAMP"
+              + " WHERE component_type=? AND component_key=? AND version=?",
+          ready ? "AVAILABLE" : "UNAVAILABLE",
+          write(config),
+          capability.type(),
+          capability.key(),
+          capability.version());
+    }
+  }
+
   void seedDefaults() {
     jdbc.update(
-        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','瘦瘦健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','bailian','qwen-plus','fitness.coach.prompt','[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'fitness.daily-memory',0.5,8) ON CONFLICT(agent_key) DO NOTHING");
+        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','瘦瘦健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','bailian','qwen-plus','fitness.coach.prompt','[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,8) ON CONFLICT(agent_key) DO NOTHING");
     seedComponent(
         "FRAMEWORK",
         "agentscope",
@@ -315,6 +358,13 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
     seedComponent(
         "TOOL",
+        "fitness.meal.feedback_context",
+        "读取饮食偏好反馈",
+        "读取近 30 天饮食偏好反馈，仅作为生成建议的参考数据",
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
+    seedComponent(
+        "TOOL",
         "fitness.plan.generate",
         "生成训练计划建议",
         "生成当前目标的训练计划建议，不直接写入数据库",
@@ -335,14 +385,22 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "每日饮食建议",
         "结合训练与饮食记录推荐三餐",
         "DRAFT",
-        Map.of("requiredTools", List.of("fitness.profile.query", "fitness.meal.query")));
+        Map.of(
+            "requiredTools",
+            List.of(
+                "fitness.profile.query",
+                "fitness.workout.query",
+                "fitness.meal.query",
+                "fitness.meal.feedback_context"),
+            "runtimeReady",
+            false));
     seedComponent(
         "HOOK",
         "fitness.safety",
         "健身安全护栏",
         "运行前检查运动禁忌和过度训练风险",
         "DRAFT",
-        Map.of("phase", "BEFORE_MODEL", "mandatory", true));
+        Map.of("phase", "BEFORE_MODEL", "mandatory", true, "runtimeReady", false));
   }
 
   private void seedComponent(
@@ -353,7 +411,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
       String status,
       Map<String, Object> config) {
     jdbc.update(
-        "INSERT INTO agent_component_projection(component_type,component_key,version,display_name,description,status,tags,config,source_checksum) VALUES (?,?,1,?,?,?,ARRAY['fitness'],?::jsonb,?) ON CONFLICT(component_type,component_key,version) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,status=EXCLUDED.status,tags=EXCLUDED.tags,config=EXCLUDED.config",
+        "INSERT INTO agent_component_projection(component_type,component_key,version,display_name,description,status,tags,config,source_checksum) VALUES (?,?,1,?,?,?,ARRAY['fitness'],?::jsonb,?) ON CONFLICT(component_type,component_key,version) DO NOTHING",
         type,
         key,
         displayName,
@@ -369,6 +427,9 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
       return Map.of("key", key, "version", version, "status", status, "config", config);
     }
   }
+
+  private record RuntimeCapabilityRow(
+      String type, String key, int version, Map<String, Object> config) {}
 
   private record PublishedCredential(int keyVersion, byte[] ciphertext, byte[] iv, byte[] aad) {
     Map<String, Object> asSnapshot() {
@@ -390,7 +451,8 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     return jdbc.query(
         "SELECT c.component_key,c.display_name,c.config::text,CASE WHEN p.provider_key IS NULL THEN FALSE ELSE TRUE END AS configured FROM agent_component_projection c LEFT JOIN agent_provider_credentials p ON p.provider_key=c.component_key WHERE c.component_type='PROVIDER' ORDER BY c.component_key",
         (rs, row) -> {
-          var config = safeReadMap(rs.getString("config"), "provider", rs.getString("component_key"));
+          var config =
+              safeReadMap(rs.getString("config"), "provider", rs.getString("component_key"));
           var configured = rs.getBoolean("configured");
           return new ProviderView(
               rs.getString("component_key"),

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,13 +24,6 @@ const snapshot = {
   ],
   providers: [{ providerKey: 'provider.bailian', displayName: '阿里云百炼', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', configured: false, maskedCredential: '', status: 'AVAILABLE' }],
   runs: [],
-};
-
-const run = {
-  runId: '49818bff-fa18-4d0c-8ec7-b0178daa60d8', agentKey: 'fitness.coach', agentVersion: 4,
-  status: 'SUCCEEDED', startedAt: '2026-08-06T19:23:52Z', completedAt: '2026-08-06T19:23:54Z',
-  durationMs: 1574, toolCalls: 0, promptTokens: 12, completionTokens: 34, costUsd: 0.001,
-  modelKey: 'qwen-plus', errorCode: null,
 };
 
 function mockFetch(overrides: Record<string, unknown> = {}) {
@@ -66,8 +59,8 @@ describe('AdminWorkbench', () => {
 
     expect(await screen.findByRole('heading', { name: 'Agent 工作台' })).toBeInTheDocument();
     expect(screen.getByText('瘦瘦健身教练')).toBeInTheDocument();
-    expect(screen.getByText('需要完成配置')).toBeInTheDocument();
-    expect(screen.getByText('暂无运行记录')).toBeInTheDocument();
+    expect(screen.getByText('尚未配置运行依赖')).toBeInTheDocument();
+    expect(screen.getByText('暂无真实 Run')).toBeInTheDocument();
     expect(screen.getByText('等待 Fitness Tool Bean 接线')).toBeInTheDocument();
   });
 
@@ -79,15 +72,16 @@ describe('AdminWorkbench', () => {
     expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument();
   });
 
-  it('lists real runs with status and token metrics', async () => {
-    mockFetch({ '/api/admin/runs': { items: [run], totalElements: 1, totalPages: 1, page: 0, size: 20 } });
-    renderAt('/admin/runs');
+  it('keeps Tool metadata read-only and omits framework and memory menus', async () => {
+    mockFetch();
+    const user = userEvent.setup();
+    renderAt('/admin/tools');
 
-    expect(await screen.findByRole('heading', { name: '运行记录' })).toBeInTheDocument();
-    const table = document.querySelector('.admin-table') as HTMLElement;
-    expect(await within(table).findByText('fitness.coach')).toBeInTheDocument();
-    expect(within(table).getByText('成功')).toBeInTheDocument();
-    expect(within(table).getByText('46')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '框架' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '记忆' })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /健身计划工具/ }));
+    expect(screen.getByText('运行时注册能力')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
   });
 
   it('saves a provider credential without echoing the secret', async () => {

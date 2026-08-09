@@ -1,6 +1,8 @@
 package happy.jayden.yang.fitness;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import happy.jayden.yang.agentbuilder.FitnessSkillRegistry;
+import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
 import happy.jayden.yang.fitness.infrastructure.JdbcAgentProviderStatus;
 import happy.jayden.yang.fitness.infrastructure.JdbcFitnessStore;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
@@ -15,6 +17,7 @@ import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.TransactionRunner;
 import javax.sql.DataSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
@@ -56,9 +59,14 @@ public class FitnessExperienceConfig {
       FitnessStore store,
       @Qualifier("agentDataSource") DataSource dataSource,
       ObjectMapper objectMapper,
+      FitnessSkillRegistry capabilities,
+      ObjectProvider<ToolRegistry> toolRegistry,
       @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
           String masterKeyFile) {
-    return new AgentRuntimeConversation(store, dataSource, objectMapper, masterKeyFile);
+    // Resolve the registry only when a run starts. Tool registrations themselves depend on the
+    // Fitness application service, which depends on this conversation port.
+    return new AgentRuntimeConversation(
+        store, dataSource, objectMapper, masterKeyFile, capabilities, toolRegistry::getObject);
   }
 
   @Bean

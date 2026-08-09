@@ -19,20 +19,20 @@ import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.AdminWorkbenchLocalSeed;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminWorkbenchStore;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
-import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportConclusion;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportGenerationResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportNarrative;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportNextAction;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.GeneratedMealRecommendation;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
-import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.CurrentGoalReportGenerationPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import jakarta.servlet.http.Cookie;
@@ -45,8 +45,8 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.HexFormat;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -68,8 +68,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.http.MediaType;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -411,7 +411,8 @@ class FitnessExperienceIntegrationTest {
                 .cookie(owner)
                 .header("Idempotency-Key", "feedback-other-branch")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\" \\t不喜欢香菜\\n \"}"))
+                .content(
+                    "{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\" \\t不喜欢香菜\\n \"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.reason").value("OTHER"));
   }
@@ -423,21 +424,8 @@ class FitnessExperienceIntegrationTest {
 
     for (String whitespaceOnlyNote :
         List.of(
-            " ",
-            "\t",
-            "\r",
-            "\n",
-            "\u0085",
-            "\u00a0",
-            "\u1680",
-            "\u2000",
-            "\u200a",
-            "\u2028",
-            "\u2029",
-            "\u202f",
-            "\u205f",
-            "\u3000",
-            "\ufeff")) {
+            " ", "\t", "\r", "\n", "\u0085", "\u00a0", "\u1680", "\u2000", "\u200a", "\u2028",
+            "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff")) {
       mvc.perform(
               put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
                   .cookie(owner)
@@ -523,12 +511,7 @@ class FitnessExperienceIntegrationTest {
                 .content(
                     objectMapper.writeValueAsString(
                         java.util.Map.of(
-                            "sentiment",
-                            "DISLIKE",
-                            "reason",
-                            "OTHER",
-                            "note",
-                            "🚀".repeat(300)))))
+                            "sentiment", "DISLIKE", "reason", "OTHER", "note", "🚀".repeat(300)))))
         .andExpect(status().isOk());
 
     mvc.perform(
@@ -539,12 +522,7 @@ class FitnessExperienceIntegrationTest {
                 .content(
                     objectMapper.writeValueAsString(
                         java.util.Map.of(
-                            "sentiment",
-                            "DISLIKE",
-                            "reason",
-                            "OTHER",
-                            "note",
-                            "🚀".repeat(301)))))
+                            "sentiment", "DISLIKE", "reason", "OTHER", "note", "🚀".repeat(301)))))
         .andExpect(status().isBadRequest());
   }
 
@@ -611,8 +589,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  void feedbackDatabaseConstraintsRejectEveryConfiguredWhitespaceOnlyOtherNote()
-      throws Exception {
+  void feedbackDatabaseConstraintsRejectEveryConfiguredWhitespaceOnlyOtherNote() throws Exception {
     Cookie owner = login();
     UUID ownerId = UUID.fromString(bootstrap(owner).path("user").path("id").asText());
     JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
@@ -620,30 +597,15 @@ class FitnessExperienceIntegrationTest {
 
     for (String whitespaceOnlyNote :
         List.of(
-            " ",
-            "\t",
-            "\r",
-            "\n",
-            "\u0085",
-            "\u00a0",
-            "\u1680",
-            "\u2000",
-            "\u200a",
-            "\u2028",
-            "\u2029",
-            "\u202f",
-            "\u205f",
-            "\u3000",
-            "\ufeff")) {
+            " ", "\t", "\r", "\n", "\u0085", "\u00a0", "\u1680", "\u2000", "\u200a", "\u2028",
+            "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff")) {
       assertThatThrownBy(
               () ->
                   jdbc.update(
                       "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
                       ownerId,
                       ownedRecommendation(
-                          jdbc,
-                          ownerId,
-                          date.plusDays(whitespaceOnlyNote.codePointAt(0))),
+                          jdbc, ownerId, date.plusDays(whitespaceOnlyNote.codePointAt(0))),
                       whitespaceOnlyNote))
           .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -720,8 +682,7 @@ class FitnessExperienceIntegrationTest {
     assertThat(context.dislikedFoods()).isNotEmpty();
     assertThat(context.noteReferences())
         .allSatisfy(
-            note ->
-                assertThat(note.codePointCount(0, note.length())).isLessThanOrEqualTo(160));
+            note -> assertThat(note.codePointCount(0, note.length())).isLessThanOrEqualTo(160));
   }
 
   @Test
@@ -738,8 +699,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  void manualDailyMealGenerationOnlyEnqueuesBeforeTheRuntimeIsCalled()
-      throws Exception {
+  void manualDailyMealGenerationOnlyEnqueuesBeforeTheRuntimeIsCalled() throws Exception {
     dailyMealPlanPort.succeed();
     Cookie owner = login();
     JsonNode bootstrap =
@@ -774,7 +734,11 @@ class FitnessExperienceIntegrationTest {
     assertThat(acceptedJson.has("dinner")).isFalse();
     assertThat(acceptedJson.has("dailyNutrition")).isFalse();
     assertThat(acceptedJson.has("failure")).isFalse();
-    String planId = objectMapper.readTree(generated.getResponse().getContentAsString()).path("mealPlanId").asText();
+    String planId =
+        objectMapper
+            .readTree(generated.getResponse().getContentAsString())
+            .path("mealPlanId")
+            .asText();
     assertThat(dailyMealPlanPort.calls()).isZero();
 
     mvc.perform(get("/api/v1/app/meal-plans/daily?date=2026-08-10").cookie(owner))
@@ -888,8 +852,7 @@ class FitnessExperienceIntegrationTest {
                     .content("{\"date\":\"%s\"}".formatted(date)))
             .andExpect(status().isAccepted())
             .andReturn();
-    assertThat(first.getResponse().getHeader("Location"))
-        .isEqualTo("/api/v1/app/meal-plans/daily");
+    assertThat(first.getResponse().getHeader("Location")).isEqualTo("/api/v1/app/meal-plans/daily");
     assertThat(
             objectMapper
                 .readTree(first.getResponse().getContentAsString())
@@ -917,8 +880,10 @@ class FitnessExperienceIntegrationTest {
     ExecutorService executor = Executors.newFixedThreadPool(2);
     CyclicBarrier start = new CyclicBarrier(2);
     try {
-      var first = executor.submit(() -> concurrentPlanRequest(owner, start, "daily-plan-concurrent-a"));
-      var second = executor.submit(() -> concurrentPlanRequest(owner, start, "daily-plan-concurrent-b"));
+      var first =
+          executor.submit(() -> concurrentPlanRequest(owner, start, "daily-plan-concurrent-a"));
+      var second =
+          executor.submit(() -> concurrentPlanRequest(owner, start, "daily-plan-concurrent-b"));
 
       assertThat(first.get()).isEqualTo(second.get());
       assertThat(dailyMealPlanPort.calls()).isZero();
@@ -939,7 +904,8 @@ class FitnessExperienceIntegrationTest {
     assertThat(dailyMealPlanPort.calls()).isZero();
     Integer runCount =
         jdbc.queryForObject(
-            "SELECT count(*) FROM daily_meal_plan_runs WHERE plan_date=CURRENT_DATE", Integer.class);
+            "SELECT count(*) FROM daily_meal_plan_runs WHERE plan_date=CURRENT_DATE",
+            Integer.class);
     Integer distinctUserCount =
         jdbc.queryForObject(
             "SELECT count(DISTINCT user_id) FROM daily_meal_plan_runs WHERE plan_date=CURRENT_DATE",
@@ -960,9 +926,12 @@ class FitnessExperienceIntegrationTest {
     jdbc.update(
         "UPDATE daily_meal_plan_runs SET lease_until=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE meal_plan_id=?",
         run.mealPlanId());
-    assertThat(fitnessStore.completeDailyMealPlanGeneration(abandonedClaim, dailyPlanResult("过期 worker")))
+    assertThat(
+            fitnessStore.completeDailyMealPlanGeneration(
+                abandonedClaim, dailyPlanResult("过期 worker")))
         .isFalse();
-    assertThat(fitnessStore.failDailyMealPlanGeneration(abandonedClaim, "RUNTIME_ERROR", "过期 worker"))
+    assertThat(
+            fitnessStore.failDailyMealPlanGeneration(abandonedClaim, "RUNTIME_ERROR", "过期 worker"))
         .isFalse();
     assertThat(fitnessStore.findDailyMealPlan(userId, date).orElseThrow().run().status())
         .isEqualTo("GENERATING");
@@ -972,11 +941,16 @@ class FitnessExperienceIntegrationTest {
     assertThat(reclaimedClaim.run().version()).isGreaterThan(abandonedClaim.run().version());
     assertThat(fitnessStore.claimNextDailyMealPlanGeneration()).isEmpty();
 
-    assertThat(fitnessStore.completeDailyMealPlanGeneration(abandonedClaim, dailyPlanResult("旧 worker")))
+    assertThat(
+            fitnessStore.completeDailyMealPlanGeneration(
+                abandonedClaim, dailyPlanResult("旧 worker")))
         .isFalse();
-    assertThat(fitnessStore.failDailyMealPlanGeneration(abandonedClaim, "RUNTIME_ERROR", "旧 worker"))
+    assertThat(
+            fitnessStore.failDailyMealPlanGeneration(abandonedClaim, "RUNTIME_ERROR", "旧 worker"))
         .isFalse();
-    assertThat(fitnessStore.completeDailyMealPlanGeneration(reclaimedClaim, dailyPlanResult("恢复 worker")))
+    assertThat(
+            fitnessStore.completeDailyMealPlanGeneration(
+                reclaimedClaim, dailyPlanResult("恢复 worker")))
         .isTrue();
     assertThat(fitnessStore.findDailyMealPlan(userId, date).orElseThrow().run().status())
         .isEqualTo("READY");
@@ -1001,7 +975,8 @@ class FitnessExperienceIntegrationTest {
     publishMealRuntimeSnapshot(
         agentJdbc, 1, "{\"providerKey\":\"published-provider\",\"modelKey\":\"published-model\"}");
     MealPlanGenerationRuntime runtime =
-        new MealPlanGenerationRuntime(agentDataSource, objectMapper, "build/missing-agent-master-key");
+        new MealPlanGenerationRuntime(
+            agentDataSource, objectMapper, "build/missing-agent-master-key");
 
     var publishedConfig = runtime.config();
     assertThat(publishedConfig.providerKey()).isEqualTo("published-provider");
@@ -1010,7 +985,10 @@ class FitnessExperienceIntegrationTest {
 
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
     publishMealRuntimeSnapshot(agentJdbc, 2, "{\"modelKey\":\"published-model\"}");
-    assertThat(runtime.generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback()).failureMessage())
+    assertThat(
+            runtime
+                .generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback())
+                .failureMessage())
         .isEqualTo("已发布 Agent 未绑定 Provider");
 
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
@@ -1021,7 +999,10 @@ class FitnessExperienceIntegrationTest {
         "published-provider",
         "published-model",
         "{\"providerKey\":\"different-provider\",\"model\":\"published-model\"}");
-    assertThat(runtime.generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback()).failureMessage())
+    assertThat(
+            runtime
+                .generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback())
+                .failureMessage())
         .isEqualTo("模型未绑定当前 Provider");
 
     upsertMealRuntimeComponents(
@@ -1048,16 +1029,21 @@ class FitnessExperienceIntegrationTest {
         "published-model",
         "{\"providerKey\":\"published-provider\",\"model\":\"published-model\"}");
     publishMealRuntimeSnapshot(
-        agentJdbc, 91, publishedCurrentGoalRuntimeSnapshot("published-provider", "published-model"));
+        agentJdbc,
+        91,
+        publishedCurrentGoalRuntimeSnapshot("published-provider", "published-model"));
     CurrentGoalReportRuntime runtime =
-        new CurrentGoalReportRuntime(agentDataSource, objectMapper, "build/missing-agent-master-key");
+        new CurrentGoalReportRuntime(
+            agentDataSource, objectMapper, "build/missing-agent-master-key");
 
     var publishedConfig = runtime.config();
     assertThat(publishedConfig.providerKey()).isEqualTo("published-provider");
     assertThat(publishedConfig.model()).isEqualTo("published-model");
-    JsonNode request = objectMapper.valueToTree(runtime.requestBody(publishedConfig, currentGoalReportFacts()));
+    JsonNode request =
+        objectMapper.valueToTree(runtime.requestBody(publishedConfig, currentGoalReportFacts()));
     assertThat(request.path("response_format").path("type").asText()).isEqualTo("json_schema");
-    assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean()).isTrue();
+    assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean())
+        .isTrue();
     assertThat(
             request
                 .path("response_format")
@@ -1112,7 +1098,8 @@ class FitnessExperienceIntegrationTest {
     try {
       JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
       agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
-      Path masterKey = testSecret("published-report-runtime", Base64.getEncoder().encodeToString(new byte[32]));
+      Path masterKey =
+          testSecret("published-report-runtime", Base64.getEncoder().encodeToString(new byte[32]));
       JdbcAdminWorkbenchStore workbench =
           new JdbcAdminWorkbenchStore(agentDataSource, objectMapper, masterKey);
       new AdminWorkbenchLocalSeed(workbench).seed();
@@ -1154,6 +1141,76 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
+  void chatSafetyHookBlocksBeforeCredentialRetrievalOrAnyModelRequestAndPersistsTrace()
+      throws Exception {
+    AtomicInteger modelRequests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          modelRequests.incrementAndGet();
+          exchange.sendResponseHeaders(500, -1);
+          exchange.close();
+        });
+    server.start();
+    try {
+      JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
+      agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+      Path masterKey =
+          testSecret("published-chat-runtime", Base64.getEncoder().encodeToString(new byte[32]));
+      JdbcAdminWorkbenchStore workbench =
+          new JdbcAdminWorkbenchStore(agentDataSource, objectMapper, masterKey);
+      new AdminWorkbenchLocalSeed(workbench).seed();
+      workbench.reconcileRuntimeCapabilities(
+          new happy.jayden.yang.agentbuilder.FitnessSkillRegistry(
+              new happy.jayden.yang.agentbuilder.FitnessSafetyHook()));
+      agentJdbc.update(
+          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='PROVIDER'"
+              + " AND component_key='bailian'",
+          "{\"endpoint\":\"http://localhost:%d/v1\"}".formatted(server.getAddress().getPort()));
+      agentJdbc.update(
+          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='MODEL'"
+              + " AND component_key='qwen-plus'",
+          "{\"providerKey\":\"bailian\",\"model\":\"published-chat-model\"}");
+      workbench.saveCredential("bailian", "published-chat-key".toCharArray());
+      workbench.publish(workbench.findDraft("fitness.coach").orElseThrow());
+
+      AgentRuntimeConversation conversation =
+          new AgentRuntimeConversation(
+              fitnessStore,
+              agentDataSource,
+              objectMapper,
+              masterKey.toString(),
+              new happy.jayden.yang.agentbuilder.FitnessSkillRegistry(
+                  new happy.jayden.yang.agentbuilder.FitnessSafetyHook()),
+              () -> {
+                throw new AssertionError("blocked run must not resolve a Tool registry");
+              });
+      var response =
+          conversation.send(
+              UUID.fromString("10000000-0000-0000-0000-000000000001"), "我胸口痛还想每天练 4 小时");
+
+      assertThat(response.message()).contains("停止训练和节食");
+      assertThat(modelRequests.get()).isZero();
+      assertThat(
+              agentJdbc.queryForObject(
+                  "SELECT status FROM agent_runs WHERE agent_key='fitness.coach'"
+                      + " ORDER BY started_at DESC LIMIT 1",
+                  String.class))
+          .isEqualTo("CANCELLED");
+      assertThat(
+              agentJdbc.queryForObject(
+                  "SELECT count(*) FROM agent_run_events WHERE run_id=(SELECT run_id FROM agent_runs"
+                      + " WHERE agent_key='fitness.coach' ORDER BY started_at DESC LIMIT 1)"
+                      + " AND event_type='RUN_BLOCKED'",
+                  Integer.class))
+          .isEqualTo(1);
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void mealRecordCreatedAtComesFromTheDatabaseInsteadOfOccurredAt() throws Exception {
     Cookie owner = login();
     mvc.perform(
@@ -1161,10 +1218,12 @@ class FitnessExperienceIntegrationTest {
                 .cookie(owner)
                 .header("Idempotency-Key", "record-created-at-0001")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"mealType\":\"LUNCH\",\"occurredAt\":\"2020-01-01T00:00:00Z\",\"source\":\"MANUAL\",\"items\":[{\"name\":\"午饭\",\"estimatedKcal\":400}]}"))
+                .content(
+                    "{\"mealType\":\"LUNCH\",\"occurredAt\":\"2020-01-01T00:00:00Z\",\"source\":\"MANUAL\",\"items\":[{\"name\":\"午饭\",\"estimatedKcal\":400}]}"))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.createdAt").isNotEmpty())
-        .andExpect(jsonPath("$.createdAt").value(org.hamcrest.Matchers.not("2020-01-01T00:00:00Z")));
+        .andExpect(
+            jsonPath("$.createdAt").value(org.hamcrest.Matchers.not("2020-01-01T00:00:00Z")));
   }
 
   @Test
@@ -1196,8 +1255,7 @@ class FitnessExperienceIntegrationTest {
             .andReturn();
     JsonNode ticket = objectMapper.readTree(ticketResult.getResponse().getContentAsString());
     String mediaId = ticket.path("mediaId").asText();
-    assertThat(ticket.path("uploadUrl").asText())
-        .isEqualTo("/api/v1/app/media-uploads/" + mediaId);
+    assertThat(ticket.path("uploadUrl").asText()).isEqualTo("/api/v1/app/media-uploads/" + mediaId);
 
     mvc.perform(
             post("/api/v1/app/media-upload-tickets")
@@ -1586,7 +1644,10 @@ class FitnessExperienceIntegrationTest {
                     .content("{\"date\":\"2026-08-15\"}"))
             .andExpect(status().isAccepted())
             .andReturn();
-    return objectMapper.readTree(result.getResponse().getContentAsString()).path("mealPlanId").asText();
+    return objectMapper
+        .readTree(result.getResponse().getContentAsString())
+        .path("mealPlanId")
+        .asText();
   }
 
   private void drainDailyMealPlanQueue() {
@@ -1740,11 +1801,10 @@ class FitnessExperienceIntegrationTest {
         "INSERT INTO agent_versions(agent_version_id,agent_key,version,status,configuration,published_at) VALUES (?, 'fitness.coach', ?, 'PUBLISHED', ?::jsonb, CURRENT_TIMESTAMP)",
         UUID.randomUUID(),
         version,
-            configuration);
+        configuration);
   }
 
-  private static String publishedCurrentGoalRuntimeSnapshot(
-      String providerKey, String modelKey) {
+  private static String publishedCurrentGoalRuntimeSnapshot(String providerKey, String modelKey) {
     return """
         {"currentGoalReportRuntime":{"provider":{"key":"%s","version":1,"status":"AVAILABLE","config":{"endpoint":"https://example.test/v1/"}},"model":{"key":"%s","version":1,"status":"AVAILABLE","config":{"providerKey":"%s","model":"%s"}},"credential":{"keyVersion":1,"ciphertext":"AA==","iv":"AAAAAAAAAAAAAAAA","aad":""}}}
         """
@@ -1824,11 +1884,9 @@ class FitnessExperienceIntegrationTest {
         .andExpect(jsonPath("$.metrics[0].key").value("GOAL_PROGRESS"))
         .andExpect(jsonPath("$.metrics[0].comparison").doesNotExist())
         .andExpect(
-            jsonPath(
-                "$.weightTrend.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
+            jsonPath("$.weightTrend.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
         .andExpect(
-            jsonPath(
-                "$.trainingVolume.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
+            jsonPath("$.trainingVolume.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
         .andExpect(jsonPath("$.conclusion.summary").value("当前目标处于稳定执行阶段"))
         .andExpect(jsonPath("$.highlights.length()").value(2))
         .andExpect(jsonPath("$.nextActions[0].action").value("OPEN_RECORD"));
@@ -1890,9 +1948,7 @@ class FitnessExperienceIntegrationTest {
     fitnessStore.createBodyRecord(
         ownerId,
         new happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest(
-            new java.math.BigDecimal("140.2"),
-            null,
-            goalStartedAt.minus(Duration.ofDays(1))));
+            new java.math.BigDecimal("140.2"), null, goalStartedAt.minus(Duration.ofDays(1))));
 
     mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
         .andExpect(status().isOk())
@@ -2019,13 +2075,13 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  void currentGoalReportIsOwnedByTheAuthenticatedActiveGoalAndFencesLateWorkers()
-      throws Exception {
+  void currentGoalReportIsOwnedByTheAuthenticatedActiveGoalAndFencesLateWorkers() throws Exception {
     currentGoalReportPort.succeed();
     drainCurrentGoalReportQueue();
     currentGoalReportPort.succeed();
     Cookie other = createOtherUser();
-    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(other)).andExpect(status().isNotFound());
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(other))
+        .andExpect(status().isNotFound());
     mvc.perform(
             post("/api/v1/app/reports/current-goal")
                 .cookie(other)
@@ -2049,8 +2105,7 @@ class FitnessExperienceIntegrationTest {
                 abandonedClaim, facts, result, Instant.now()))
         .isFalse();
     assertThat(
-            fitnessStore.failCurrentGoalReportGeneration(
-                abandonedClaim, "TASK_FAILED", "旧 worker"))
+            fitnessStore.failCurrentGoalReportGeneration(abandonedClaim, "TASK_FAILED", "旧 worker"))
         .isFalse();
 
     var reclaimedClaim = fitnessStore.claimNextCurrentGoalReportGeneration().orElseThrow();

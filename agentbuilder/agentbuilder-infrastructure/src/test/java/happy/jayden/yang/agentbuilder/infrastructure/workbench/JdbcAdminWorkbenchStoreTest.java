@@ -128,6 +128,24 @@ class JdbcAdminWorkbenchStoreTest {
   }
 
   @Test
+  void startupReconciliationProjectsOnlyRegisteredSkillsAndHooksAsRuntimeReady() {
+    store.reconcileRuntimeCapabilities(
+        (type, key) -> type.equals("SKILL") && key.equals("fitness.meal.skill"));
+
+    var components = store.snapshot().components();
+    var meal = component(components, "SKILL", "fitness.meal.skill");
+    var plan = component(components, "SKILL", "fitness.plan.skill");
+    var safety = component(components, "HOOK", "fitness.safety");
+
+    assertEquals("AVAILABLE", meal.status());
+    assertEquals(Boolean.TRUE, meal.config().get("runtimeReady"));
+    assertEquals("UNAVAILABLE", plan.status());
+    assertEquals(Boolean.FALSE, plan.config().get("runtimeReady"));
+    assertEquals("运行时 handler 未注册", plan.config().get("runtimeReason"));
+    assertEquals("UNAVAILABLE", safety.status());
+  }
+
+  @Test
   void publishingEmbedsAnEncryptedCurrentGoalRuntimeSnapshotWithoutLeakingPlaintext()
       throws Exception {
     String secret = "published-report-key";
@@ -150,6 +168,13 @@ class JdbcAdminWorkbenchStoreTest {
     assertFalse(snapshot.path("credential").path("iv").asText().isBlank());
     assertFalse(configuration.contains(secret));
     assertFalse(mapper.writeValueAsString(store.snapshot()).contains(secret));
+  }
+
+  private static ComponentView component(List<ComponentView> components, String type, String key) {
+    return components.stream()
+        .filter(item -> item.type().equals(type) && item.componentKey().equals(key))
+        .findFirst()
+        .orElseThrow();
   }
 
   @Test

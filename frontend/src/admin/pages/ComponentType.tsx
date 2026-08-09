@@ -17,7 +17,7 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : '保存失败';
 }
 
-export function ComponentType({ type, label }: { type: string; label: string }) {
+export function ComponentType({ type, label, readOnly = false }: { type: string; label: string; readOnly?: boolean }) {
   const [components, setComponents] = useState<WorkbenchComponent[]>([]);
   const [selected, setSelected] = useState<WorkbenchComponent>();
   const [form, setForm] = useState<WorkbenchComponentUpdate>({
@@ -127,6 +127,11 @@ export function ComponentType({ type, label }: { type: string; label: string }) 
               <div><dt>版本</dt><dd>v{selected.version}</dd></div>
             </dl>
             <section className="admin-card admin-form-card">
+              {readOnly ? <>
+                <strong>运行时注册能力</strong>
+                <p>Tool 由应用代码登记并受 scope guard 约束；工作台只展示其元数据，不能在此修改。</p>
+                <pre className="admin-component-config">{JSON.stringify(selected.config, null, 2)}</pre>
+              </> : <>
               <label>显示名称<input value={form.displayName} onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
               <label className="is-wide">说明<textarea rows={3} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
               <label>状态<select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
@@ -142,6 +147,7 @@ export function ComponentType({ type, label }: { type: string; label: string }) 
                   {pending === selected.componentKey ? <LoaderCircle className="is-spin" /> : <Save />} 保存
                 </button>
               </footer>
+              </>}
             </section>
           </>
         ) : <div className="admin-empty"><strong>选择左侧组件</strong><p>这里会展示其配置详情。</p></div>}

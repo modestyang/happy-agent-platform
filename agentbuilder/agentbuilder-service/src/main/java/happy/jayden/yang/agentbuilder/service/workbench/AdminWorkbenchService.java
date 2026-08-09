@@ -2,6 +2,7 @@ package happy.jayden.yang.agentbuilder.service.workbench;
 
 import static happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.*;
 
+import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -10,9 +11,12 @@ import java.util.UUID;
 
 public final class AdminWorkbenchService {
   private final AdminWorkbenchPort port;
+  private final RuntimeCapabilityRegistry runtimeCapabilities;
 
-  public AdminWorkbenchService(AdminWorkbenchPort port) {
+  public AdminWorkbenchService(
+      AdminWorkbenchPort port, RuntimeCapabilityRegistry runtimeCapabilities) {
     this.port = Objects.requireNonNull(port, "port");
+    this.runtimeCapabilities = Objects.requireNonNull(runtimeCapabilities, "runtimeCapabilities");
   }
 
   public WorkbenchSnapshot snapshot() {
@@ -28,7 +32,11 @@ public final class AdminWorkbenchService {
     if (type == null || type.isBlank() || componentKey == null || componentKey.isBlank()) {
       throw new IllegalArgumentException("type 和 componentKey 必填");
     }
-    return port.updateComponent(type.trim(), componentKey.trim(), Objects.requireNonNull(update, "update"));
+    if ("TOOL".equals(type.trim())) {
+      throw new IllegalArgumentException("Tool 仅可由应用代码登记，工作台只读");
+    }
+    return port.updateComponent(
+        type.trim(), componentKey.trim(), Objects.requireNonNull(update, "update"));
   }
 
   public ValidationView validate(String agentKey) {
@@ -79,7 +87,7 @@ public final class AdminWorkbenchService {
     return port.run(runId).orElseThrow(() -> new AdminWorkbenchPort.NotFound("运行记录不存在"));
   }
 
-  private static void requireComponent(
+  private void requireComponent(
       WorkbenchSnapshot snapshot, List<String> errors, String type, String key) {
     if (key == null || key.isBlank()) {
       errors.add(type + " 尚未选择");
@@ -91,5 +99,12 @@ public final class AdminWorkbenchService {
             .findFirst();
     if (component.isEmpty()) errors.add("组件 " + key + " 不存在");
     else if (!"AVAILABLE".equals(component.get().status())) errors.add("组件 " + key + " 当前不可用");
+    else if (requiresRuntimeHandler(type) && !runtimeCapabilities.hasHandler(type, key)) {
+      errors.add("组件 " + key + " 没有已注册的运行时 handler");
+    }
+  }
+
+  private static boolean requiresRuntimeHandler(String type) {
+    return "SKILL".equals(type) || "HOOK".equals(type);
   }
 }

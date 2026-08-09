@@ -377,5 +377,8 @@ function MobileApp() {
 }
 
 export function App() {
-  return window.location.pathname.startsWith('/admin') ? <AdminWorkbench /> : <MobileApp />;
+  if (window.location.pathname.startsWith('/admin')) {
+    return <BrowserRouter><AdminWorkbench /></BrowserRouter>;
+  }
+  return <MobileApp />;
 }

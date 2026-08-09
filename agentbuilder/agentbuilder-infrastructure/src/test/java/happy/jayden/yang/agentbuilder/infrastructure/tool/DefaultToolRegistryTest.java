@@ -78,6 +78,24 @@ class DefaultToolRegistryTest {
   }
 
   @Test
+  void invokesOnlyARegisteredToolWithItsNormalScopeGuard() throws Exception {
+    var registry = new DefaultToolRegistry(List.of(scanner().scanRegistration(new QueryTools())));
+    var context = new ToolExecutionContext("user-7", "run-1", Set.of("workout:read"), "skill");
+
+    assertEquals("legs:user-7", registry.invoke("fitness.query", Map.of("query", "legs"), context));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> registry.invoke("fitness.missing", Map.of(), context));
+    assertThrows(
+        SecurityException.class,
+        () ->
+            registry.invoke(
+                "fitness.query",
+                Map.of("query", "legs"),
+                new ToolExecutionContext("user-7", "run-1", Set.of(), "skill")));
+  }
+
+  @Test
   void rejectsDuplicateRuntimeNamesAcrossDifferentRegistrations() {
     var first = scanner().scanRegistration(new QueryTools());
     var second = scanner().scanRegistration(new AlternateQueryTools());

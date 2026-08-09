@@ -33,8 +33,8 @@ GREEN command passes after implementation.
   `onerror` without cancelling ordinary cues.
 - Pause and resume receive one event cue each; their existing timer freeze and
   resume behavior remains intact.
-- Mute, explicit action skip, confirmed exit/unmount, and cleanup stop the
-  active queue. Late utterance callbacks cannot restart it.
+- Mute, explicit action skip, opening the exit confirmation, and unmount stop
+  the active queue. Late utterance callbacks cannot restart it.
 - Unsupported Web Speech displays the existing concise notice in both preview
   and active-player states while the timer continues.
 - `StrictMode` replays do not duplicate the start cue.
@@ -52,6 +52,34 @@ transition mapping, and browser effects are confined to the engine/event
 handlers. The player does not invoke `speechSynthesis.cancel()` during normal
 state rendering.
 
+## Round 1 review remediation
+
+The independent review found one Important exit boundary: pressing the top
+exit control paused the clock but left the current utterance and FIFO queue
+running until the user confirmed. It is fixed by stopping the engine before
+the confirmation dialog opens. Cancelling that dialog resumes the timer; new
+state transitions can speak again, while the old utterance's late `onend` is
+ignored.
+
+`stop()` now clears the consumed-ID session cache as well as queued/active
+speech. This lets an explicit next/previous navigation announce a previously
+visited action again. It does not cause ordinary React renders to replay a
+cue, because cue requests still require a state transition. Empty cleanup no
+longer calls browser `cancel()`, which avoids the StrictMode initial
+effect-replay cancellation while preserving active-session cleanup.
+
+The revised App-level coverage verifies:
+
+- the first exit click immediately cancels and a stale `onend` cannot dequeue
+  another cue;
+- continuing from the dialog permits later action guidance and re-visiting an
+  action announces it again;
+- final exit cleanup does not duplicate cancel after the first stop;
+- pause and resume each speak once through the real controls; and
+- StrictMode has no initial cancel and still produces one start cue.
+
+Review disposition after this round: Critical 0, Important 0, Minor 0.
+
 ## Verification
 
 Run after the final implementation:
@@ -60,7 +88,7 @@ Run after the final implementation:
 npm --prefix frontend test -- voiceGuidance.test.ts App.test.tsx
 ```
 
-Result: 2 files / 27 tests passed.
+Result after round 1: 2 files / 30 tests passed.
 
 ```text
 npm --prefix frontend run typecheck
@@ -68,14 +96,16 @@ npm --prefix frontend run typecheck
 
 Result: passed.
 
-Earlier full-suite and production-build evidence is retained below; both are
-re-run before the Task 5 commit.
+Final round 1 verification:
 
 ```text
 npm --prefix frontend test
 npm --prefix frontend run build
 git diff --check
 ```
+
+Result: full frontend suite 8 files / 61 tests passed; production build and
+diff check passed.
 
 Browser/device voice verification is intentionally deferred to Task 7 because
 this worktree has no browser binding.

@@ -278,9 +278,10 @@ describe('App', () => {
 
   it('does not duplicate a start cue when React StrictMode replays effects', async () => {
     const speak = vi.fn();
+    const cancel = vi.fn();
     class Utterance { text: string; constructor(text: string) { this.text = text; } }
     vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
-    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn(), resume: vi.fn() });
+    vi.stubGlobal('speechSynthesis', { speak, cancel, resume: vi.fn() });
     mockFetch();
     const user = userEvent.setup();
     render(<StrictMode><App /></StrictMode>);
@@ -288,12 +289,44 @@ describe('App', () => {
     await screen.findByText('124.8');
     await user.click(screen.getByRole('link', { name: '计划' }));
     await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+    expect(cancel).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '开始训练' }));
 
     expect(speak).toHaveBeenCalledTimes(1);
   });
 
-  it('cancels queued speech only when muting, skipping, or leaving a workout', async () => {
+  it('speaks pause and resume once each through the real player controls', async () => {
+    const speak = vi.fn();
+    class Utterance {
+      text: string;
+      onend?: () => void;
+      constructor(text: string) { this.text = text; }
+    }
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn(), resume: vi.fn() });
+    mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+    await user.click(screen.getByRole('button', { name: '开始训练' }));
+    await user.click(screen.getByRole('button', { name: '暂停训练' }));
+
+    const initialCue = speak.mock.calls[0]?.[0] as Utterance;
+    initialCue.onend?.();
+    expect(speak.mock.calls[1]?.[0]).toMatchObject({ text: '训练暂停' });
+
+    await user.click(screen.getByRole('button', { name: '继续训练' }));
+    const pauseCue = speak.mock.calls[1]?.[0] as Utterance;
+    pauseCue.onend?.();
+    expect(speak.mock.calls[2]?.[0]).toMatchObject({ text: '继续训练' });
+    expect(speak.mock.calls.map(([utterance]) => (utterance as Utterance).text).filter((text) => text === '训练暂停')).toHaveLength(1);
+    expect(speak.mock.calls.map(([utterance]) => (utterance as Utterance).text).filter((text) => text === '继续训练')).toHaveLength(1);
+  });
+
+  it('stops speech immediately on exit, then allows a cancelled workout to continue with revisited action cues', async () => {
     const speak = vi.fn();
     const cancel = vi.fn();
     class Utterance { text: string; constructor(text: string) { this.text = text; } }
@@ -323,16 +356,30 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '开始训练' }));
     expect(cancel).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: '关闭声音' }));
-    expect(cancel).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: '打开声音' }));
-    expect(cancel).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: '下一个动作' }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '关闭声音' }));
     expect(cancel).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole('button', { name: '打开声音' }));
+    await user.click(screen.getByRole('button', { name: '上一个动作' }));
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(speak.mock.calls.at(-1)?.[0]).toMatchObject({ text: '哑铃深蹲，第 1 组' });
 
     await user.click(screen.getByRole('button', { name: '退出训练' }));
-    await user.click(within(await screen.findByRole('dialog', { name: '退出训练确认' })).getByRole('button', { name: '退出训练' }));
     expect(cancel).toHaveBeenCalledTimes(3);
+    const stoppedUtterance = speak.mock.calls.at(-1)?.[0] as { onend?: () => void };
+    const callsBeforeLateEnd = speak.mock.calls.length;
+    stoppedUtterance.onend?.();
+    expect(speak).toHaveBeenCalledTimes(callsBeforeLateEnd);
+
+    await user.click(within(screen.getByRole('dialog', { name: '退出训练确认' })).getByRole('button', { name: '继续跟练' }));
+    await user.click(screen.getByRole('button', { name: '下一个动作' }));
+    expect(speak.mock.calls.at(-1)?.[0]).toMatchObject({ text: '臀桥，第 1 组' });
+
+    await user.click(screen.getByRole('button', { name: '退出训练' }));
+    expect(cancel).toHaveBeenCalledTimes(4);
+    await user.click(within(screen.getByRole('dialog', { name: '退出训练确认' })).getByRole('button', { name: '退出训练' }));
+    expect(cancel).toHaveBeenCalledTimes(4);
   });
 
   it('pauses the workout clock and records completion exactly once', async () => {

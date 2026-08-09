@@ -104,6 +104,26 @@ describe('voice guidance', () => {
     expect(speech.utterances.map((utterance) => utterance.text)).toEqual(['第一句']);
   });
 
+  it('does not cancel an idle engine during lifecycle cleanup', () => {
+    const speech = speechDouble();
+    const engine = createVoiceEngine(speech, (text) => ({ text }));
+
+    engine.stop();
+
+    expect(speech.cancel).not.toHaveBeenCalled();
+  });
+
+  it('allows a visited action cue to play again after an explicit navigation stop', () => {
+    const speech = speechDouble();
+    const engine = createVoiceEngine(speech, (text) => ({ text }));
+
+    engine.speak({ id: 'exercise:0:set:0', text: '深蹲，第 1 组', interrupt: false });
+    engine.stop();
+    engine.speak({ id: 'exercise:0:set:0', text: '深蹲，第 1 组', interrupt: false });
+
+    expect(speech.utterances.map((utterance) => utterance.text)).toEqual(['深蹲，第 1 组', '深蹲，第 1 组']);
+  });
+
   it('has a safe no-op engine when Web Speech is unavailable', () => {
     expect(isVoiceSupported(undefined)).toBe(false);
     const engine = createVoiceEngine(undefined, (text) => ({ text }));

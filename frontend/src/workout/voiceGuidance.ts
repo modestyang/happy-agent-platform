@@ -97,10 +97,12 @@ export function createVoiceEngine(
   };
 
   const stop = () => {
+    const hasPendingSpeech = speaking || queue.length > 0;
     queue.length = 0;
+    consumed.clear();
     generation += 1;
     speaking = false;
-    speech?.cancel();
+    if (hasPendingSpeech) speech?.cancel();
   };
 
   return {

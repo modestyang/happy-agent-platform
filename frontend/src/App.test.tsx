@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
@@ -237,7 +238,8 @@ describe('App', () => {
       constructor(text: string) { this.text = text; }
     }
     vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
-    vi.stubGlobal('speechSynthesis', { speak, cancel });
+    const resume = vi.fn();
+    vi.stubGlobal('speechSynthesis', { speak, cancel, resume });
     mockFetch();
     const user = userEvent.setup();
     render(<App />);
@@ -253,8 +255,84 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '开始训练' }));
     expect(screen.getByText('准备开始')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
+    expect(resume).toHaveBeenCalledTimes(1);
     expect(speak).toHaveBeenCalled();
     expect(speak.mock.calls.at(-1)?.[0]).toMatchObject({ text: expect.stringContaining('3') });
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('keeps timing active with a concise unsupported-voice notice after training starts', async () => {
+    mockFetch();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+    expect(screen.getByText(/当前浏览器不支持语音播报/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '开始训练' }));
+    expect(screen.getByRole('timer')).toHaveAttribute('aria-label', '剩余 3 秒');
+    expect(screen.getByText(/当前浏览器不支持语音播报/)).toBeInTheDocument();
+  });
+
+  it('does not duplicate a start cue when React StrictMode replays effects', async () => {
+    const speak = vi.fn();
+    class Utterance { text: string; constructor(text: string) { this.text = text; } }
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn(), resume: vi.fn() });
+    mockFetch();
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+    await user.click(screen.getByRole('button', { name: '开始训练' }));
+
+    expect(speak).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels queued speech only when muting, skipping, or leaving a workout', async () => {
+    const speak = vi.fn();
+    const cancel = vi.fn();
+    class Utterance { text: string; constructor(text: string) { this.text = text; } }
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('speechSynthesis', { speak, cancel, resume: vi.fn() });
+    const multiExerciseDashboard = {
+      ...dashboard,
+      plan: {
+        ...dashboard.plan,
+        exercises: [
+          ...dashboard.plan.exercises,
+          { ...dashboard.plan.exercises[0], id: 'bridge', name: '臀桥' },
+        ],
+      },
+      exercises: [
+        ...dashboard.exercises,
+        { ...dashboard.exercises[0], id: 'bridge', name: '臀桥' },
+      ],
+    };
+    mockFetch({ '/api/app/bootstrap': multiExerciseDashboard });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('link', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '开始跟练' }));
+    await user.click(screen.getByRole('button', { name: '开始训练' }));
+    expect(cancel).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: '关闭声音' }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '打开声音' }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '下一个动作' }));
+    expect(cancel).toHaveBeenCalledTimes(2);
+
+    await user.click(screen.getByRole('button', { name: '退出训练' }));
+    await user.click(within(await screen.findByRole('dialog', { name: '退出训练确认' })).getByRole('button', { name: '退出训练' }));
+    expect(cancel).toHaveBeenCalledTimes(3);
   });
 
   it('pauses the workout clock and records completion exactly once', async () => {

@@ -159,7 +159,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
                         "properties",
                         Map.of(
                             "name",
-                            Map.of("type", "string", "minLength", 1, "maxLength", 160),
+                            Map.of("type", "string", "minLength", 1, "maxLength", 120),
                             "estimatedKcal",
                             Map.of("type", "integer", "minimum", 0, "maximum", 20000),
                             "confidence",
@@ -236,7 +236,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
       int kcal = item.get("estimatedKcal").intValue();
       double confidence = item.get("confidence").doubleValue();
       if (name.isBlank()
-          || name.length() > 160
+          || name.codePointCount(0, name.length()) > 120
           || kcal < 0
           || kcal > 20_000
           || !Double.isFinite(confidence)

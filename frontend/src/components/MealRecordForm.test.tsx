@@ -80,6 +80,44 @@ describe('MealRecordForm', () => {
     expect(screen.getByLabelText('食物名称 1')).toBeEnabled();
   });
 
+  it('retries a terminal failure with fresh upload and job idempotency keys', async () => {
+    let ticketAttempt = 0;
+    let jobAttempt = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/v1/app/media-upload-tickets') {
+        ticketAttempt += 1;
+        return json({ mediaId: ticketAttempt === 1 ? '11111111-1111-1111-1111-111111111111' : '33333333-3333-3333-3333-333333333333', method: 'PUT', uploadUrl: `/api/v1/app/media-uploads/${ticketAttempt}`, headers: [], expiresAt: '2026-08-09T01:00:00Z', maxBytes: 10485760 });
+      }
+      if (path.startsWith('/api/v1/app/media-uploads/')) return new Response(null, { status: 204 });
+      if (path === '/api/v1/app/meal-recognition-jobs') {
+        jobAttempt += 1;
+        return json(jobAttempt === 1
+          ? { jobId: '22222222-2222-2222-2222-222222222222', status: 'FAILED', mediaId: '11111111-1111-1111-1111-111111111111', mealType: 'LUNCH', occurredAt: '2026-08-09T00:00:00Z', candidates: [], failure: { code: 'TIMEOUT', message: '视觉模型超时', retryable: true }, createdAt: '2026-08-09T00:00:00Z', updatedAt: '2026-08-09T00:00:01Z' }
+          : { jobId: '44444444-4444-4444-4444-444444444444', status: 'SUCCEEDED', mediaId: '33333333-3333-3333-3333-333333333333', mealType: 'LUNCH', occurredAt: '2026-08-09T00:00:00Z', candidates: [{ name: '重试后的食物', estimatedKcal: 410, confidence: 0.9 }], createdAt: '2026-08-09T00:00:00Z', updatedAt: '2026-08-09T00:00:01Z' });
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<MealRecordForm onSaved={vi.fn()} />);
+
+    await user.upload(screen.getByLabelText('拍照识别'), new File(['image'], 'retry.png', { type: 'image/png' }));
+    await user.click(await screen.findByRole('button', { name: '重试' }));
+    expect(await screen.findByDisplayValue('重试后的食物')).toBeInTheDocument();
+
+    const ticketCalls = fetchMock.mock.calls.filter(([path]) => path === '/api/v1/app/media-upload-tickets');
+    const jobCalls = fetchMock.mock.calls.filter(([path]) => path === '/api/v1/app/meal-recognition-jobs');
+    expect(ticketCalls).toHaveLength(2);
+    expect(jobCalls).toHaveLength(2);
+    const ticketKeys = ticketCalls.map(([, init]) => ((init as RequestInit).headers as Record<string, string>)['Idempotency-Key']);
+    const jobKeys = jobCalls.map(([, init]) => ((init as RequestInit).headers as Record<string, string>)['Idempotency-Key']);
+    expect(ticketKeys[1]).not.toBe(ticketKeys[0]);
+    expect(jobKeys[1]).not.toBe(jobKeys[0]);
+    expect(jobKeys[1]).not.toBe(ticketKeys[1]);
+    expect((jobCalls[1][1] as RequestInit).body).toContain('33333333-3333-3333-3333-333333333333');
+  });
+
   it('rejects unsupported and oversized files before creating an upload ticket', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

@@ -40,6 +40,19 @@ class MealRecognitionRuntimeTest {
           .startsWith("data:image/png;base64,");
       assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean()).isTrue();
       assertThat(request.path("response_format").path("json_schema").path("schema").path("properties").path("items").path("items").path("properties").has("confidence")).isTrue();
+      assertThat(
+              request
+                  .path("response_format")
+                  .path("json_schema")
+                  .path("schema")
+                  .path("properties")
+                  .path("items")
+                  .path("items")
+                  .path("properties")
+                  .path("name")
+                  .path("maxLength")
+                  .asInt())
+          .isEqualTo(120);
       assertThat(parsed.path("items").get(0).path("estimatedKcal").asInt()).isEqualTo(200);
     } finally {
       server.stop(0);
@@ -61,5 +74,28 @@ class MealRecognitionRuntimeTest {
 
     assertThat(result.status()).isEqualTo("FAILED");
     assertThat(result.failureCode()).isEqualTo("INVALID_MODEL_RESPONSE");
+  }
+
+  @Test
+  void acceptsA120CharacterCandidateNameAndRejects121Characters() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    var ds = new DriverManagerDataSource("jdbc:postgresql://localhost:1/not-used");
+    var runtime = new MealRecognitionRuntime(ds, ds, mapper, Path.of("build/no-key").toString());
+
+    String atLimit = "🍅".repeat(120);
+    assertThat(
+            runtime.result(
+                    mapper.readTree(
+                        "{\"items\":[{\"name\":\"%s\",\"estimatedKcal\":200,\"confidence\":0.8}]}"
+                            .formatted(atLimit)))
+                .status())
+        .isEqualTo("SUCCEEDED");
+    assertThat(
+            runtime.result(
+                    mapper.readTree(
+                        "{\"items\":[{\"name\":\"%s\",\"estimatedKcal\":200,\"confidence\":0.8}]}"
+                            .formatted("🍅".repeat(121))))
+                .failureCode())
+        .isEqualTo("INVALID_MODEL_RESPONSE");
   }
 }

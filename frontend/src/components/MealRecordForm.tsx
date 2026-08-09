@@ -52,7 +52,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
     setManualFallback(false);
     if (!ALLOWED_TYPES.has(file.type)) { setError('仅支持 JPEG、PNG 或 WebP 图片。'); return; }
     if (file.size > MAX_BYTES) { setError('图片不能超过 10 MB。'); return; }
-    if (!retry || !recognitionKeys.current) {
+    if (retry || !recognitionKeys.current) {
       recognitionKeys.current = { ticket: idempotencyKey(), job: idempotencyKey() };
     }
     lastFile.current = file;

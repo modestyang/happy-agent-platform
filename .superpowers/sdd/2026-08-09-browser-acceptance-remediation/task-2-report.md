@@ -132,3 +132,31 @@
   AdminWorkbench expectation mismatches. `ComponentType.tsx` and its missing imports are already
   present in baseline `fa26821` (from `9adf2ad`); the excluded dirty Admin worktree files supply
   the absent modules. No Task 2 typecheck or `MealRecordForm` test failed.
+
+## Final review remediation round 1
+
+- Recognition job failures now use the dedicated `RecognitionFailureCode` contract rather than
+  widening the shared `ProblemCode`. Its complete persisted runtime/worker set is
+  `DEPENDENCY_NOT_CONFIGURED`, `DEPENDENCY_UNAVAILABLE`, `TIMEOUT`,
+  `INVALID_MODEL_RESPONSE`, and `RUNTIME_ERROR`; regenerated public TypeScript types reflect the
+  schema. A wire-adapter contract test asserts a real `TIMEOUT` response and the recognition-only
+  OpenAPI failure reference/enum.
+- The Bailian strict JSON schema and the local parser both limit candidate names to 120 Unicode
+  code points. Focused tests accept 120 emoji code points and reject 121, while the request-shape
+  test asserts that the provider receives `maxLength: 120`.
+- A terminal-failure retry now replaces both ticket and job idempotency keys before re-uploading.
+  The browser test clicks `重试` and proves two distinct tickets/keys and a new job/media id; the
+  MVC lifecycle test completes a failed `TIMEOUT` attempt followed by a new ticket/upload/job that
+  reaches `SUCCEEDED`.
+- The remaining `MealRecord.createdAt` Minor is intentionally not synthesized. The existing
+  `meals` table has no `created_at` column, so it is deferred to Task 3's coordinated V7 migration
+  and DTO/query update rather than adding a fabricated timestamp or mutating historical V2.
+
+### Round 1 verification
+
+- `node scripts/contracts/lint.mjs`: passed (102 operations);
+  `node scripts/contracts/generate-types.mjs`: public client regenerated.
+- `npm --prefix frontend run typecheck` and
+  `npm --prefix frontend test -- MealRecordForm.test.tsx`: passed (4 tests).
+- `./mvnw -pl starter -am test -Dtest=FitnessExperienceIntegrationTest,FitnessV1RecognitionContractTest,MealRecognitionRuntimeTest,MealRecognitionWorkerTest,OssPresignedMediaUploadPortTest,DualSchemaIntegrationTest,FitnessV1IdempotencyConcurrencyIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`:
+  passed (22 tests; zero failures/errors).

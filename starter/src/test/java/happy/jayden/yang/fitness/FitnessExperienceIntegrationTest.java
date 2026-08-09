@@ -504,6 +504,31 @@ class FitnessExperienceIntegrationTest {
         .andExpect(jsonPath("$.failure.code").value("TIMEOUT"))
         .andExpect(jsonPath("$.failure.message").value("视觉模型超时"))
         .andExpect(jsonPath("$.failure.retryable").value(true));
+
+    recognitionPort.succeedWith("重试后的食物", 410, 0.9);
+    String retriedMediaId = createAndUpload(owner, image, sha256, "ticket-key-0005");
+    MvcResult retriedJob =
+        mvc.perform(
+                post("/api/v1/app/meal-recognition-jobs")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "job-key-0003")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"mediaId":"%s","mealType":"DINNER","occurredAt":"2026-08-09T12:00:00Z"}
+                        """
+                            .formatted(retriedMediaId)))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.status").value("QUEUED"))
+            .andReturn();
+    String retriedJobId =
+        objectMapper.readTree(retriedJob.getResponse().getContentAsString()).path("jobId").asText();
+    assertThat(retriedJobId).isNotEqualTo(failedJobId);
+    recognitionWorker.runOne();
+    mvc.perform(get("/api/v1/app/meal-recognition-jobs/{jobId}", retriedJobId).cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+        .andExpect(jsonPath("$.mediaId").value(retriedMediaId));
   }
 
   @Test

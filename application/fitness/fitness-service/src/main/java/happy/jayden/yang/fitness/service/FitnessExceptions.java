@@ -21,7 +21,12 @@ public final class FitnessExceptions {
       super(message);
     }
   }
-  public static final class ConflictException extends RuntimeException { public ConflictException(String message) { super(message); } }
+
+  public static final class ConflictException extends RuntimeException {
+    public ConflictException(String message) {
+      super(message);
+    }
+  }
 
   public static final class DependencyNotConfiguredException extends RuntimeException {
     public DependencyNotConfiguredException() {

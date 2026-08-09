@@ -9,11 +9,11 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
-import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -58,16 +58,29 @@ public final class FitnessPorts {
     Optional<MealRecognitionJobDto> findRecognitionJob(UUID userId, UUID jobId);
 
     MealDto createMealRecord(UUID userId, FitnessDtos.CreateMealRecordRequest request);
-    Optional<FitnessDtos.IdempotencyEntry> findIdempotency(UUID userId, String operation, String key);
-    void saveIdempotency(UUID userId, String operation, String key, String requestHash, UUID resourceId, String responseJson);
+
+    java.util.List<MealDto> listMealRecords(UUID userId);
+
+    Optional<FitnessDtos.IdempotencyEntry> findIdempotency(
+        UUID userId, String operation, String key);
+
+    void saveIdempotency(
+        UUID userId,
+        String operation,
+        String key,
+        String requestHash,
+        UUID resourceId,
+        String responseJson);
   }
 
   public interface MediaUploadPort {
-    MediaUploadTicket createTicket(UUID userId, String contentType, long contentLength, String sha256);
+    MediaUploadTicket createTicket(
+        UUID userId, String contentType, long contentLength, String sha256);
   }
 
   public interface MealRecognitionPort {
-    MealRecognitionResult recognize(UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
+    MealRecognitionResult recognize(
+        UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
   }
 
   public interface PasswordVerifier {

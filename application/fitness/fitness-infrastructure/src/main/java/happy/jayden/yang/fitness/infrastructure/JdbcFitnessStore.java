@@ -4,24 +4,24 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
-import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedMealRecognitionJob;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedMealRecognitionJob;
 import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.ExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
-import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.IdempotencyEntry;
+import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
@@ -47,7 +47,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcFitnessStore implements FitnessStore {
 
   private static final TypeReference<List<MealItemDto>> MEAL_ITEMS = new TypeReference<>() {};
-  private static final TypeReference<List<MealRecognitionCandidate>> CANDIDATES = new TypeReference<>() {};
+  private static final TypeReference<List<MealRecognitionCandidate>> CANDIDATES =
+      new TypeReference<>() {};
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
   private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
   private final JdbcTemplate jdbc;
@@ -63,7 +64,8 @@ public final class JdbcFitnessStore implements FitnessStore {
     try {
       return Optional.ofNullable(
           jdbc.queryForObject(
-              "SELECT user_id,nickname,password_hash FROM users WHERE username=? AND status='ACTIVE'",
+              "SELECT user_id,nickname,password_hash FROM users WHERE username=? AND"
+                  + " status='ACTIVE'",
               (rs, row) ->
                   new LoginAccount(
                       rs.getObject("user_id", UUID.class),
@@ -111,7 +113,8 @@ public final class JdbcFitnessStore implements FitnessStore {
     GoalState goal = latestGoal(userId);
     List<BodyRecordDto> records =
         jdbc.query(
-            "SELECT body_record_id,recorded_at,weight_jin,waist_cm FROM body_records WHERE user_id=? ORDER BY recorded_at DESC",
+            "SELECT body_record_id,recorded_at,weight_jin,waist_cm FROM body_records WHERE"
+                + " user_id=? ORDER BY recorded_at DESC",
             (rs, row) ->
                 new BodyRecordDto(
                     rs.getObject("body_record_id", UUID.class),
@@ -121,14 +124,16 @@ public final class JdbcFitnessStore implements FitnessStore {
             userId);
     List<MealDto> meals =
         jdbc.query(
-            "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note FROM meals WHERE user_id=? ORDER BY occurred_at DESC",
+            "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note FROM meals"
+                + " WHERE user_id=? ORDER BY occurred_at DESC",
             (rs, row) -> meal(rs),
             userId);
     List<MealRecommendationDto> mealRecommendations =
         jdbc.query(
-            "SELECT recommendation_id,recommendation_date,meal_type,items,reason,status,generated_at "
-                + "FROM daily_meal_recommendations WHERE user_id=? AND recommendation_date=? "
-                + "ORDER BY CASE meal_type WHEN 'BREAKFAST' THEN 1 WHEN 'LUNCH' THEN 2 ELSE 3 END",
+            "SELECT"
+                + " recommendation_id,recommendation_date,meal_type,items,reason,status,generated_at"
+                + " FROM daily_meal_recommendations WHERE user_id=? AND recommendation_date=? ORDER"
+                + " BY CASE meal_type WHEN 'BREAKFAST' THEN 1 WHEN 'LUNCH' THEN 2 ELSE 3 END",
             (rs, row) -> mealRecommendation(rs),
             userId,
             recommendationDate);
@@ -155,7 +160,8 @@ public final class JdbcFitnessStore implements FitnessStore {
     UUID id = UUID.randomUUID();
     Instant recordedAt = request.recordedAt() == null ? Instant.now() : request.recordedAt();
     jdbc.update(
-        "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES (?,?,?,?,?)",
+        "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES"
+            + " (?,?,?,?,?)",
         id,
         userId,
         Timestamp.from(recordedAt),
@@ -175,22 +181,43 @@ public final class JdbcFitnessStore implements FitnessStore {
         Timestamp.from(occurredAt),
         request.mealType().name(),
         json(request.items()));
-    return new MealDto(id, occurredAt, request.mealType(), List.copyOf(request.items()), "MANUAL", null, null);
+    return new MealDto(
+        id, occurredAt, request.mealType(), List.copyOf(request.items()), "MANUAL", null, null);
   }
 
   @Override
   public void markMediaUploaded(UUID userId, UUID mediaId) {
-    int changed = jdbc.update("UPDATE media_objects SET status='UPLOADED' WHERE media_id=? AND user_id=? AND status='PENDING' AND expires_at > CURRENT_TIMESTAMP", mediaId, userId);
+    int changed =
+        jdbc.update(
+            "UPDATE media_objects SET status='UPLOADED' WHERE media_id=? AND user_id=? AND"
+                + " status='PENDING' AND expires_at > CURRENT_TIMESTAMP",
+            mediaId,
+            userId);
     if (changed == 0) throw new NotFoundException("上传票据不存在或已失效");
   }
 
   @Override
-  public MealRecognitionJobDto createRecognitionJob(UUID userId, UUID mediaId, MealType mealType, Instant occurredAt) {
-    Long uploaded = jdbc.queryForObject("SELECT COUNT(*) FROM media_objects WHERE media_id=? AND user_id=? AND status='UPLOADED'", Long.class, mediaId, userId);
+  public MealRecognitionJobDto createRecognitionJob(
+      UUID userId, UUID mediaId, MealType mealType, Instant occurredAt) {
+    Long uploaded =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM media_objects WHERE media_id=? AND user_id=? AND"
+                + " status='UPLOADED'",
+            Long.class,
+            mediaId,
+            userId);
     if (uploaded == null || uploaded == 0) throw new NotFoundException("图片尚未上传完成");
     UUID id = UUID.randomUUID();
     Instant at = occurredAt == null ? Instant.now() : occurredAt;
-    jdbc.update("INSERT INTO meal_recognition_jobs(job_id,user_id,media_id,meal_type,occurred_at,status,candidates) VALUES (?,?,?,?,?,'QUEUED','[]'::jsonb)", id, userId, mediaId, mealType.name(), Timestamp.from(at));
+    jdbc.update(
+        "INSERT INTO"
+            + " meal_recognition_jobs(job_id,user_id,media_id,meal_type,occurred_at,status,candidates)"
+            + " VALUES (?,?,?,?,?,'QUEUED','[]'::jsonb)",
+        id,
+        userId,
+        mediaId,
+        mealType.name(),
+        Timestamp.from(at));
     return findRecognitionJob(userId, id).orElseThrow();
   }
 
@@ -199,43 +226,131 @@ public final class JdbcFitnessStore implements FitnessStore {
     if ("SUCCEEDED".equals(result.status()) && result.candidates().isEmpty()) {
       throw new IllegalArgumentException("SUCCEEDED recognition requires candidates");
     }
-    int changed = jdbc.update("UPDATE meal_recognition_jobs SET status=?,candidates=?::jsonb,failure_code=?,failure_message=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND status='RUNNING'", result.status(), json(result.candidates()), result.failureCode(), result.failureMessage(), jobId);
+    int changed =
+        jdbc.update(
+            "UPDATE meal_recognition_jobs SET"
+                + " status=?,candidates=?::jsonb,failure_code=?,failure_message=?,updated_at=CURRENT_TIMESTAMP"
+                + " WHERE job_id=? AND status='RUNNING'",
+            result.status(),
+            json(result.candidates()),
+            result.failureCode(),
+            result.failureMessage(),
+            jobId);
     if (changed != 1) throw new IllegalStateException("识别任务不是运行中状态");
-    return jdbc.query("SELECT job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at FROM meal_recognition_jobs WHERE job_id=?", (rs, row) -> recognitionJob(rs), jobId).stream().findFirst().orElseThrow(() -> new NotFoundException("识别任务不存在"));
+    return jdbc
+        .query(
+            "SELECT"
+                + " job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at"
+                + " FROM meal_recognition_jobs WHERE job_id=?",
+            (rs, row) -> recognitionJob(rs),
+            jobId)
+        .stream()
+        .findFirst()
+        .orElseThrow(() -> new NotFoundException("识别任务不存在"));
   }
 
   @Override
   public Optional<ClaimedMealRecognitionJob> claimNextRecognitionJob() {
-    return jdbc.query(
-            "WITH next AS (SELECT job_id FROM meal_recognition_jobs WHERE status='QUEUED' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) "
-                + "UPDATE meal_recognition_jobs j SET status='RUNNING',updated_at=CURRENT_TIMESTAMP FROM next WHERE j.job_id=next.job_id "
-                + "RETURNING j.job_id,j.user_id,j.media_id,j.meal_type,j.occurred_at",
-            (rs, row) -> new ClaimedMealRecognitionJob(
-                rs.getObject("job_id", UUID.class), rs.getObject("user_id", UUID.class),
-                rs.getObject("media_id", UUID.class), MealType.valueOf(rs.getString("meal_type")),
-                rs.getTimestamp("occurred_at").toInstant()))
+    return jdbc
+        .query(
+            "WITH next AS (SELECT job_id FROM meal_recognition_jobs WHERE status='QUEUED' ORDER BY"
+                + " created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE meal_recognition_jobs j SET"
+                + " status='RUNNING',updated_at=CURRENT_TIMESTAMP FROM next WHERE"
+                + " j.job_id=next.job_id RETURNING"
+                + " j.job_id,j.user_id,j.media_id,j.meal_type,j.occurred_at",
+            (rs, row) ->
+                new ClaimedMealRecognitionJob(
+                    rs.getObject("job_id", UUID.class),
+                    rs.getObject("user_id", UUID.class),
+                    rs.getObject("media_id", UUID.class),
+                    MealType.valueOf(rs.getString("meal_type")),
+                    rs.getTimestamp("occurred_at").toInstant()))
         .stream()
         .findFirst();
   }
 
   @Override
   public Optional<MealRecognitionJobDto> findRecognitionJob(UUID userId, UUID jobId) {
-    return jdbc.query("SELECT job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at FROM meal_recognition_jobs WHERE user_id=? AND job_id=?", (rs, row) -> recognitionJob(rs), userId, jobId).stream().findFirst();
+    return jdbc
+        .query(
+            "SELECT"
+                + " job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at"
+                + " FROM meal_recognition_jobs WHERE user_id=? AND job_id=?",
+            (rs, row) -> recognitionJob(rs),
+            userId,
+            jobId)
+        .stream()
+        .findFirst();
   }
 
   @Override
   public MealDto createMealRecord(UUID userId, CreateMealRecordRequest request) {
     UUID id = UUID.randomUUID();
     Instant occurredAt = request.occurredAt() == null ? Instant.now() : request.occurredAt();
-    jdbc.update("INSERT INTO meals(meal_id,user_id,occurred_at,meal_type,items,source,recognition_job_id,note) VALUES (?,?,?,?,?::jsonb,?,?,?)", id, userId, Timestamp.from(occurredAt), request.mealType().name(), json(request.items()), request.source(), request.recognitionJobId(), request.note());
-    return new MealDto(id, occurredAt, request.mealType(), List.copyOf(request.items()), request.source(), request.recognitionJobId(), request.note());
+    jdbc.update(
+        "INSERT INTO"
+            + " meals(meal_id,user_id,occurred_at,meal_type,items,source,recognition_job_id,note)"
+            + " VALUES (?,?,?,?,?::jsonb,?,?,?)",
+        id,
+        userId,
+        Timestamp.from(occurredAt),
+        request.mealType().name(),
+        json(request.items()),
+        request.source(),
+        request.recognitionJobId(),
+        request.note());
+    return new MealDto(
+        id,
+        occurredAt,
+        request.mealType(),
+        List.copyOf(request.items()),
+        request.source(),
+        request.recognitionJobId(),
+        request.note());
   }
 
-  @Override public Optional<IdempotencyEntry> findIdempotency(UUID userId, String operation, String key) {
-    return jdbc.query("SELECT resource_id,request_hash,response_json::text FROM fitness_idempotency_keys WHERE user_id=? AND operation=? AND idempotency_key=?", (rs,row) -> new IdempotencyEntry(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3)), userId,operation,key).stream().findFirst();
+  @Override
+  public List<MealDto> listMealRecords(UUID userId) {
+    return jdbc.query(
+        "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note FROM meals WHERE"
+            + " user_id=? ORDER BY occurred_at DESC",
+        (rs, row) -> meal(rs),
+        userId);
   }
-  @Override public void saveIdempotency(UUID userId,String operation,String key,String requestHash,UUID resourceId,String responseJson) {
-    jdbc.update("INSERT INTO fitness_idempotency_keys(user_id,operation,idempotency_key,request_hash,resource_id,response_json) VALUES (?,?,?,?,?,?::jsonb)",userId,operation,key,requestHash,resourceId,responseJson);
+
+  @Override
+  public Optional<IdempotencyEntry> findIdempotency(UUID userId, String operation, String key) {
+    return jdbc
+        .query(
+            "SELECT resource_id,request_hash,response_json::text FROM fitness_idempotency_keys"
+                + " WHERE user_id=? AND operation=? AND idempotency_key=?",
+            (rs, row) ->
+                new IdempotencyEntry(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)),
+            userId,
+            operation,
+            key)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public void saveIdempotency(
+      UUID userId,
+      String operation,
+      String key,
+      String requestHash,
+      UUID resourceId,
+      String responseJson) {
+    jdbc.update(
+        "INSERT INTO"
+            + " fitness_idempotency_keys(user_id,operation,idempotency_key,request_hash,resource_id,response_json)"
+            + " VALUES (?,?,?,?,?,?::jsonb)",
+        userId,
+        operation,
+        key,
+        requestHash,
+        resourceId,
+        responseJson);
   }
 
   @Override
@@ -243,14 +358,17 @@ public final class JdbcFitnessStore implements FitnessStore {
       UUID userId, UUID workoutId, CompleteWorkoutRequest request) {
     int changed =
         jdbc.update(
-            "UPDATE workout_plans SET status='COMPLETED',completion_ratio=?,completed_at=CURRENT_TIMESTAMP WHERE workout_plan_id=? AND user_id=? AND status<>'COMPLETED'",
+            "UPDATE workout_plans SET"
+                + " status='COMPLETED',completion_ratio=?,completed_at=CURRENT_TIMESTAMP WHERE"
+                + " workout_plan_id=? AND user_id=? AND status<>'COMPLETED'",
             request.completionRatio(),
             workoutId,
             userId);
     if (changed == 0) {
       return jdbc
           .query(
-              "SELECT workout_plan_id,status,completion_ratio FROM workout_plans WHERE workout_plan_id=? AND user_id=?",
+              "SELECT workout_plan_id,status,completion_ratio FROM workout_plans WHERE"
+                  + " workout_plan_id=? AND user_id=?",
               (rs, row) ->
                   new WorkoutCompletionDto(
                       rs.getObject("workout_plan_id", UUID.class),
@@ -270,7 +388,8 @@ public final class JdbcFitnessStore implements FitnessStore {
     BigDecimal current =
         jdbc
             .query(
-                "SELECT weight_jin FROM body_records WHERE user_id=? AND weight_jin IS NOT NULL ORDER BY recorded_at DESC LIMIT 1",
+                "SELECT weight_jin FROM body_records WHERE user_id=? AND weight_jin IS NOT NULL"
+                    + " ORDER BY recorded_at DESC LIMIT 1",
                 (rs, row) -> rs.getBigDecimal(1),
                 userId)
             .stream()
@@ -278,7 +397,9 @@ public final class JdbcFitnessStore implements FitnessStore {
             .orElseThrow(() -> new NotFoundException("请先记录体重"));
     UUID id = UUID.randomUUID();
     jdbc.update(
-        "INSERT INTO goals(goal_id,user_id,name,start_weight_jin,target_weight_jin,target_date,status) VALUES (?,?,?,?,?,?,'ACTIVE')",
+        "INSERT INTO"
+            + " goals(goal_id,user_id,name,start_weight_jin,target_weight_jin,target_date,status)"
+            + " VALUES (?,?,?,?,?,?,'ACTIVE')",
         id,
         userId,
         request.name().trim(),
@@ -296,11 +417,16 @@ public final class JdbcFitnessStore implements FitnessStore {
   public void seedLocalExperience(String passwordHash) {
     UUID userId = UUID.fromString("10000000-0000-0000-0000-000000000001");
     jdbc.update(
-        "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname) VALUES (?,'local:user','ACTIVE','user',?,'小秦') ON CONFLICT (external_subject) DO UPDATE SET username='user',password_hash=EXCLUDED.password_hash,nickname='小秦',status='ACTIVE'",
+        "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname) VALUES"
+            + " (?,'local:user','ACTIVE','user',?,'小秦') ON CONFLICT (external_subject) DO UPDATE"
+            + " SET username='user',password_hash=EXCLUDED.password_hash,nickname='小秦',status='ACTIVE'",
         userId,
         passwordHash);
     jdbc.update(
-        "INSERT INTO goals(goal_id,user_id,name,start_weight_jin,target_weight_jin,target_date,status,created_at) VALUES ('20000000-0000-0000-0000-000000000001',?,'8周减脂入门',160,140,CURRENT_DATE + 56,'ACTIVE',CURRENT_TIMESTAMP - INTERVAL '8 weeks') ON CONFLICT DO NOTHING",
+        "INSERT INTO"
+            + " goals(goal_id,user_id,name,start_weight_jin,target_weight_jin,target_date,status,created_at)"
+            + " VALUES ('20000000-0000-0000-0000-000000000001',?,'8周减脂入门',160,140,CURRENT_DATE +"
+            + " 56,'ACTIVE',CURRENT_TIMESTAMP - INTERVAL '8 weeks') ON CONFLICT DO NOTHING",
         userId);
 
     seedExercises();
@@ -308,14 +434,16 @@ public final class JdbcFitnessStore implements FitnessStore {
       LocalDate weekDate = LocalDate.now(USER_ZONE).minusWeeks(8L - week);
       String suffix = String.format("%012d", week);
       jdbc.update(
-          "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES (?::uuid,?,?,?,?) ON CONFLICT DO NOTHING",
+          "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES"
+              + " (?::uuid,?,?,?,?) ON CONFLICT DO NOTHING",
           "30000000-0000-0000-0000-" + suffix,
           userId,
           Timestamp.from(weekDate.atStartOfDay(USER_ZONE).toInstant()),
           BigDecimal.valueOf(157L - week),
           BigDecimal.valueOf(91L - week));
       jdbc.update(
-          "INSERT INTO meals(meal_id,user_id,occurred_at,meal_type,items) VALUES (?::uuid,?,?,?,?::jsonb) ON CONFLICT DO NOTHING",
+          "INSERT INTO meals(meal_id,user_id,occurred_at,meal_type,items) VALUES"
+              + " (?::uuid,?,?,?,?::jsonb) ON CONFLICT DO NOTHING",
           "40000000-0000-0000-0000-" + suffix,
           userId,
           Timestamp.from(weekDate.atTime(0, 1).atZone(USER_ZONE).toInstant()),
@@ -323,13 +451,16 @@ public final class JdbcFitnessStore implements FitnessStore {
           "[{\"name\":\"第" + week + "周均衡餐\",\"estimatedKcal\":520}]");
       String planId = "50000000-0000-0000-0000-" + suffix;
       jdbc.update(
-          "INSERT INTO workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for) VALUES (?::uuid,?,'全身燃脂训练',28,'PLANNED',?) ON CONFLICT DO NOTHING",
+          "INSERT INTO"
+              + " workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for)"
+              + " VALUES (?::uuid,?,'全身燃脂训练',28,'PLANNED',?) ON CONFLICT DO NOTHING",
           planId,
           userId,
           weekDate);
       for (int exercise = 1; exercise <= 4; exercise++) {
         jdbc.update(
-            "INSERT INTO workout_plan_exercises(workout_plan_id,exercise_id,display_order) VALUES (?::uuid,?::uuid,?) ON CONFLICT DO NOTHING",
+            "INSERT INTO workout_plan_exercises(workout_plan_id,exercise_id,display_order) VALUES"
+                + " (?::uuid,?::uuid,?) ON CONFLICT DO NOTHING",
             planId,
             "60000000-0000-0000-0000-" + String.format("%012d", exercise),
             exercise);
@@ -354,19 +485,18 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   private void seedMealRecommendation(
-      UUID userId,
-      String mealType,
-      List<MealItemDto> items,
-      String reason) {
+      UUID userId, String mealType, List<MealItemDto> items, String reason) {
     LocalDate recommendationDate = LocalDate.now(USER_ZONE);
     UUID recommendationId =
         UUID.nameUUIDFromBytes(
             ("local-meal-recommendation-" + recommendationDate + "-" + mealType)
                 .getBytes(StandardCharsets.UTF_8));
     jdbc.update(
-        "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at) "
-            + "VALUES (?::uuid,?,?,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) "
-            + "ON CONFLICT (user_id,recommendation_date,meal_type) DO UPDATE SET items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
+        "INSERT INTO"
+            + " daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at)"
+            + " VALUES (?::uuid,?,?,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) ON CONFLICT"
+            + " (user_id,recommendation_date,meal_type) DO UPDATE SET"
+            + " items=EXCLUDED.items,reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
         recommendationId,
         userId,
         recommendationDate,
@@ -387,17 +517,19 @@ public final class JdbcFitnessStore implements FitnessStore {
       return;
     }
     UUID planId =
-        UUID.nameUUIDFromBytes(
-            ("local-workout-plan-" + today).getBytes(StandardCharsets.UTF_8));
+        UUID.nameUUIDFromBytes(("local-workout-plan-" + today).getBytes(StandardCharsets.UTF_8));
     jdbc.update(
-        "INSERT INTO workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for) VALUES (?,?,? ,28,'PLANNED',?)",
+        "INSERT INTO"
+            + " workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for)"
+            + " VALUES (?,?,? ,28,'PLANNED',?)",
         planId,
         userId,
         "全身燃脂训练",
         today);
     for (int exercise = 1; exercise <= 4; exercise++) {
       jdbc.update(
-          "INSERT INTO workout_plan_exercises(workout_plan_id,exercise_id,display_order) VALUES (?,?::uuid,?) ON CONFLICT DO NOTHING",
+          "INSERT INTO workout_plan_exercises(workout_plan_id,exercise_id,display_order) VALUES"
+              + " (?,?::uuid,?) ON CONFLICT DO NOTHING",
           planId,
           "60000000-0000-0000-0000-" + String.format("%012d", exercise),
           exercise);
@@ -451,14 +583,17 @@ public final class JdbcFitnessStore implements FitnessStore {
     List<String> images = new ArrayList<>();
     for (int step = 1; step <= 4; step++) {
       images.add(
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='240'%3E%3Crect width='100%25' height='100%25' fill='%23eef2ff'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' fill='%23312e81'%3E"
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320'"
+              + " height='240'%3E%3Crect width='100%25' height='100%25' fill='%23eef2ff'/%3E%3Ctext"
+              + " x='50%25' y='50%25' text-anchor='middle' fill='%23312e81'%3E"
               + name
               + " 第"
               + step
               + "步示意%3C/text%3E%3C/svg%3E");
     }
     jdbc.update(
-        "INSERT INTO exercises(exercise_id,name,target_area,sets,seconds,steps,errors,image_urls) VALUES (?::uuid,?,?,?,?,?::jsonb,?::jsonb,?::jsonb) ON CONFLICT DO NOTHING",
+        "INSERT INTO exercises(exercise_id,name,target_area,sets,seconds,steps,errors,image_urls)"
+            + " VALUES (?::uuid,?,?,?,?,?::jsonb,?::jsonb,?::jsonb) ON CONFLICT DO NOTHING",
         id,
         name,
         area,
@@ -471,7 +606,8 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   private GoalState latestGoal(UUID userId) {
     return required(
-        "SELECT goal_id,name,start_weight_jin,target_weight_jin,status FROM goals WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+        "SELECT goal_id,name,start_weight_jin,target_weight_jin,status FROM goals WHERE user_id=?"
+            + " ORDER BY created_at DESC LIMIT 1",
         (rs, row) ->
             new GoalState(
                 rs.getObject("goal_id", UUID.class),
@@ -486,16 +622,18 @@ public final class JdbcFitnessStore implements FitnessStore {
     PlanDto base =
         jdbc
             .query(
-            "SELECT workout_plan_id,title,estimated_minutes,status FROM workout_plans WHERE user_id=? AND scheduled_for=? ORDER BY CASE status WHEN 'PLANNED' THEN 0 ELSE 1 END, workout_plan_id LIMIT 1",
-            (rs, row) ->
-                new PlanDto(
-                    rs.getObject("workout_plan_id", UUID.class),
-                    rs.getString("title"),
-                    rs.getInt("estimated_minutes"),
-                    rs.getString("status"),
-                    List.of()),
-            userId,
-            scheduledFor)
+                "SELECT workout_plan_id,title,estimated_minutes,status FROM workout_plans WHERE"
+                    + " user_id=? AND scheduled_for=? ORDER BY CASE status WHEN 'PLANNED' THEN 0"
+                    + " ELSE 1 END, workout_plan_id LIMIT 1",
+                (rs, row) ->
+                    new PlanDto(
+                        rs.getObject("workout_plan_id", UUID.class),
+                        rs.getString("title"),
+                        rs.getInt("estimated_minutes"),
+                        rs.getString("status"),
+                        List.of()),
+                userId,
+                scheduledFor)
             .stream()
             .findFirst()
             .orElse(null);
@@ -504,7 +642,9 @@ public final class JdbcFitnessStore implements FitnessStore {
     }
     List<PlanExerciseDto> exercises =
         jdbc.query(
-            "SELECT e.exercise_id,e.name,e.target_area,e.sets,e.seconds,e.steps,e.errors FROM workout_plan_exercises pe JOIN exercises e ON e.exercise_id=pe.exercise_id WHERE pe.workout_plan_id=? ORDER BY pe.display_order",
+            "SELECT e.exercise_id,e.name,e.target_area,e.sets,e.seconds,e.steps,e.errors FROM"
+                + " workout_plan_exercises pe JOIN exercises e ON e.exercise_id=pe.exercise_id"
+                + " WHERE pe.workout_plan_id=? ORDER BY pe.display_order",
             (rs, row) ->
                 new PlanExerciseDto(
                     rs.getObject("exercise_id", UUID.class),
@@ -520,7 +660,8 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   private List<ExerciseDto> exerciseDetails() {
     return jdbc.query(
-        "SELECT exercise_id,name,target_area,sets,seconds,steps,errors,image_urls FROM exercises ORDER BY name",
+        "SELECT exercise_id,name,target_area,sets,seconds,steps,errors,image_urls FROM exercises"
+            + " ORDER BY name",
         (rs, row) ->
             new ExerciseDto(
                 rs.getObject("exercise_id", UUID.class),
@@ -551,8 +692,20 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   private MealRecognitionJobDto recognitionJob(ResultSet rs) throws SQLException {
     try {
-      return new MealRecognitionJobDto(rs.getObject("job_id", UUID.class), rs.getString("status"), rs.getObject("media_id", UUID.class), MealType.valueOf(rs.getString("meal_type")), rs.getTimestamp("occurred_at").toInstant(), objectMapper.readValue(rs.getString("candidates"), CANDIDATES), rs.getString("failure_code"), rs.getString("failure_message"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
-    } catch (JsonProcessingException exception) { throw new SQLException("Invalid recognition candidates JSON", exception); }
+      return new MealRecognitionJobDto(
+          rs.getObject("job_id", UUID.class),
+          rs.getString("status"),
+          rs.getObject("media_id", UUID.class),
+          MealType.valueOf(rs.getString("meal_type")),
+          rs.getTimestamp("occurred_at").toInstant(),
+          objectMapper.readValue(rs.getString("candidates"), CANDIDATES),
+          rs.getString("failure_code"),
+          rs.getString("failure_message"),
+          rs.getTimestamp("created_at").toInstant(),
+          rs.getTimestamp("updated_at").toInstant());
+    } catch (JsonProcessingException exception) {
+      throw new SQLException("Invalid recognition candidates JSON", exception);
+    }
   }
 
   private MealRecommendationDto mealRecommendation(ResultSet rs) throws SQLException {

@@ -14,10 +14,17 @@ public final class MealRecognitionWorker {
     this.runtime = runtime;
   }
 
-  @Scheduled(fixedDelayString = "${happy.fitness.recognition.poll-ms:500}")
+  @Scheduled(
+      fixedDelayString = "${happy.fitness.recognition.poll-ms:500}",
+      initialDelayString = "${happy.fitness.recognition.initial-delay-ms:500}")
   public void runOne() {
-    store.claimNextRecognitionJob().ifPresent(job ->
-        store.updateRecognitionJob(
-            job.jobId(), runtime.recognize(job.userId(), job.mediaId(), job.mealType(), job.occurredAt())));
+    store
+        .claimNextRecognitionJob()
+        .ifPresent(
+            job ->
+                store.updateRecognitionJob(
+                    job.jobId(),
+                    runtime.recognize(
+                        job.userId(), job.mediaId(), job.mealType(), job.occurredAt())));
   }
 }

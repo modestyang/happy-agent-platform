@@ -30,4 +30,29 @@
 - The UI now polls the server-issued job id only, clears intervals on unmount/state change, and keeps the image preview when the user selects manual fallback.
 - Dual-schema coverage now expects five fitness migrations and asserts recognition tables have no foreign key outside `fitness`.
 
-Remaining work intentionally left open: a production OSS presigned-PUT adapter and persistent idempotency implementation for all three POST endpoints; the HTTP inference code is present but still lacks its required local HTTP-server request-body test and a full image/job lifecycle endpoint test.
+## Final remediation — lifecycle and idempotency race
+
+- The production configuration and HTTP inference adapter landed in the preceding Task 2 commits. This round audited `V6__fitness_idempotency_keys.sql`: its `(user_id, operation, idempotency_key)` uniqueness is now used inside a transaction. On a unique-key race the controller rolls back its attempted resource write, reads the committed idempotency row, and returns the saved response for an equal request hash or `409` for a different hash. It never returns a transient `500` or creates a second resource.
+- Added a real Spring MVC → application service → JDBC → durable worker lifecycle test. It uses only a test-profile fake recognition port; ticket, upload, job, meal confirmation, persistence, and worker execution are the application’s real paths. It verifies `ticket → PUT → 202 QUEUED → explicit worker → GET SUCCEEDED → edited confirmation → GET meal-records`.
+- The lifecycle test also verifies ticket owner, expiry, SHA-256, and MIME rejection; mandatory `Idempotency-Key` on all three POSTs; equal-payload replay with the original resource; different-payload `409`; the `MealRecord` JSON contract; and a nested recognition failure response. It proves no inference call occurs on the HTTP request thread before the worker is explicitly run.
+- Added a two-request barrier concurrency integration test. Both requests reach the V6 unique-key contention point; both receive the same `201` JSON response while the database contains exactly one media object and one idempotency row.
+
+## Final verification
+
+- `./mvnw -pl starter -am test -Dtest=FitnessExperienceIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`: 6 passed.
+- `./mvnw -pl starter -am test -Dtest=FitnessV1IdempotencyConcurrencyIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`: 1 passed.
+- `./mvnw -pl starter -am test -DskipITs=false`: Task 2 Surefire reports are green (`FitnessExperienceIntegrationTest` 6, the concurrency test 1, and `MealRecognitionRuntimeTest` 1; all have 0 failures/errors). The aggregate run is blocked by an already-dirty, unstaged `DualSchemaIntegrationTest`: it expects five fitness migrations while the current V1–V6 directory applies six. That non-Task-2 change is deliberately not modified or staged here.
+- `npm --prefix frontend test -- MealRecordForm.test.tsx`: 3 passed; `npm --prefix frontend run typecheck`: passed.
+- `node scripts/contracts/lint.mjs`: 101 operations validated. `node scripts/contracts/generate-types.mjs` succeeded; a pre-existing dirty `admin-v1.yaml` also changes generated `frontend/src/api/generated/admin.ts`, so that unrelated file is intentionally excluded from this Task 2 commit.
+- `git diff --check`: passed.
+
+## Review closure evidence
+
+- Critical — deployable inference: the existing runtime/HTTP adapter and its focused runtime test remain wired through the durable worker; the lifecycle test exercises the worker boundary with a controlled test port.
+- Critical — public endpoint paths: the lifecycle test invokes only `/api/v1/app/...` and exercises ticket, upload, job, meal, and list endpoints through MVC.
+- Critical — asynchronous durable processing: the test asserts `QUEUED` and zero fake-port calls before `runOne()`, then `SUCCEEDED` only after the worker claims the stored job.
+- Critical — response contract: the test asserts `mealRecordId`, edited item/nutrition fields, list page shape, and nested recognition failure fields.
+- Important — upload safety: local-upload validation is covered for owner, expiry, MIME, and exact bytes/SHA; the existing signed-upload adapter remains the production path.
+- Important — persistence/schema boundaries: V4/V5 are unchanged and V6 contention is covered. The unrelated, currently dirty dual-schema count assertion must be updated from five to six by its owner before the aggregate reactor is fully green.
+- Important — idempotency semantics: all three POST operations have missing-key, replay, and conflict assertions; the new barrier test covers the database race.
+- Important — client lifecycle: the focused `MealRecordForm` suite still passes its upload/edit/failure/manual-fallback cases, while the new server lifecycle test covers the job states it consumes.

@@ -8,9 +8,9 @@ import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecognitionJobRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMediaUploadTicketRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
@@ -29,7 +29,6 @@ import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
-import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -113,12 +112,26 @@ public final class FitnessApplicationService {
   public UUID authenticateSession(String sessionToken) {
     return authenticate(sessionToken);
   }
-  public java.util.Optional<FitnessDtos.IdempotencyEntry> idempotency(UUID userId, String operation, String key) { return store.findIdempotency(userId, operation, key); }
-  public void saveIdempotency(UUID userId, String operation, String key, String hash, UUID resourceId, String responseJson) { store.saveIdempotency(userId, operation, key, hash, resourceId, responseJson); }
+
+  public java.util.Optional<FitnessDtos.IdempotencyEntry> idempotency(
+      UUID userId, String operation, String key) {
+    return store.findIdempotency(userId, operation, key);
+  }
+
+  public void saveIdempotency(
+      UUID userId,
+      String operation,
+      String key,
+      String hash,
+      UUID resourceId,
+      String responseJson) {
+    store.saveIdempotency(userId, operation, key, hash, resourceId, responseJson);
+  }
 
   /** Loads data for a trusted in-process Agent Tool context. */
   public BootstrapData loadForTool(UUID userId) {
-    return store.loadBootstrap(java.util.Objects.requireNonNull(userId, "userId"), LocalDate.now(USER_ZONE));
+    return store.loadBootstrap(
+        java.util.Objects.requireNonNull(userId, "userId"), LocalDate.now(USER_ZONE));
   }
 
   public BodyRecordDto createBodyRecord(String sessionToken, CreateBodyRecordRequest request) {
@@ -145,7 +158,11 @@ public final class FitnessApplicationService {
 
   public MediaUploadTicket createMediaUploadTicket(
       String sessionToken, CreateMediaUploadTicketRequest request) {
-    if (request == null || !"MEAL_RECOGNITION".equals(request.purpose()) || blank(request.contentType()) || request.contentLength() <= 0 || blank(request.sha256())) {
+    if (request == null
+        || !"MEAL_RECOGNITION".equals(request.purpose())
+        || blank(request.contentType())
+        || request.contentLength() <= 0
+        || blank(request.sha256())) {
       throw new InvalidRequestException("purpose、contentType、contentLength 和 sha256 必填");
     }
     if (!List.of("image/jpeg", "image/png", "image/webp").contains(request.contentType())
@@ -153,7 +170,11 @@ public final class FitnessApplicationService {
         || !request.sha256().matches("[a-f0-9]{64}")) {
       throw new InvalidRequestException("图片格式、大小或 SHA-256 不合法");
     }
-    return mediaUploadPort.createTicket(authenticate(sessionToken), request.contentType(), request.contentLength(), request.sha256());
+    return mediaUploadPort.createTicket(
+        authenticate(sessionToken),
+        request.contentType(),
+        request.contentLength(),
+        request.sha256());
   }
 
   public void markMediaUploaded(String sessionToken, UUID mediaId) {
@@ -166,24 +187,46 @@ public final class FitnessApplicationService {
       throw new InvalidRequestException("mediaId 和 mealType 必填");
     }
     UUID userId = authenticate(sessionToken);
-    return store.createRecognitionJob(userId, request.mediaId(), request.mealType(), request.occurredAt());
+    return store.createRecognitionJob(
+        userId, request.mediaId(), request.mealType(), request.occurredAt());
   }
 
   public MealRecognitionJobDto mealRecognitionJob(String sessionToken, UUID jobId) {
-    return store.findRecognitionJob(authenticate(sessionToken), jobId).orElseThrow(() -> new happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException("识别任务不存在"));
+    return store
+        .findRecognitionJob(authenticate(sessionToken), jobId)
+        .orElseThrow(
+            () ->
+                new happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException(
+                    "识别任务不存在"));
   }
 
   public MealDto createMealRecord(String sessionToken, CreateMealRecordRequest request) {
-    if (request == null || request.mealType() == null || request.items() == null || request.items().isEmpty()) throw new InvalidRequestException("mealType 和 items 必填");
-    if (!"MANUAL".equals(request.source()) && !"RECOGNITION_CONFIRMED".equals(request.source())) throw new InvalidRequestException("source 不合法");
+    if (request == null
+        || request.mealType() == null
+        || request.items() == null
+        || request.items().isEmpty()) throw new InvalidRequestException("mealType 和 items 必填");
+    if (!"MANUAL".equals(request.source()) && !"RECOGNITION_CONFIRMED".equals(request.source()))
+      throw new InvalidRequestException("source 不合法");
     UUID userId = authenticate(sessionToken);
     if ("RECOGNITION_CONFIRMED".equals(request.source())) {
-      if (request.recognitionJobId() == null) throw new InvalidRequestException("RECOGNITION_CONFIRMED 必须带 recognitionJobId");
-      MealRecognitionJobDto job = store.findRecognitionJob(userId, request.recognitionJobId()).orElseThrow(() -> new happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException("识别任务不存在"));
+      if (request.recognitionJobId() == null)
+        throw new InvalidRequestException("RECOGNITION_CONFIRMED 必须带 recognitionJobId");
+      MealRecognitionJobDto job =
+          store
+              .findRecognitionJob(userId, request.recognitionJobId())
+              .orElseThrow(
+                  () ->
+                      new happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException(
+                          "识别任务不存在"));
       if (!"SUCCEEDED".equals(job.status())) throw new InvalidRequestException("识别任务尚未成功");
     }
-    if (request.items().stream().anyMatch(item -> blank(item.name()) || item.estimatedKcal() < 0)) throw new InvalidRequestException("餐食名称不能为空且 estimatedKcal 不能为负数");
+    if (request.items().stream().anyMatch(item -> blank(item.name()) || item.estimatedKcal() < 0))
+      throw new InvalidRequestException("餐食名称不能为空且 estimatedKcal 不能为负数");
     return store.createMealRecord(userId, request);
+  }
+
+  public List<MealDto> mealRecords(String sessionToken) {
+    return store.listMealRecords(authenticate(sessionToken));
   }
 
   public WorkoutCompletionDto completeWorkout(

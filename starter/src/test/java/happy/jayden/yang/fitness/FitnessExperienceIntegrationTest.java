@@ -3,6 +3,7 @@ package happy.jayden.yang.fitness;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -12,18 +13,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.StarterApplication;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
+import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import jakarta.servlet.http.Cookie;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -38,6 +55,7 @@ import org.testcontainers.utility.MountableFile;
 @Testcontainers
 @SpringBootTest(classes = StarterApplication.class)
 @AutoConfigureMockMvc
+@Import(FitnessExperienceIntegrationTest.RecognitionPortConfiguration.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class FitnessExperienceIntegrationTest {
 
@@ -66,6 +84,12 @@ class FitnessExperienceIntegrationTest {
 
   @Autowired private MockMvc mvc;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private MealRecognitionWorker recognitionWorker;
+  @Autowired private ControlledRecognitionPort recognitionPort;
+
+  @Autowired
+  @Qualifier("fitnessDataSource")
+  private DataSource fitnessDataSource;
 
   @DynamicPropertySource
   static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -75,6 +99,7 @@ class FitnessExperienceIntegrationTest {
     registry.add("happy.datasource.agent.password", () -> "agent-test-password");
     registry.add("happy.fitness.local-seed.enabled", () -> "true");
     registry.add("happy.fitness.local-media.enabled", () -> "true");
+    registry.add("happy.fitness.recognition.initial-delay-ms", () -> "3600000");
   }
 
   @Test
@@ -208,16 +233,332 @@ class FitnessExperienceIntegrationTest {
     mvc.perform(get("/api/app/bootstrap").cookie(session)).andExpect(status().isUnauthorized());
   }
 
+  @Test
+  @Order(6)
+  void mealRecognitionUsesDurableControllerServiceJdbcAndWorkerLifecycle() throws Exception {
+    recognitionPort.succeedWith("手工修改前的候选", 610, 0.91);
+    byte[] image = "valid-png-image".getBytes(StandardCharsets.UTF_8);
+    String sha256 = sha256(image);
+    Cookie owner = login();
+
+    mvc.perform(
+            post("/api/v1/app/media-upload-tickets")
+                .cookie(owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ticketRequest("image/png", image.length, sha256)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+    MvcResult ticketResult =
+        mvc.perform(
+                post("/api/v1/app/media-upload-tickets")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "ticket-key-0001")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(ticketRequest("image/png", image.length, sha256)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.method").value("PUT"))
+            .andExpect(jsonPath("$.uploadUrl").isString())
+            .andReturn();
+    JsonNode ticket = objectMapper.readTree(ticketResult.getResponse().getContentAsString());
+    String mediaId = ticket.path("mediaId").asText();
+    assertThat(ticket.path("uploadUrl").asText())
+        .isEqualTo("http://localhost/api/v1/app/media-uploads/" + mediaId);
+
+    mvc.perform(
+            post("/api/v1/app/media-upload-tickets")
+                .cookie(owner)
+                .header("Idempotency-Key", "ticket-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ticketRequest("image/png", image.length, sha256)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.mediaId").value(mediaId));
+
+    mvc.perform(
+            post("/api/v1/app/media-upload-tickets")
+                .cookie(owner)
+                .header("Idempotency-Key", "ticket-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ticketRequest("image/jpeg", image.length, sha256)))
+        .andExpect(status().isConflict());
+
+    mvc.perform(
+            post("/api/v1/app/media-upload-tickets")
+                .cookie(owner)
+                .header("Idempotency-Key", "ticket-key-0002")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ticketRequest("image/gif", image.length, sha256)))
+        .andExpect(status().isBadRequest());
+
+    MvcResult expiredTicket =
+        mvc.perform(
+                post("/api/v1/app/media-upload-tickets")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "ticket-key-0004")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(ticketRequest("image/png", image.length, sha256)))
+            .andExpect(status().isCreated())
+            .andReturn();
+    String expiredMediaId =
+        objectMapper
+            .readTree(expiredTicket.getResponse().getContentAsString())
+            .path("mediaId")
+            .asText();
+    new org.springframework.jdbc.core.JdbcTemplate(fitnessDataSource)
+        .update(
+            "UPDATE media_objects SET expires_at=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE"
+                + " media_id=?",
+            UUID.fromString(expiredMediaId));
+    mvc.perform(
+            put("/api/v1/app/media-uploads/{mediaId}", expiredMediaId)
+                .cookie(owner)
+                .contentType(MediaType.IMAGE_PNG)
+                .content(image))
+        .andExpect(status().isNotFound());
+
+    Cookie otherUser = createOtherUser();
+    mvc.perform(
+            put("/api/v1/app/media-uploads/{mediaId}", mediaId)
+                .cookie(otherUser)
+                .contentType(MediaType.IMAGE_PNG)
+                .content(image))
+        .andExpect(status().isNotFound());
+
+    mvc.perform(
+            put("/api/v1/app/media-uploads/{mediaId}", mediaId)
+                .cookie(owner)
+                .contentType(MediaType.IMAGE_JPEG)
+                .content(image))
+        .andExpect(status().isBadRequest());
+
+    mvc.perform(
+            put("/api/v1/app/media-uploads/{mediaId}", mediaId)
+                .cookie(owner)
+                .contentType(MediaType.IMAGE_PNG)
+                .content("wrong-image".getBytes(StandardCharsets.UTF_8)))
+        .andExpect(status().isBadRequest());
+
+    mvc.perform(
+            put("/api/v1/app/media-uploads/{mediaId}", mediaId)
+                .cookie(owner)
+                .contentType(MediaType.IMAGE_PNG)
+                .content(image))
+        .andExpect(status().isNoContent());
+
+    String jobRequest =
+        """
+        {"mediaId":"%s","mealType":"LUNCH","occurredAt":"2026-08-09T08:00:00Z"}
+        """
+            .formatted(mediaId);
+    mvc.perform(
+            post("/api/v1/app/meal-recognition-jobs")
+                .cookie(owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jobRequest))
+        .andExpect(status().isBadRequest());
+
+    MvcResult jobResult =
+        mvc.perform(
+                post("/api/v1/app/meal-recognition-jobs")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "job-key-0001")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(jobRequest))
+            .andExpect(status().isAccepted())
+            .andExpect(
+                header()
+                    .string(
+                        "Location",
+                        org.hamcrest.Matchers.containsString("/meal-recognition-jobs/")))
+            .andExpect(header().string("Retry-After", "1"))
+            .andExpect(jsonPath("$.status").value("QUEUED"))
+            .andExpect(jsonPath("$.candidates").isEmpty())
+            .andReturn();
+    String jobId =
+        objectMapper.readTree(jobResult.getResponse().getContentAsString()).path("jobId").asText();
+    assertThat(recognitionPort.calls()).isZero();
+
+    mvc.perform(
+            post("/api/v1/app/meal-recognition-jobs")
+                .cookie(owner)
+                .header("Idempotency-Key", "job-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jobRequest))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.jobId").value(jobId));
+
+    mvc.perform(
+            post("/api/v1/app/meal-recognition-jobs")
+                .cookie(owner)
+                .header("Idempotency-Key", "job-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jobRequest.replace("LUNCH", "DINNER")))
+        .andExpect(status().isConflict());
+
+    mvc.perform(get("/api/v1/app/meal-recognition-jobs/{jobId}", jobId).cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("QUEUED"));
+
+    recognitionWorker.runOne();
+
+    mvc.perform(get("/api/v1/app/meal-recognition-jobs/{jobId}", jobId).cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+        .andExpect(jsonPath("$.candidates[0].name").value("手工修改前的候选"))
+        .andExpect(jsonPath("$.failure").doesNotExist());
+    assertThat(recognitionPort.calls()).isEqualTo(1);
+
+    String mealRequest =
+        """
+{"mealType":"LUNCH","occurredAt":"2026-08-09T08:00:00Z","source":"RECOGNITION_CONFIRMED","recognitionJobId":"%s","note":"改成实际份量","items":[{"name":"手工修改后的鸡肉饭","estimatedKcal":560}]}
+"""
+            .formatted(jobId);
+    mvc.perform(
+            post("/api/v1/app/meal-records")
+                .cookie(owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mealRequest))
+        .andExpect(status().isBadRequest());
+
+    MvcResult mealResult =
+        mvc.perform(
+                post("/api/v1/app/meal-records")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "meal-key-0001")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(mealRequest))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.mealRecordId").isString())
+            .andExpect(jsonPath("$.id").doesNotExist())
+            .andExpect(jsonPath("$.items[0].name").value("手工修改后的鸡肉饭"))
+            .andExpect(jsonPath("$.nutrition.caloriesKcal").value(560))
+            .andExpect(jsonPath("$.createdAt").isString())
+            .andReturn();
+    String mealId =
+        objectMapper
+            .readTree(mealResult.getResponse().getContentAsString())
+            .path("mealRecordId")
+            .asText();
+
+    mvc.perform(
+            post("/api/v1/app/meal-records")
+                .cookie(owner)
+                .header("Idempotency-Key", "meal-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mealRequest))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.mealRecordId").value(mealId));
+
+    mvc.perform(
+            post("/api/v1/app/meal-records")
+                .cookie(owner)
+                .header("Idempotency-Key", "meal-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mealRequest.replace("560", "561")))
+        .andExpect(status().isConflict());
+
+    MvcResult records =
+        mvc.perform(get("/api/v1/app/meal-records").cookie(owner))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.page.hasMore").value(false))
+            .andReturn();
+    assertThat(
+            objectMapper
+                .readTree(records.getResponse().getContentAsString())
+                .path("items")
+                .findValuesAsText("mealRecordId"))
+        .contains(mealId);
+
+    recognitionPort.failWith("TIMEOUT", "视觉模型超时");
+    String failedMediaId = createAndUpload(owner, image, sha256, "ticket-key-0003");
+    MvcResult failedJob =
+        mvc.perform(
+                post("/api/v1/app/meal-recognition-jobs")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "job-key-0002")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"mediaId":"%s","mealType":"DINNER","occurredAt":"2026-08-09T12:00:00Z"}
+                        """
+                            .formatted(failedMediaId)))
+            .andExpect(status().isAccepted())
+            .andReturn();
+    String failedJobId =
+        objectMapper.readTree(failedJob.getResponse().getContentAsString()).path("jobId").asText();
+    recognitionWorker.runOne();
+
+    mvc.perform(get("/api/v1/app/meal-recognition-jobs/{jobId}", failedJobId).cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("FAILED"))
+        .andExpect(jsonPath("$.failure.code").value("TASK_FAILED"))
+        .andExpect(jsonPath("$.failure.message").value("视觉模型超时"))
+        .andExpect(jsonPath("$.failure.retryable").value(false));
+  }
+
+  private String createAndUpload(Cookie owner, byte[] image, String sha256, String key)
+      throws Exception {
+    MvcResult ticket =
+        mvc.perform(
+                post("/api/v1/app/media-upload-tickets")
+                    .cookie(owner)
+                    .header("Idempotency-Key", key)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(ticketRequest("image/png", image.length, sha256)))
+            .andExpect(status().isCreated())
+            .andReturn();
+    String mediaId =
+        objectMapper.readTree(ticket.getResponse().getContentAsString()).path("mediaId").asText();
+    mvc.perform(
+            put("/api/v1/app/media-uploads/{mediaId}", mediaId)
+                .cookie(owner)
+                .contentType(MediaType.IMAGE_PNG)
+                .content(image))
+        .andExpect(status().isNoContent());
+    return mediaId;
+  }
+
+  private Cookie createOtherUser() throws Exception {
+    new org.springframework.jdbc.core.JdbcTemplate(fitnessDataSource)
+        .update(
+            "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname)"
+                + " VALUES (?,'test:other','ACTIVE','other',?,'另一位用户') ON CONFLICT"
+                + " (external_subject) DO NOTHING",
+            UUID.fromString("10000000-0000-0000-0000-000000000002"),
+            new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
+                .encode("demo123"));
+    return login("other", "demo123");
+  }
+
+  private static String ticketRequest(String contentType, int contentLength, String sha256) {
+    return """
+           {"purpose":"MEAL_RECOGNITION","contentType":"%s","contentLength":%d,"sha256":"%s"}
+           """
+        .formatted(contentType, contentLength, sha256);
+  }
+
+  private static String sha256(byte[] value) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+    } catch (java.security.NoSuchAlgorithmException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
   private Cookie login() throws Exception {
+    return login("user", "demo123");
+  }
+
+  private Cookie login(String username, String password) throws Exception {
     MvcResult result =
         mvc.perform(
                 post("/api/local/login")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"username\":\"user\",\"password\":\"demo123\"}"))
+                    .content(
+                        "{\"username\":\"%s\",\"password\":\"%s\"}".formatted(username, password)))
             .andExpect(status().isOk())
             .andExpect(cookie().httpOnly("FITNESS_SESSION", true))
             .andExpect(jsonPath("$.user.id").isString())
-            .andExpect(jsonPath("$.user.nickname").value("小秦"))
             .andReturn();
     Cookie session = result.getResponse().getCookie("FITNESS_SESSION");
     assertThat(session).isNotNull();
@@ -245,5 +586,45 @@ class FitnessExperienceIntegrationTest {
       directory = directory.getParent();
     }
     throw new IllegalStateException("Unable to locate repository root");
+  }
+
+  @TestConfiguration(proxyBeanMethods = false)
+  static class RecognitionPortConfiguration {
+    @Bean
+    @Primary
+    ControlledRecognitionPort controlledRecognitionPort() {
+      return new ControlledRecognitionPort();
+    }
+  }
+
+  static final class ControlledRecognitionPort implements MealRecognitionPort {
+    private final AtomicInteger calls = new AtomicInteger();
+    private MealRecognitionResult result =
+        new MealRecognitionResult(
+            "SUCCEEDED", List.of(new MealRecognitionCandidate("默认候选", 500, 0.9)), null, null);
+
+    @Override
+    public MealRecognitionResult recognize(
+        UUID userId, UUID mediaId, MealType mealType, Instant occurredAt) {
+      calls.incrementAndGet();
+      return result;
+    }
+
+    void succeedWith(String name, int estimatedKcal, double confidence) {
+      result =
+          new MealRecognitionResult(
+              "SUCCEEDED",
+              List.of(new MealRecognitionCandidate(name, estimatedKcal, confidence)),
+              null,
+              null);
+    }
+
+    void failWith(String code, String message) {
+      result = new MealRecognitionResult("FAILED", List.of(), code, message);
+    }
+
+    int calls() {
+      return calls.get();
+    }
   }
 }

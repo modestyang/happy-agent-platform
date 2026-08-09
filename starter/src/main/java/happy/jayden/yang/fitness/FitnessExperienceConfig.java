@@ -11,7 +11,6 @@ import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
-import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -63,13 +62,15 @@ public class FitnessExperienceConfig {
     return new MealRecognitionRuntime.LocalMediaUploadPort(dataSource);
   }
 
-  /** Production must supply an object-storage signer; never silently write application-local files. */
   @Bean
   @ConditionalOnProperty(name = "happy.fitness.local-media.enabled", havingValue = "false", matchIfMissing = true)
-  MediaUploadPort unavailableMediaUploadPort() {
-    return (userId, contentType, contentLength, sha256) -> {
-      throw new DependencyNotConfiguredException();
-    };
+  MediaUploadPort ossMediaUploadPort(
+      @Qualifier("fitnessDataSource") DataSource dataSource,
+      @Value("${happy.fitness.oss.endpoint:}") String endpoint,
+      @Value("${happy.fitness.oss.bucket:}") String bucket,
+      @Value("${happy.fitness.oss.access-key-id:}") String accessKeyId,
+      @Value("${happy.fitness.oss.access-key-secret:}") String accessKeySecret) {
+    return new OssPresignedMediaUploadPort(dataSource, java.time.Clock.systemUTC(), endpoint, bucket, accessKeyId, accessKeySecret);
   }
 
   @Bean

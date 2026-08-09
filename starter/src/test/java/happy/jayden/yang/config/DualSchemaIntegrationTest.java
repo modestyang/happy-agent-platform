@@ -111,7 +111,7 @@ class DualSchemaIntegrationTest {
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(8L);
+        .isEqualTo(9L);
   }
 
   @Test

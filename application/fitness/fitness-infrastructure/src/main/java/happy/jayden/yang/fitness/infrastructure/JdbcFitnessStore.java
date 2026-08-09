@@ -487,7 +487,7 @@ public final class JdbcFitnessStore implements FitnessStore {
         !jdbc
             .query(
                 "SELECT meal_plan_id FROM daily_meal_plan_runs WHERE meal_plan_id=? AND status='GENERATING'"
-                    + " AND version=? AND lease_token=? FOR UPDATE",
+                    + " AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP FOR UPDATE",
                 (rs, row) -> rs.getObject(1, UUID.class),
                 run.mealPlanId(),
                 run.version(),
@@ -510,7 +510,8 @@ public final class JdbcFitnessStore implements FitnessStore {
     int changed = jdbc.update(
         "UPDATE daily_meal_plan_runs SET status='READY',generated_at=CURRENT_TIMESTAMP,"
             + " failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP"
-            + " WHERE meal_plan_id=? AND status='GENERATING' AND version=? AND lease_token=?",
+            + " WHERE meal_plan_id=? AND status='GENERATING' AND version=? AND lease_token=?"
+            + " AND lease_until > CURRENT_TIMESTAMP",
         run.mealPlanId(),
         run.version(),
         run.leaseToken());
@@ -526,7 +527,7 @@ public final class JdbcFitnessStore implements FitnessStore {
     return jdbc.update(
         "UPDATE daily_meal_plan_runs SET status='FAILED',failure_code=?,failure_message=?,"
             + " lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE meal_plan_id=?"
-            + " AND status='GENERATING' AND version=? AND lease_token=?",
+            + " AND status='GENERATING' AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP",
         failureCode,
         failureMessage,
         run.mealPlanId(),

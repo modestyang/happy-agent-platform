@@ -28,4 +28,4 @@
 - 前端完整回归增至 28/28，通过 TypeScript、ESLint 与 Vite production build；浏览器已验证真实数据库种子、发布门禁阻塞信息与组件状态原因。
 - 真实浏览器验收发现并修复 `If-Match` 覆盖 JSON Content-Type 的请求封装缺陷；回归测试完成 RED/GREEN，草稿 revision 1→2 且刷新后仍为 2。
 - 全量 `./mvnw verify -q` 退出码 0；管理台首轮验收记录已归档，未配置 Provider 与尚未接线的 Tool/Skill/Hook 均作为真实限制列明。
-- Task 3 已使用新的 fitness V8 迁移落地反馈数据库约束与每日三餐生成围栏；Task 4 的任何数据库变更已明确顺延到 V9，V7/V8 保持不可变。
+- Task 3 已使用新的 fitness V8/V9 迁移落地反馈数据库约束、每日三餐生成围栏及复审加固；Task 4 的任何数据库变更已明确顺延到 V10，V7/V8/V9 保持不可变。

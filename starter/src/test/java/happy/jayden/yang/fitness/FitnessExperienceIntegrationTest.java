@@ -393,11 +393,10 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  void feedbackDatabaseConstraintsRejectCrossOwnerAndInvalidSentimentRows() throws Exception {
+  void feedbackDatabaseConstraintsRejectInvalidRows() throws Exception {
     Cookie owner = login();
     JsonNode ownerBootstrap = bootstrap(owner);
     UUID ownerId = UUID.fromString(ownerBootstrap.path("user").path("id").asText());
-    UUID recommendationId = UUID.fromString(ownerBootstrap.path("mealRecommendations").get(0).path("id").asText());
     createOtherUser();
     UUID otherUserId = UUID.fromString("10000000-0000-0000-0000-000000000002");
     JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
@@ -407,22 +406,72 @@ class FitnessExperienceIntegrationTest {
                 jdbc.update(
                     "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment) VALUES (?,?, 'LIKE')",
                     otherUserId,
-                    recommendationId))
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 1))))
         .isInstanceOf(DataIntegrityViolationException.class);
     assertThatThrownBy(
             () ->
                 jdbc.update(
                     "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason) VALUES (?,?, 'LIKE','TASTE')",
                     ownerId,
-                    recommendationId))
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 2))))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment) VALUES (?,?, 'DISLIKE')",
+                    ownerId,
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 3))))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason) VALUES (?,?, 'DISLIKE','OTHER')",
+                    ownerId,
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 4))))
         .isInstanceOf(DataIntegrityViolationException.class);
     assertThatThrownBy(
             () ->
                 jdbc.update(
                     "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER','   ')",
                     ownerId,
-                    recommendationId))
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 5))))
         .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','TASTE',?)",
+                    ownerId,
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 6)),
+                    "x".repeat(301)))
+        .isInstanceOf(DataIntegrityViolationException.class);
+  }
+
+  @Test
+  void feedbackDatabaseConstraintsAcceptDocumentedBranches() throws Exception {
+    Cookie owner = login();
+    JsonNode ownerBootstrap = bootstrap(owner);
+    UUID ownerId = UUID.fromString(ownerBootstrap.path("user").path("id").asText());
+    JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
+
+    assertThat(
+            jdbc.update(
+                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment) VALUES (?,?, 'LIKE')",
+                ownerId,
+                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 7))))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.update(
+                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','TASTE',?)",
+                ownerId,
+                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 8)),
+                "x".repeat(300)))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.update(
+                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER','不喜欢香菜')",
+                ownerId,
+                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 9))))
+        .isEqualTo(1);
   }
 
   @Test
@@ -699,6 +748,13 @@ class FitnessExperienceIntegrationTest {
     jdbc.update(
         "UPDATE daily_meal_plan_runs SET lease_until=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE meal_plan_id=?",
         run.mealPlanId());
+    assertThat(fitnessStore.completeDailyMealPlanGeneration(abandonedClaim, dailyPlanResult("过期 worker")))
+        .isFalse();
+    assertThat(fitnessStore.failDailyMealPlanGeneration(abandonedClaim, "RUNTIME_ERROR", "过期 worker"))
+        .isFalse();
+    assertThat(fitnessStore.findDailyMealPlan(userId, date).orElseThrow().run().status())
+        .isEqualTo("GENERATING");
+
     var reclaimedClaim = fitnessStore.claimNextDailyMealPlanGeneration().orElseThrow();
     assertThat(reclaimedClaim.run().mealPlanId()).isEqualTo(run.mealPlanId());
     assertThat(reclaimedClaim.run().version()).isGreaterThan(abandonedClaim.run().version());
@@ -1207,6 +1263,16 @@ class FitnessExperienceIntegrationTest {
     for (int ignored = 0; ignored < 8; ignored++) {
       dailyMealPlanWorker.runOne();
     }
+  }
+
+  private static UUID ownedRecommendation(JdbcTemplate jdbc, UUID userId, LocalDate date) {
+    UUID recommendationId = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status) VALUES (?,?,?,'BREAKFAST','[]'::jsonb,'约束测试','READY')",
+        recommendationId,
+        userId,
+        date);
+    return recommendationId;
   }
 
   private JsonNode bootstrap(Cookie session) throws Exception {

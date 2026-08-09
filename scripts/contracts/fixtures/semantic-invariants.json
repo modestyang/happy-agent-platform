@@ -23,6 +23,9 @@
     },
     "requiredProperties": {
       "ReadyDailyMealPlan": ["breakfast", "lunch", "dinner", "dailyNutrition"]
+    },
+    "propertyPatterns": {
+      "OtherMealRecommendationFeedbackRequest.note": "\\S"
     }
   },
   "admin": {

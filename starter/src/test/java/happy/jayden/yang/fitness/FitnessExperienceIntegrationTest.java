@@ -385,9 +385,17 @@ class FitnessExperienceIntegrationTest {
     mvc.perform(
             put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
                 .cookie(owner)
+                .header("Idempotency-Key", "feedback-other-tab-newline")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\"\\t\\n\"}"))
+        .andExpect(status().isBadRequest());
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
                 .header("Idempotency-Key", "feedback-other-branch")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\"不喜欢香菜\"}"))
+                .content("{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\" \\t不喜欢香菜\\n \"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.reason").value("OTHER"));
   }
@@ -439,9 +447,17 @@ class FitnessExperienceIntegrationTest {
     assertThatThrownBy(
             () ->
                 jdbc.update(
-                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','TASTE',?)",
+                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
                     ownerId,
                     ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 6)),
+                    "\t\n"))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','TASTE',?)",
+                    ownerId,
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 7)),
                     "x".repeat(301)))
         .isInstanceOf(DataIntegrityViolationException.class);
   }
@@ -457,20 +473,21 @@ class FitnessExperienceIntegrationTest {
             jdbc.update(
                 "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment) VALUES (?,?, 'LIKE')",
                 ownerId,
-                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 7))))
+                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 8))))
         .isEqualTo(1);
     assertThat(
             jdbc.update(
                 "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','TASTE',?)",
                 ownerId,
-                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 8)),
+                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 9)),
                 "x".repeat(300)))
         .isEqualTo(1);
     assertThat(
             jdbc.update(
-                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER','不喜欢香菜')",
+                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
                 ownerId,
-                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 9))))
+                ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 10)),
+                "\t 不喜欢香菜\n"))
         .isEqualTo(1);
   }
 

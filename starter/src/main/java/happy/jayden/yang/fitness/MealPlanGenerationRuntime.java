@@ -67,15 +67,17 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
     }
   }
 
-  private RuntimeConfig config() throws IOException, ConfigurationException {
-    var selected =
+  /** Reads only the immutable latest published agent configuration, never the mutable draft. */
+  RuntimeConfig config() throws IOException, ConfigurationException {
+    var published =
         agentJdbc.query(
-            "SELECT provider_key,model_key FROM agent_drafts WHERE agent_key='fitness.coach' AND"
-                + " current_published_version>0 LIMIT 1",
-            (rs, row) -> new String[] {rs.getString("provider_key"), rs.getString("model_key")});
-    if (selected.isEmpty()) throw new ConfigurationException("未发布可用的三餐生成 Agent");
-    String providerKey = selected.get(0)[0];
-    String modelKey = selected.get(0)[1];
+            "SELECT configuration::text FROM agent_versions WHERE agent_key='fitness.coach'"
+                + " AND status='PUBLISHED' ORDER BY version DESC LIMIT 1",
+            (rs, row) -> rs.getString("configuration"));
+    if (published.isEmpty()) throw new ConfigurationException("未发布可用的三餐生成 Agent");
+    JsonNode snapshot = mapper.readTree(published.get(0));
+    String providerKey = requiredText(snapshot, "providerKey", "已发布 Agent 未绑定 Provider");
+    String modelKey = requiredText(snapshot, "modelKey", "已发布 Agent 未绑定模型");
     var models =
         agentJdbc.query(
             "SELECT config::text,status FROM agent_component_projection WHERE"
@@ -96,12 +98,20 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
     }
     JsonNode model = mapper.readTree(models.get(0)[0]);
     JsonNode provider = mapper.readTree(providers.get(0)[0]);
-    if (!providerKey.equals(model.path("providerKey").asText(providerKey))) {
+    String boundProvider = requiredText(model, "providerKey", "模型未显式绑定 Provider");
+    if (!providerKey.equals(boundProvider)) {
       throw new ConfigurationException("模型未绑定当前 Provider");
     }
     String endpoint = provider.path("endpoint").asText();
     if (endpoint.isBlank()) throw new ConfigurationException("Provider 未配置 endpoint");
     return new RuntimeConfig(providerKey, model.path("model").asText(modelKey), endpoint.replaceAll("/$", ""));
+  }
+
+  private static String requiredText(JsonNode node, String field, String message)
+      throws ConfigurationException {
+    String value = node.path(field).asText();
+    if (value == null || value.isBlank()) throw new ConfigurationException(message);
+    return value;
   }
 
   JsonNode post(

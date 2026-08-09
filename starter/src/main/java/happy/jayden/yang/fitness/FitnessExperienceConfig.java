@@ -129,6 +129,12 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
+  DailyMealPlanGenerationWorker dailyMealPlanGenerationWorker(
+      FitnessApplicationService application) {
+    return new DailyMealPlanGenerationWorker(application);
+  }
+
+  @Bean
   DailyMealPlanScheduler dailyMealPlanScheduler(FitnessApplicationService application) {
     return new DailyMealPlanScheduler(application);
   }

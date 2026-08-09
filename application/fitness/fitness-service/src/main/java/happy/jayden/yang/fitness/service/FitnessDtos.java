@@ -139,7 +139,12 @@ public final class FitnessDtos {
       Instant generatedAt,
       String failureCode,
       String failureMessage,
-      int version) {}
+      int version,
+      UUID leaseToken,
+      Instant leaseUntil) {}
+
+  /** A fenced worker claim. A late worker must never complete a newer claim. */
+  public record ClaimedDailyMealPlanRunDto(DailyMealPlanRunDto run) {}
 
   public record DailyMealPlanStateDto(
       DailyMealPlanRunDto run, List<MealRecommendationDto> recommendations) {}
@@ -166,8 +171,35 @@ public final class FitnessDtos {
       List<DailyMealPlanFoodItem> items,
       NutritionDto nutrition) {}
 
-  /** Public shape of the generated/failed plan; nullable members are status-specific. */
-  public record DailyMealPlanDto(
+  /**
+   * Status-specific public wire values. Each record exactly matches one OpenAPI oneOf branch and
+   * deliberately has no null-filled members from another state.
+   */
+  public sealed interface DailyMealPlanDto
+      permits GeneratingDailyMealPlanDto, ReadyDailyMealPlanDto, FailedDailyMealPlanDto {
+    UUID mealPlanId();
+
+    LocalDate date();
+
+    String timezone();
+
+    String generatedAtLocalTime();
+
+    String status();
+
+    int version();
+  }
+
+  public record GeneratingDailyMealPlanDto(
+      UUID mealPlanId,
+      LocalDate date,
+      String timezone,
+      String generatedAtLocalTime,
+      String status,
+      int version)
+      implements DailyMealPlanDto {}
+
+  public record ReadyDailyMealPlanDto(
       UUID mealPlanId,
       LocalDate date,
       String timezone,
@@ -177,8 +209,18 @@ public final class FitnessDtos {
       DailyMealPlanSectionDto lunch,
       DailyMealPlanSectionDto dinner,
       NutritionDto dailyNutrition,
+      int version)
+      implements DailyMealPlanDto {}
+
+  public record FailedDailyMealPlanDto(
+      UUID mealPlanId,
+      LocalDate date,
+      String timezone,
+      String generatedAtLocalTime,
+      String status,
       DailyMealPlanFailureDto failure,
-      int version) {}
+      int version)
+      implements DailyMealPlanDto {}
 
   public record DailyMealPlanFailureDto(String code, String message, boolean retryable) {}
 

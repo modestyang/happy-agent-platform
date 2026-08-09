@@ -7,6 +7,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedDailyMealPlanRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
@@ -73,14 +74,22 @@ public final class FitnessPorts {
     /** Reads the durable state and the persisted recommendation rows for one local date. */
     Optional<DailyMealPlanStateDto> findDailyMealPlan(UUID userId, LocalDate date);
 
-    /** Transitions one user/date plan into GENERATING and returns its durable identity/version. */
-    DailyMealPlanRunDto beginDailyMealPlanGeneration(UUID userId, LocalDate date);
+    /**
+     * Enqueues an absent or failed plan. READY and currently GENERATING rows are returned without
+     * changing their owner/version, so concurrent requests reuse one durable run.
+     */
+    DailyMealPlanRunDto enqueueDailyMealPlanGeneration(UUID userId, LocalDate date);
 
-    void completeDailyMealPlanGeneration(
-        DailyMealPlanRunDto run, DailyMealPlanGenerationResult result);
+    /** Atomically leases one unclaimed or stale GENERATING run to exactly one worker. */
+    Optional<ClaimedDailyMealPlanRunDto> claimNextDailyMealPlanGeneration();
 
-    void failDailyMealPlanGeneration(
-        DailyMealPlanRunDto run, String failureCode, String failureMessage);
+    /** Returns false when a newer lease has fenced this worker out. */
+    boolean completeDailyMealPlanGeneration(
+        ClaimedDailyMealPlanRunDto claim, DailyMealPlanGenerationResult result);
+
+    /** Returns false when a newer lease has fenced this worker out. */
+    boolean failDailyMealPlanGeneration(
+        ClaimedDailyMealPlanRunDto claim, String failureCode, String failureMessage);
 
     java.util.List<UUID> activeUserIds();
 

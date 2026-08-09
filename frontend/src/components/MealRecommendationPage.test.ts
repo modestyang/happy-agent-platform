@@ -119,6 +119,80 @@ describe('meal recommendation feedback', () => {
     expect(screen.getByRole('button', { name: '赞' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('keeps each meal pending independently while concurrent feedback resolves out of order', async () => {
+    let resolveBreakfast!: (value: Response) => void;
+    let resolveLunch!: (value: Response) => void;
+    const fetchMock = vi.fn((input: RequestInfo | URL) =>
+      new Promise<Response>((resolve) => {
+        if (String(input).includes('breakfast-id')) resolveBreakfast = resolve;
+        else resolveLunch = resolve;
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(
+      createElement(
+        MemoryRouter,
+        undefined,
+        createElement(MealRecommendationPage, {
+          recommendations: [
+            { ...recommendation('BREAKFAST'), id: 'breakfast-id' },
+            { ...recommendation('LUNCH'), id: 'lunch-id' },
+          ],
+          now: new Date('2026-08-06T08:00:00+08:00'),
+        }),
+      ),
+    );
+
+    const likes = screen.getAllByRole('button', { name: '赞' });
+    await user.click(likes[0]);
+    await user.click(likes[1]);
+    expect(likes[0]).toBeDisabled();
+    expect(likes[1]).toBeDisabled();
+
+    resolveLunch(
+      new Response(JSON.stringify({ recommendationId: 'lunch-id', sentiment: 'LIKE' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await waitFor(() => expect(likes[1]).toHaveAttribute('aria-pressed', 'true'));
+    expect(likes[0]).toBeDisabled();
+
+    resolveBreakfast(
+      new Response(JSON.stringify({ detail: '早餐保存失败' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/problem+json' },
+      }),
+    );
+    expect(await screen.findByText(/早餐保存失败/)).toBeInTheDocument();
+    expect(likes[0]).toBeEnabled();
+    expect(likes[1]).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('uses an accessible bottom feedback dialog that closes on Escape and returns focus', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const user = userEvent.setup();
+    render(
+      createElement(
+        MemoryRouter,
+        undefined,
+        createElement(MealRecommendationPage, {
+          recommendations: [recommendation('LUNCH')],
+          now: new Date('2026-08-06T10:00:00+08:00'),
+        }),
+      ),
+    );
+
+    const dislike = screen.getByRole('button', { name: '踩' });
+    await user.click(dislike);
+    const dialog = screen.getByRole('dialog', { name: '这餐哪里不合适？' });
+    expect(dialog).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '这餐哪里不合适？' })).not.toBeInTheDocument();
+    expect(dislike).toHaveFocus();
+  });
+
   it('requires an explanation for OTHER dislike before persisting and retaining it', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(

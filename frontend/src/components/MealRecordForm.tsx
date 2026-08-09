@@ -47,7 +47,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
     setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: key === 'estimatedKcal' ? Number(value) : value } : item));
   };
 
-  async function startRecognition(file: File, retry = false) {
+  async function startRecognition(file: File) {
     setError('');
     setManualFallback(false);
     if (!ALLOWED_TYPES.has(file.type)) { setError('仅支持 JPEG、PNG 或 WebP 图片。'); return; }
@@ -103,7 +103,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
     {previewUrl && <img className="meal-photo-preview" src={previewUrl} alt="已选择的饮食照片" />}
     {state.status === 'UPLOADING' && <p className="notice">正在上传照片，暂时锁定编辑区…</p>}
     {state.status === 'RECOGNIZING' && <p className="notice">正在识别食物，暂时锁定编辑区…</p>}
-    {state.status === 'FAILED' && !manualFallback && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current, true)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setManualFallback(true)}>改为手动填写</button></div>}
+    {state.status === 'FAILED' && !manualFallback && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setManualFallback(true)}>改为手动填写</button></div>}
     <div aria-disabled={locked}>{items.map((item, index) => <div className="food-row" key={index}><label>食物名称 {index + 1}<input aria-label={`食物名称 ${index + 1}`} value={item.name} disabled={locked} onChange={(event) => updateItem(index, 'name', event.target.value)} required /></label><label>热量 (kcal)<input aria-label={`热量 ${index + 1}`} type="number" min="0" value={item.estimatedKcal || ''} disabled={locked} onChange={(event) => updateItem(index, 'estimatedKcal', event.target.value)} required /></label>{items.length > 1 && <button aria-label={`删除食物 ${index + 1}`} type="button" disabled={locked} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 /></button>}</div>)}</div>
     <button type="button" className="soft-button" disabled={locked} onClick={() => setItems((current) => [...current, { name: '', estimatedKcal: 0 }])}><Plus /> 新增食物</button>
     {error && <p className="error">{error}</p>}<button className="primary" disabled={locked || saving}>{saving ? '正在保存…' : '保存饮食记录'}</button>

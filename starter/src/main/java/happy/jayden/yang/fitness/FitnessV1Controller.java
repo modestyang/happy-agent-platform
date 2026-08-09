@@ -135,19 +135,28 @@ public class FitnessV1Controller {
   }
 
   @PostMapping("/meal-plans/daily/generate")
-  happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto generateDailyMealPlan(
+  ResponseEntity<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto> generateDailyMealPlan(
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
       @RequestHeader(name = "Idempotency-Key", required = false) String key,
       @RequestBody happy.jayden.yang.fitness.service.FitnessDtos.GenerateDailyMealPlanRequest request) {
-    return application.idempotently(
+    var state =
+        application.idempotently(
         token,
         "daily-meal-plan-generate",
         key,
         hash(request),
-        () -> application.generateDailyMealPlan(token, request == null ? null : request.date()),
-        happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto::mealPlanId,
+        () -> application.enqueueDailyMealPlan(token, request == null ? null : request.date()),
+        value -> value.run().mealPlanId(),
         this::write,
-        json -> read(json, happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto.class));
+        json ->
+            read(
+                json,
+                happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto.class));
+    java.time.LocalDate date = request == null || request.date() == null ? null : request.date();
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .header(HttpHeaders.LOCATION, "/api/v1/app/meal-plans/daily")
+        .header(HttpHeaders.RETRY_AFTER, "1")
+        .body(application.dailyMealPlan(token, date));
   }
 
   @PutMapping("/meal-recommendations/{recommendationId}/feedback")
@@ -232,8 +241,8 @@ public class FitnessV1Controller {
     if (response instanceof FitnessV1Responses.MealRecord meal) {
       return meal.mealRecordId();
     }
-    if (response instanceof happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto plan) {
-      return plan.mealPlanId();
+    if (response instanceof happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto plan) {
+      return plan.run().mealPlanId();
     }
     throw new IllegalArgumentException("不支持的幂等响应类型");
   }

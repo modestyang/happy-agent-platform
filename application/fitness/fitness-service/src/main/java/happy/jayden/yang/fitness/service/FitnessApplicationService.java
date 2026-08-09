@@ -348,6 +348,10 @@ public final class FitnessApplicationService {
     if (request == null || request.recommendationId() == null || request.sentiment() == null) {
       throw new InvalidRequestException("recommendationId 和 sentiment 必填");
     }
+    if (request.sentiment() == FitnessDtos.Sentiment.LIKE
+        && (request.reason() != null || request.note() != null)) {
+      throw new InvalidRequestException("赞仅允许 sentiment 字段");
+    }
     if (request.sentiment() == FitnessDtos.Sentiment.DISLIKE && request.reason() == null) {
       throw new InvalidRequestException("点踩必须选择原因");
     }
@@ -380,49 +384,81 @@ public final class FitnessApplicationService {
   }
 
   /**
-   * Generates one date-scoped plan through the dedicated runtime adapter. Feedback is loaded from
-   * the safe 30-day aggregation immediately before the runtime call and is never an HTTP input.
+   * Persists an asynchronous request. HTTP and the 05:30 scheduler never invoke the model; only
+   * the leased worker below can do so.
    */
-  public FitnessDtos.DailyMealPlanDto generateDailyMealPlan(
+  public FitnessDtos.DailyMealPlanStateDto enqueueDailyMealPlan(
       String sessionToken, LocalDate requestedDate) {
     UUID userId = authenticate(sessionToken);
     LocalDate date = requestedDate == null ? LocalDate.now(USER_ZONE) : requestedDate;
-    return generateDailyMealPlan(userId, date);
+    return enqueueDailyMealPlan(userId, date);
   }
 
-  /** Invoked by the 05:30 local scheduler; the current product has one default user timezone. */
-  public void generateScheduledDailyMealPlans() {
+  /** Invoked by the 05:30 local scheduler; it only makes durable work visible to workers. */
+  public void enqueueScheduledDailyMealPlans() {
     LocalDate today = LocalDate.now(USER_ZONE);
     for (UUID userId : store.activeUserIds()) {
-      generateDailyMealPlan(userId, today);
+      enqueueDailyMealPlan(userId, today);
     }
   }
 
-  private FitnessDtos.DailyMealPlanDto generateDailyMealPlan(UUID userId, LocalDate date) {
-    FitnessDtos.DailyMealPlanRunDto run = store.beginDailyMealPlanGeneration(userId, date);
+  private FitnessDtos.DailyMealPlanStateDto enqueueDailyMealPlan(UUID userId, LocalDate date) {
+    var existing = store.findDailyMealPlan(userId, date);
+    if (existing.isPresent()
+        && ("READY".equals(existing.get().run().status())
+            || "GENERATING".equals(existing.get().run().status()))) {
+      return existing.get();
+    }
+    store.enqueueDailyMealPlanGeneration(userId, date);
+    return store
+        .findDailyMealPlan(userId, date)
+        .orElseThrow(() -> new IllegalStateException("三餐生成状态未持久化"));
+  }
+
+  /** Executes at most one durable lease. Returns false if no pending/stale run was claimable. */
+  public boolean runNextDailyMealPlanGeneration() {
+    var claim = store.claimNextDailyMealPlanGeneration();
+    if (claim.isEmpty()) return false;
+    runClaimedDailyMealPlan(claim.get());
+    return true;
+  }
+
+  private void runClaimedDailyMealPlan(FitnessDtos.ClaimedDailyMealPlanRunDto claim) {
+    FitnessDtos.DailyMealPlanRunDto run = claim.run();
     FitnessDtos.DailyMealPlanGenerationResult result;
     try {
-      result = dailyMealPlanGenerationPort.generate(userId, date, mealRecommendationFeedbackContext(userId));
+      result =
+          dailyMealPlanGenerationPort.generate(
+              run.userId(), run.date(), mealRecommendationFeedbackContext(run.userId()));
     } catch (RuntimeException exception) {
       result =
           new FitnessDtos.DailyMealPlanGenerationResult(
               "FAILED", List.of(), "RUNTIME_ERROR", "三餐生成运行时发生未处理错误");
     }
-    String invalid = invalidGeneration(result);
+    final FitnessDtos.DailyMealPlanGenerationResult generationResult = result;
+    String invalid = invalidGeneration(generationResult);
     if (invalid != null) {
-      store.failDailyMealPlanGeneration(run, "INVALID_MODEL_RESPONSE", invalid);
-    } else if ("SUCCEEDED".equals(result.status())) {
-      store.completeDailyMealPlanGeneration(run, result);
+      transactionRunner.inTransaction(
+          () -> {
+            store.failDailyMealPlanGeneration(claim, "INVALID_MODEL_RESPONSE", invalid);
+            return null;
+          });
+    } else if ("SUCCEEDED".equals(generationResult.status())) {
+      transactionRunner.inTransaction(
+          () -> {
+            store.completeDailyMealPlanGeneration(claim, generationResult);
+            return null;
+          });
     } else {
-      store.failDailyMealPlanGeneration(
-          run,
-          blank(result.failureCode()) ? "RUNTIME_ERROR" : result.failureCode(),
-          blank(result.failureMessage()) ? "三餐生成未完成" : result.failureMessage());
+      transactionRunner.inTransaction(
+          () -> {
+            store.failDailyMealPlanGeneration(
+                claim,
+                blank(generationResult.failureCode()) ? "RUNTIME_ERROR" : generationResult.failureCode(),
+                blank(generationResult.failureMessage()) ? "三餐生成未完成" : generationResult.failureMessage());
+            return null;
+          });
     }
-    return dailyMealPlan(
-        store
-            .findDailyMealPlan(userId, date)
-            .orElseThrow(() -> new IllegalStateException("三餐生成状态未持久化")));
   }
 
   private static String invalidGeneration(FitnessDtos.DailyMealPlanGenerationResult result) {
@@ -462,23 +498,18 @@ public final class FitnessApplicationService {
       FitnessDtos.DailyMealPlanStateDto state) {
     FitnessDtos.DailyMealPlanRunDto run = state.run();
     if ("GENERATING".equals(run.status())) {
-      return new FitnessDtos.DailyMealPlanDto(
-          run.mealPlanId(), run.date(), USER_ZONE.getId(), "05:30:00", "GENERATING", null, null,
-          null, null, null, run.version());
+      return new FitnessDtos.GeneratingDailyMealPlanDto(
+          run.mealPlanId(), run.date(), USER_ZONE.getId(), "05:30:00", "GENERATING", run.version());
     }
     if ("FAILED".equals(run.status())) {
       String rawCode = blank(run.failureCode()) ? "RUNTIME_ERROR" : run.failureCode();
       String code = "DEPENDENCY_NOT_CONFIGURED".equals(rawCode) ? rawCode : "TASK_FAILED";
-      return new FitnessDtos.DailyMealPlanDto(
+      return new FitnessDtos.FailedDailyMealPlanDto(
           run.mealPlanId(),
           run.date(),
           USER_ZONE.getId(),
           "05:30:00",
           "FAILED",
-          null,
-          null,
-          null,
-          null,
           new FitnessDtos.DailyMealPlanFailureDto(
               code,
               blank(run.failureMessage()) ? "三餐生成失败" : run.failureMessage(),
@@ -499,7 +530,7 @@ public final class FitnessApplicationService {
             breakfast.nutrition().caloriesKcal()
                 .add(lunch.nutrition().caloriesKcal())
                 .add(dinner.nutrition().caloriesKcal()));
-    return new FitnessDtos.DailyMealPlanDto(
+    return new FitnessDtos.ReadyDailyMealPlanDto(
         run.mealPlanId(),
         run.date(),
         USER_ZONE.getId(),
@@ -509,7 +540,6 @@ public final class FitnessApplicationService {
         lunch,
         dinner,
         nutrition,
-        null,
         run.version());
   }
 

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
 import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedMealRecognitionJob;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedDailyMealPlanRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
@@ -402,7 +403,7 @@ public final class JdbcFitnessStore implements FitnessStore {
     List<MealRecommendationDto> recommendations = dailyRecommendations(userId, date);
     List<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto> runs =
         jdbc.query(
-            "SELECT meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version"
+            "SELECT meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version,lease_token,lease_until"
                 + " FROM daily_meal_plan_runs WHERE user_id=? AND plan_date=?",
             (rs, row) -> dailyMealPlanRun(rs),
             userId,
@@ -427,7 +428,7 @@ public final class JdbcFitnessStore implements FitnessStore {
       return Optional.of(
           new happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto(
               new happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto(
-                  legacyPlanId, userId, date, "READY", generatedAt, null, null, 1),
+                  legacyPlanId, userId, date, "READY", generatedAt, null, null, 1, null, null),
               recommendations));
     }
     return Optional.empty();
@@ -435,26 +436,64 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   @Override
   public happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto
-      beginDailyMealPlanGeneration(UUID userId, LocalDate date) {
+      enqueueDailyMealPlanGeneration(UUID userId, LocalDate date) {
+    List<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto> enqueued =
+        jdbc.query(
+            "INSERT INTO daily_meal_plan_runs(meal_plan_id,user_id,plan_date,status) VALUES (?,?,?,'GENERATING')"
+                + " ON CONFLICT (user_id,plan_date) DO UPDATE SET status='GENERATING',generated_at=NULL,"
+                + " failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,"
+                + " version=daily_meal_plan_runs.version+1,updated_at=CURRENT_TIMESTAMP"
+                + " WHERE daily_meal_plan_runs.status='FAILED' RETURNING"
+                + " meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version,lease_token,lease_until",
+            (rs, row) -> dailyMealPlanRun(rs),
+            UUID.randomUUID(),
+            userId,
+            date);
+    if (!enqueued.isEmpty()) return enqueued.get(0);
     return jdbc.queryForObject(
-        "INSERT INTO daily_meal_plan_runs(meal_plan_id,user_id,plan_date,status) VALUES (?,?,?,'GENERATING')"
-            + " ON CONFLICT (user_id,plan_date) DO UPDATE SET status='GENERATING',generated_at=NULL,"
-            + " failure_code=NULL,failure_message=NULL,version=daily_meal_plan_runs.version+1,"
-            + " updated_at=CURRENT_TIMESTAMP RETURNING"
-            + " meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version",
+        "SELECT meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version,lease_token,lease_until"
+            + " FROM daily_meal_plan_runs WHERE user_id=? AND plan_date=?",
         (rs, row) -> dailyMealPlanRun(rs),
-        UUID.randomUUID(),
         userId,
         date);
   }
 
   @Override
-  public void completeDailyMealPlanGeneration(
-      happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto run,
+  public Optional<ClaimedDailyMealPlanRunDto> claimNextDailyMealPlanGeneration() {
+    UUID leaseToken = UUID.randomUUID();
+    return jdbc
+        .query(
+            "WITH candidate AS (SELECT meal_plan_id FROM daily_meal_plan_runs WHERE status='GENERATING'"
+                + " AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP) ORDER BY created_at"
+                + " FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE daily_meal_plan_runs r SET lease_token=?,"
+                + " lease_until=CURRENT_TIMESTAMP + INTERVAL '2 minutes',version=r.version+1,updated_at=CURRENT_TIMESTAMP"
+                + " FROM candidate WHERE r.meal_plan_id=candidate.meal_plan_id RETURNING"
+                + " r.meal_plan_id,r.user_id,r.plan_date,r.status,r.generated_at,r.failure_code,r.failure_message,r.version,r.lease_token,r.lease_until",
+            (rs, row) -> new ClaimedDailyMealPlanRunDto(dailyMealPlanRun(rs)),
+            leaseToken)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public boolean completeDailyMealPlanGeneration(
+      ClaimedDailyMealPlanRunDto claim,
       happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult result) {
     if (!"SUCCEEDED".equals(result.status()) || result.recommendations() == null) {
       throw new IllegalArgumentException("只可持久化成功的三餐生成结果");
     }
+    var run = claim.run();
+    boolean owned =
+        !jdbc
+            .query(
+                "SELECT meal_plan_id FROM daily_meal_plan_runs WHERE meal_plan_id=? AND status='GENERATING'"
+                    + " AND version=? AND lease_token=? FOR UPDATE",
+                (rs, row) -> rs.getObject(1, UUID.class),
+                run.mealPlanId(),
+                run.version(),
+                run.leaseToken())
+            .isEmpty();
+    if (!owned) return false;
     for (var recommendation : result.recommendations()) {
       jdbc.update(
           "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at)"
@@ -468,24 +507,31 @@ public final class JdbcFitnessStore implements FitnessStore {
           json(recommendation.items()),
           recommendation.reason());
     }
-    jdbc.update(
+    int changed = jdbc.update(
         "UPDATE daily_meal_plan_runs SET status='READY',generated_at=CURRENT_TIMESTAMP,"
-            + " failure_code=NULL,failure_message=NULL,updated_at=CURRENT_TIMESTAMP"
-            + " WHERE meal_plan_id=?",
-        run.mealPlanId());
+            + " failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP"
+            + " WHERE meal_plan_id=? AND status='GENERATING' AND version=? AND lease_token=?",
+        run.mealPlanId(),
+        run.version(),
+        run.leaseToken());
+    return changed == 1;
   }
 
   @Override
-  public void failDailyMealPlanGeneration(
-      happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto run,
+  public boolean failDailyMealPlanGeneration(
+      ClaimedDailyMealPlanRunDto claim,
       String failureCode,
       String failureMessage) {
-    jdbc.update(
+    var run = claim.run();
+    return jdbc.update(
         "UPDATE daily_meal_plan_runs SET status='FAILED',failure_code=?,failure_message=?,"
-            + " updated_at=CURRENT_TIMESTAMP WHERE meal_plan_id=?",
+            + " lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE meal_plan_id=?"
+            + " AND status='GENERATING' AND version=? AND lease_token=?",
         failureCode,
         failureMessage,
-        run.mealPlanId());
+        run.mealPlanId(),
+        run.version(),
+        run.leaseToken()) == 1;
   }
 
   @Override
@@ -902,7 +948,9 @@ public final class JdbcFitnessStore implements FitnessStore {
         generatedAt == null ? null : generatedAt.toInstant(),
         rs.getString("failure_code"),
         rs.getString("failure_message"),
-        rs.getInt("version"));
+        rs.getInt("version"),
+        rs.getObject("lease_token", UUID.class),
+        rs.getTimestamp("lease_until") == null ? null : rs.getTimestamp("lease_until").toInstant());
   }
 
   private MealRecognitionJobDto recognitionJob(ResultSet rs) throws SQLException {

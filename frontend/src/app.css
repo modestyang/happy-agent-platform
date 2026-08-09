@@ -386,7 +386,8 @@ input, select { width: 100%; border: 1px solid #ded5c8; border-radius: 14px; pad
 .meal-feedback-actions svg { width: 16px; }
 .meal-feedback-actions small { color: var(--muted); font-size: 10px; }
 .meal-feedback-error { margin: 7px 0 0; color: #b8502f; font-size: 11px; }
-.meal-feedback-sheet { position: sticky; bottom: 8px; z-index: 3; display: grid; gap: 11px; margin-top: 14px; padding: 16px; border: 1px solid #eed3aa; border-radius: 20px; background: #fffaf0; box-shadow: 0 14px 32px rgba(89,57,22,.16); }
+.meal-feedback-sheet { position: fixed; right: max(12px, calc((100vw - 460px) / 2)); bottom: max(12px, env(safe-area-inset-bottom)); left: max(12px, calc((100vw - 460px) / 2)); z-index: 20; display: grid; gap: 11px; max-width: 436px; margin: 0 auto; padding: 16px; border: 1px solid #eed3aa; border-radius: 20px; background: #fffaf0; box-shadow: 0 14px 32px rgba(89,57,22,.24); }
+.meal-feedback-sheet:focus { outline: 3px solid rgba(221,129,80,.35); outline-offset: 2px; }
 .meal-feedback-sheet > div:first-child { display: flex; justify-content: space-between; align-items: center; }
 .meal-feedback-sheet > div:first-child button { border: 0; background: transparent; color: var(--muted); font-size: 22px; }
 .meal-feedback-reasons { display: flex; flex-wrap: wrap; gap: 7px; }

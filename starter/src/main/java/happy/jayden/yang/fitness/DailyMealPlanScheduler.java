@@ -3,12 +3,12 @@ package happy.jayden.yang.fitness;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import org.springframework.scheduling.annotation.Scheduled;
 
-/** Runs the same durable application use case used by manual catch-up generation. */
+/** At 05:30, enqueue durable work; a separately leased worker performs model invocation. */
 final class DailyMealPlanScheduler {
   private final Runnable generateDailyPlans;
 
   DailyMealPlanScheduler(FitnessApplicationService application) {
-    this(application::generateScheduledDailyMealPlans);
+    this(application::enqueueScheduledDailyMealPlans);
   }
 
   DailyMealPlanScheduler(Runnable generateDailyPlans) {

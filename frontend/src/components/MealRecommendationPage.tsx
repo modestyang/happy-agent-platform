@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChefHat, Flame, Sparkles, ThumbsDown, ThumbsUp, Utensils } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -60,24 +60,61 @@ export function MealRecommendationPage({ recommendations, now = new Date() }: { 
   const mealTypes: MealRecommendation['mealType'][] = ['BREAKFAST', 'LUNCH', 'DINNER'];
   const hasReadyMeal = recommendations.some((meal) => meal.status === 'READY' && meal.items.length > 0);
   const [feedback, setFeedback] = useState<Record<string, MealRecommendationFeedback | undefined>>(() => feedbackFrom(recommendations));
-  const [pendingId, setPendingId] = useState<string>();
+  const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [feedbackError, setFeedbackError] = useState<{ recommendationId: string; message: string }>();
   const [dislikeId, setDislikeId] = useState<string>();
   const [reason, setReason] = useState<FeedbackReason>();
   const [note, setNote] = useState('');
+  const requestSequence = useRef<Record<string, number>>({});
+  const dislikeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const returnFocus = useRef<HTMLButtonElement | null>(null);
+  const feedbackDialog = useRef<HTMLElement>(null);
 
   useEffect(() => setFeedback(feedbackFrom(recommendations)), [recommendations]);
+  useEffect(() => { if (dislikeId) feedbackDialog.current?.focus(); }, [dislikeId]);
+
+  const beginRequest = (recommendationId: string) => {
+    const sequence = (requestSequence.current[recommendationId] ?? 0) + 1;
+    requestSequence.current[recommendationId] = sequence;
+    setPendingIds((current) => new Set(current).add(recommendationId));
+    return sequence;
+  };
+  const finishRequest = (recommendationId: string, sequence: number) => {
+    if (requestSequence.current[recommendationId] !== sequence) return false;
+    setPendingIds((current) => {
+      const next = new Set(current);
+      next.delete(recommendationId);
+      return next;
+    });
+    return true;
+  };
+  const closeDislike = () => {
+    const trigger = returnFocus.current;
+    trigger?.focus();
+    setDislikeId(undefined);
+  };
+  const openDislike = (recommendationId: string) => {
+    setFeedbackError(undefined);
+    returnFocus.current = dislikeButtons.current.get(recommendationId) ?? null;
+    setDislikeId(recommendationId);
+    setReason(feedback[recommendationId]?.reason);
+    setNote(feedback[recommendationId]?.note ?? '');
+  };
 
   const submitLike = async (recommendationId: string) => {
     setFeedbackError(undefined);
-    setPendingId(recommendationId);
+    const sequence = beginRequest(recommendationId);
     try {
       const saved = await api.upsertMealRecommendationFeedback(recommendationId, { sentiment: 'LIKE' }, idempotencyKey());
-      setFeedback((current) => ({ ...current, [recommendationId]: { sentiment: saved.sentiment } }));
+      if (requestSequence.current[recommendationId] === sequence) {
+        setFeedback((current) => ({ ...current, [recommendationId]: { sentiment: saved.sentiment } }));
+      }
     } catch (cause) {
-      setFeedbackError({ recommendationId, message: feedbackMessage(cause) });
+      if (requestSequence.current[recommendationId] === sequence) {
+        setFeedbackError({ recommendationId, message: feedbackMessage(cause) });
+      }
     } finally {
-      setPendingId(undefined);
+      finishRequest(recommendationId, sequence);
     }
   };
   const submitDislike = async () => {
@@ -86,15 +123,19 @@ export function MealRecommendationPage({ recommendations, now = new Date() }: { 
       ? { sentiment: 'DISLIKE', reason, note: note.trim() }
       : { sentiment: 'DISLIKE', reason };
     setFeedbackError(undefined);
-    setPendingId(dislikeId);
+    const sequence = beginRequest(dislikeId);
     try {
       const saved = await api.upsertMealRecommendationFeedback(dislikeId, body, idempotencyKey());
-      setFeedback((current) => ({ ...current, [dislikeId]: { sentiment: saved.sentiment, reason: saved.reason, note: saved.note } }));
-      setDislikeId(undefined);
+      if (requestSequence.current[dislikeId] === sequence) {
+        setFeedback((current) => ({ ...current, [dislikeId]: { sentiment: saved.sentiment, reason: saved.reason, note: saved.note } }));
+        closeDislike();
+      }
     } catch (cause) {
-      setFeedbackError({ recommendationId: dislikeId, message: feedbackMessage(cause) });
+      if (requestSequence.current[dislikeId] === sequence) {
+        setFeedbackError({ recommendationId: dislikeId, message: feedbackMessage(cause) });
+      }
     } finally {
-      setPendingId(undefined);
+      finishRequest(dislikeId, sequence);
     }
   };
   const selectedDislike = recommendations.find((item) => item.id === dislikeId);
@@ -114,10 +155,10 @@ export function MealRecommendationPage({ recommendations, now = new Date() }: { 
         const ready = meal?.status === 'READY' && meal.items.length > 0;
         return <article className={`meal-recommendation${isNext ? ' is-next' : ''}${ready ? '' : ' is-pending'}`} key={mealType}>
           <div className="meal-recommendation__head"><span><Utensils /></span><div><small>{isNext ? mealTimingLabel(now, mealType) : '今日安排'}</small><h2>{mealNames[mealType]}</h2></div>{ready && <strong><Flame />约 {recommendationKcal(meal)} kcal</strong>}</div>
-          {ready ? <><div className="meal-foods">{meal.items.map((item) => <p key={item.name}><span>{item.name}</span><small>{item.estimatedKcal} kcal</small></p>)}</div><p className="meal-reason">{meal.reason}</p><div className="meal-feedback-actions"><button type="button" aria-label="赞" aria-pressed={feedback[meal.id]?.sentiment === 'LIKE'} disabled={pendingId === meal.id} onClick={() => void submitLike(meal.id)}><ThumbsUp /></button><button type="button" aria-label="踩" aria-pressed={feedback[meal.id]?.sentiment === 'DISLIKE'} disabled={pendingId === meal.id} onClick={() => { setFeedbackError(undefined); setDislikeId(meal.id); setReason(feedback[meal.id]?.reason); setNote(feedback[meal.id]?.note ?? ''); }}><ThumbsDown /></button>{pendingId === meal.id && <small>正在提交…</small>}</div>{feedbackError?.recommendationId === meal.id && <p className="meal-feedback-error" role="alert">{feedbackError.message}，未保存，请重试。</p>}</> : <div className="meal-pending"><Sparkles /><strong>{meal?.status === 'GENERATING' ? '正在生成推荐…' : meal?.status === 'FAILED' ? '这餐暂时没生成成功' : '等待生成这餐建议'}</strong><small>不会用占位食物代替真实推荐</small></div>}
+          {ready ? <><div className="meal-foods">{meal.items.map((item) => <p key={item.name}><span>{item.name}</span><small>{item.estimatedKcal} kcal</small></p>)}</div><p className="meal-reason">{meal.reason}</p><div className="meal-feedback-actions"><button type="button" aria-label="赞" aria-pressed={feedback[meal.id]?.sentiment === 'LIKE'} disabled={pendingIds.has(meal.id)} onClick={() => void submitLike(meal.id)}><ThumbsUp /></button><button type="button" aria-label="踩" aria-pressed={feedback[meal.id]?.sentiment === 'DISLIKE'} disabled={pendingIds.has(meal.id)} ref={(node) => { if (node) dislikeButtons.current.set(meal.id, node); else dislikeButtons.current.delete(meal.id); }} onClick={() => openDislike(meal.id)}><ThumbsDown /></button>{pendingIds.has(meal.id) && <small>正在提交…</small>}</div>{feedbackError?.recommendationId === meal.id && <p className="meal-feedback-error" role="alert">{feedbackError.message}，未保存，请重试。</p>}</> : <div className="meal-pending"><Sparkles /><strong>{meal?.status === 'GENERATING' ? '正在生成推荐…' : meal?.status === 'FAILED' ? '这餐暂时没生成成功' : '等待生成这餐建议'}</strong><small>不会用占位食物代替真实推荐</small></div>}
         </article>;
       })}</div>
-      {selectedDislike && <aside className="meal-feedback-sheet" aria-label="不喜欢的原因"><div><strong>这餐哪里不合适？</strong><button type="button" aria-label="关闭反馈面板" onClick={() => setDislikeId(undefined)}>×</button></div><div className="meal-feedback-reasons">{feedbackReasons.map((item) => <button type="button" key={item.value} aria-pressed={reason === item.value} onClick={() => setReason(item.value)}>{item.label}</button>)}</div>{reason === 'OTHER' && <label>补充说明<textarea aria-label="其他原因说明" value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} /></label>}<button type="button" className="primary" disabled={!reason || (reason === 'OTHER' && !note.trim()) || pendingId === selectedDislike.id} onClick={() => void submitDislike()}>{pendingId === selectedDislike.id ? '正在提交…' : '提交反馈'}</button></aside>}
+      {selectedDislike && <aside className="meal-feedback-sheet" ref={feedbackDialog} role="dialog" aria-modal="true" aria-labelledby="meal-feedback-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeDislike(); } }}><div><strong id="meal-feedback-title">这餐哪里不合适？</strong><button type="button" aria-label="关闭反馈面板" onClick={closeDislike}>×</button></div><div className="meal-feedback-reasons">{feedbackReasons.map((item) => <button type="button" key={item.value} aria-pressed={reason === item.value} onClick={() => setReason(item.value)}>{item.label}</button>)}</div>{reason === 'OTHER' && <label>补充说明<textarea aria-label="其他原因说明" value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} /></label>}<button type="button" className="primary" disabled={!reason || (reason === 'OTHER' && !note.trim()) || pendingIds.has(selectedDislike.id)} onClick={() => void submitDislike()}>{pendingIds.has(selectedDislike.id) ? '正在提交…' : '提交反馈'}</button></aside>}
     </> : <section className="empty-card meal-empty"><span><ChefHat /></span><h2>今天还没有饮食建议</h2><p>推荐生成后会在这里展示三餐安排，现在不会用假数据凑一份菜单。</p></section>}
   </section>;
 }

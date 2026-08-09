@@ -23,8 +23,8 @@ import happy.jayden.yang.fitness.service.FitnessDtos.ReportDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.ReportMetric;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
-import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConflictException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConflictException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.UnauthorizedException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
@@ -40,10 +40,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +67,7 @@ public final class FitnessApplicationService {
   private final MediaUploadPort mediaUploadPort;
   private final TransactionRunner transactionRunner;
   private final DailyMealPlanGenerationPort dailyMealPlanGenerationPort;
+  private final FitnessPorts.CurrentGoalReportGenerationPort currentGoalReportGenerationPort;
   private final SecureRandom secureRandom = new SecureRandom();
 
   public FitnessApplicationService(
@@ -115,12 +120,35 @@ public final class FitnessApplicationService {
       MediaUploadPort mediaUploadPort,
       DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
       TransactionRunner transactionRunner) {
+    this(
+        store,
+        passwordVerifier,
+        providerStatus,
+        aiConversation,
+        mediaUploadPort,
+        dailyMealPlanGenerationPort,
+        facts ->
+            new FitnessDtos.CurrentGoalReportGenerationResult(
+                "FAILED", null, "DEPENDENCY_NOT_CONFIGURED", "当前目标报告运行时未配置"),
+        transactionRunner);
+  }
+
+  public FitnessApplicationService(
+      FitnessStore store,
+      PasswordVerifier passwordVerifier,
+      AgentProviderStatus providerStatus,
+      AiConversation aiConversation,
+      MediaUploadPort mediaUploadPort,
+      DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
+      FitnessPorts.CurrentGoalReportGenerationPort currentGoalReportGenerationPort,
+      TransactionRunner transactionRunner) {
     this.store = store;
     this.passwordVerifier = passwordVerifier;
     this.providerStatus = providerStatus;
     this.aiConversation = aiConversation;
     this.mediaUploadPort = mediaUploadPort;
     this.dailyMealPlanGenerationPort = dailyMealPlanGenerationPort;
+    this.currentGoalReportGenerationPort = currentGoalReportGenerationPort;
     this.transactionRunner = transactionRunner;
   }
 
@@ -355,8 +383,7 @@ public final class FitnessApplicationService {
     if (request.sentiment() == FitnessDtos.Sentiment.DISLIKE && request.reason() == null) {
       throw new InvalidRequestException("点踩必须选择原因");
     }
-    if (request.note() != null
-        && request.note().codePointCount(0, request.note().length()) > 300) {
+    if (request.note() != null && request.note().codePointCount(0, request.note().length()) > 300) {
       throw new InvalidRequestException("说明不能超过 300 个字符");
     }
     if (request.reason() == FitnessDtos.FeedbackReason.OTHER
@@ -366,8 +393,10 @@ public final class FitnessApplicationService {
     return store.upsertMealRecommendationFeedback(authenticate(sessionToken), request);
   }
 
-  public FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(UUID userId) {
-    return store.mealRecommendationFeedbackContext(userId, Instant.now().minus(Duration.ofDays(30)));
+  public FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(
+      UUID userId) {
+    return store.mealRecommendationFeedbackContext(
+        userId, Instant.now().minus(Duration.ofDays(30)));
   }
 
   /** Reads only a durable plan state; it never fabricates an answer when no run exists. */
@@ -384,8 +413,8 @@ public final class FitnessApplicationService {
   }
 
   /**
-   * Persists an asynchronous request. HTTP and the 05:30 scheduler never invoke the model; only
-   * the leased worker below can do so.
+   * Persists an asynchronous request. HTTP and the 05:30 scheduler never invoke the model; only the
+   * leased worker below can do so.
    */
   public FitnessDtos.DailyMealPlanStateDto enqueueDailyMealPlan(
       String sessionToken, LocalDate requestedDate) {
@@ -454,8 +483,12 @@ public final class FitnessApplicationService {
           () -> {
             store.failDailyMealPlanGeneration(
                 claim,
-                blank(generationResult.failureCode()) ? "RUNTIME_ERROR" : generationResult.failureCode(),
-                blank(generationResult.failureMessage()) ? "三餐生成未完成" : generationResult.failureMessage());
+                blank(generationResult.failureCode())
+                    ? "RUNTIME_ERROR"
+                    : generationResult.failureCode(),
+                blank(generationResult.failureMessage())
+                    ? "三餐生成未完成"
+                    : generationResult.failureMessage());
             return null;
           });
     }
@@ -467,7 +500,8 @@ public final class FitnessApplicationService {
     if (result.recommendations() == null || result.recommendations().size() != 3) {
       return "三餐生成结果必须包含早餐、午餐和晚餐";
     }
-    java.util.Set<FitnessDtos.MealType> types = java.util.EnumSet.noneOf(FitnessDtos.MealType.class);
+    java.util.Set<FitnessDtos.MealType> types =
+        java.util.EnumSet.noneOf(FitnessDtos.MealType.class);
     for (FitnessDtos.GeneratedMealRecommendation recommendation : result.recommendations()) {
       if (recommendation == null
           || recommendation.mealType() == null
@@ -518,8 +552,11 @@ public final class FitnessApplicationService {
     }
     Map<FitnessDtos.MealType, FitnessDtos.MealRecommendationDto> byType =
         state.recommendations().stream()
-            .collect(java.util.stream.Collectors.toMap(FitnessDtos.MealRecommendationDto::mealType, item -> item));
-    FitnessDtos.DailyMealPlanSectionDto breakfast = section(byType.get(FitnessDtos.MealType.BREAKFAST));
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    FitnessDtos.MealRecommendationDto::mealType, item -> item));
+    FitnessDtos.DailyMealPlanSectionDto breakfast =
+        section(byType.get(FitnessDtos.MealType.BREAKFAST));
     FitnessDtos.DailyMealPlanSectionDto lunch = section(byType.get(FitnessDtos.MealType.LUNCH));
     FitnessDtos.DailyMealPlanSectionDto dinner = section(byType.get(FitnessDtos.MealType.DINNER));
     if (breakfast == null || lunch == null || dinner == null) {
@@ -527,7 +564,9 @@ public final class FitnessApplicationService {
     }
     FitnessDtos.NutritionDto nutrition =
         nutrition(
-            breakfast.nutrition().caloriesKcal()
+            breakfast
+                .nutrition()
+                .caloriesKcal()
                 .add(lunch.nutrition().caloriesKcal())
                 .add(dinner.nutrition().caloriesKcal()));
     return new FitnessDtos.ReadyDailyMealPlanDto(
@@ -559,7 +598,10 @@ public final class FitnessApplicationService {
             .map(
                 item ->
                     new FitnessDtos.DailyMealPlanFoodItem(
-                        item.name(), BigDecimal.ONE, "份", nutrition(BigDecimal.valueOf(item.estimatedKcal()))))
+                        item.name(),
+                        BigDecimal.ONE,
+                        "份",
+                        nutrition(BigDecimal.valueOf(item.estimatedKcal()))))
             .toList(),
         nutrition);
   }
@@ -574,7 +616,284 @@ public final class FitnessApplicationService {
   }
 
   private static FitnessDtos.NutritionDto nutrition(BigDecimal calories) {
-    return new FitnessDtos.NutritionDto(calories, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+    return new FitnessDtos.NutritionDto(
+        calories, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+  }
+
+  /** Reads the one cumulative report for the active goal; a missing active goal is a real 404. */
+  public FitnessDtos.CurrentGoalReportRunDto currentGoalReport(String sessionToken) {
+    return store
+        .findCurrentGoalReport(authenticate(sessionToken))
+        .orElseThrow(
+            () ->
+                new happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException(
+                    "当前目标不存在或报告尚未入队"));
+  }
+
+  /**
+   * HTTP only persists QUEUED work. The model is exclusively invoked by the leased worker below.
+   */
+  public FitnessDtos.CurrentGoalReportRunDto enqueueCurrentGoalReport(String sessionToken) {
+    return store.enqueueCurrentGoalReport(authenticate(sessionToken));
+  }
+
+  /** Executes no more than one fenced report lease. */
+  public boolean runNextCurrentGoalReportGeneration() {
+    var claim = store.claimNextCurrentGoalReportGeneration();
+    if (claim.isEmpty()) return false;
+    runClaimedCurrentGoalReport(claim.get());
+    return true;
+  }
+
+  private void runClaimedCurrentGoalReport(FitnessDtos.ClaimedCurrentGoalReportRunDto claim) {
+    FitnessDtos.CurrentGoalReportRunDto run = claim.run();
+    FitnessDtos.CurrentGoalReportFacts facts;
+    FitnessDtos.CurrentGoalReportSourceData source;
+    try {
+      source = store.loadCurrentGoalReportSource(run.userId(), run.goalId());
+      facts = currentGoalReportFacts(source);
+    } catch (RuntimeException exception) {
+      transactionRunner.inTransaction(
+          () -> {
+            store.failCurrentGoalReportGeneration(claim, "INTERNAL_ERROR", "报告客观数据计算失败");
+            return null;
+          });
+      return;
+    }
+    FitnessDtos.CurrentGoalReportGenerationResult result;
+    try {
+      result = currentGoalReportGenerationPort.generate(facts);
+    } catch (RuntimeException exception) {
+      result =
+          new FitnessDtos.CurrentGoalReportGenerationResult(
+              "FAILED", null, "INTERNAL_ERROR", "报告生成运行时发生未处理错误");
+    }
+    String invalid = invalidCurrentGoalNarrative(result);
+    Instant computedThrough = source.observedThrough();
+    if (invalid != null) {
+      transactionRunner.inTransaction(
+          () -> {
+            store.failCurrentGoalReportGeneration(claim, "TASK_FAILED", invalid);
+            return null;
+          });
+      return;
+    }
+    if ("SUCCEEDED".equals(result.status())) {
+      FitnessDtos.CurrentGoalReportGenerationResult completed = result;
+      transactionRunner.inTransaction(
+          () -> {
+            store.completeCurrentGoalReportGeneration(claim, facts, completed, computedThrough);
+            return null;
+          });
+      return;
+    }
+    FitnessDtos.CurrentGoalReportGenerationResult failed = result;
+    transactionRunner.inTransaction(
+        () -> {
+          store.failCurrentGoalReportGeneration(
+              claim,
+              reportFailureCode(failed == null ? null : failed.failureCode()),
+              blank(failed == null ? null : failed.failureMessage())
+                  ? "当前目标报告未生成"
+                  : failed.failureMessage());
+          return null;
+        });
+  }
+
+  private static String reportFailureCode(String value) {
+    return "DEPENDENCY_NOT_CONFIGURED".equals(value) ? value : "TASK_FAILED";
+  }
+
+  private static String invalidCurrentGoalNarrative(
+      FitnessDtos.CurrentGoalReportGenerationResult result) {
+    if (result == null) return "报告运行时未返回结果";
+    if (!"SUCCEEDED".equals(result.status())) return null;
+    FitnessDtos.CurrentGoalReportNarrative narrative = result.narrative();
+    if (narrative == null
+        || narrative.conclusion() == null
+        || blank(narrative.conclusion().summary())
+        || narrative.conclusion().score() < 0
+        || narrative.conclusion().score() > 100
+        || !List.of("A", "B", "C", "D").contains(narrative.conclusion().grade())
+        || narrative.highlights() == null
+        || narrative.highlights().size() != 2
+        || narrative.weaknesses() == null
+        || narrative.weaknesses().isEmpty()
+        || narrative.weaknesses().size() > 2
+        || narrative.nextActions() == null
+        || narrative.nextActions().isEmpty()
+        || narrative.nextActions().size() > 3) {
+      return "报告模型返回不符合结构化约束";
+    }
+    List<String> text = new ArrayList<>();
+    text.add(narrative.conclusion().summary());
+    text.addAll(narrative.highlights());
+    text.addAll(narrative.weaknesses());
+    for (FitnessDtos.CurrentGoalReportNextAction action : narrative.nextActions()) {
+      if (action == null
+          || blank(action.title())
+          || blank(action.rationale())
+          || !List.of("GENERATE_PLAN", "OPEN_RECORD", "NONE").contains(action.action())) {
+        return "报告模型返回不符合结构化约束";
+      }
+      text.add(action.title());
+      text.add(action.rationale());
+    }
+    return text.stream()
+            .anyMatch(value -> blank(value) || value.contains("<") || value.contains(">"))
+        ? "报告模型不得生成 HTML"
+        : null;
+  }
+
+  /** Computes report facts from timestamp-windowed objective data; no record has a goal_id. */
+  static FitnessDtos.CurrentGoalReportFacts currentGoalReportFacts(
+      FitnessDtos.CurrentGoalReportSourceData source) {
+    FitnessDtos.GoalState goal = source.goal();
+    LocalDate end = source.observedThrough().atZone(USER_ZONE).toLocalDate();
+    LocalDate start = goal.startedAt().atZone(USER_ZONE).toLocalDate();
+    LocalDate currentWeek = end.with(DayOfWeek.MONDAY);
+    LocalDate firstWeek = start.with(DayOfWeek.MONDAY);
+    if (firstWeek.isAfter(currentWeek.minusWeeks(3))) firstWeek = currentWeek.minusWeeks(3);
+    List<LocalDate> weeks = new ArrayList<>();
+    for (LocalDate week = firstWeek; !week.isAfter(currentWeek); week = week.plusWeeks(1)) {
+      weeks.add(week);
+    }
+
+    List<FitnessDtos.BodyRecordDto> weights =
+        source.bodyRecords().stream()
+            .filter(record -> record.weightJin() != null)
+            .sorted(Comparator.comparing(FitnessDtos.BodyRecordDto::recordedAt))
+            .toList();
+    HashMap<LocalDate, BigDecimal> latestWeightByWeek = new HashMap<>();
+    for (FitnessDtos.BodyRecordDto record : weights) {
+      latestWeightByWeek.put(
+          record.recordedAt().atZone(USER_ZONE).toLocalDate().with(DayOfWeek.MONDAY),
+          record.weightJin());
+    }
+    List<FitnessDtos.CurrentGoalWeightTrendPoint> weightTrend =
+        weeks.stream()
+            .map(
+                week ->
+                    new FitnessDtos.CurrentGoalWeightTrendPoint(week, latestWeightByWeek.get(week)))
+            .toList();
+
+    HashMap<LocalDate, int[]> workoutByWeek = new HashMap<>();
+    HashMap<String, Integer> areas = new HashMap<>();
+    int cardioMinutes = 0;
+    int strengthMinutes = 0;
+    for (FitnessDtos.CurrentGoalWorkoutRecord workout : source.workouts()) {
+      LocalDate week = workout.completedAt().atZone(USER_ZONE).toLocalDate().with(DayOfWeek.MONDAY);
+      int[] aggregate = workoutByWeek.computeIfAbsent(week, ignored -> new int[2]);
+      aggregate[0] += workout.minutes();
+      aggregate[1]++;
+      boolean cardio =
+          (workout.title() + " " + String.join(" ", workout.targetAreas()))
+              .matches(".*(有氧|心肺|跑|骑行|HIIT).*");
+      if (cardio) cardioMinutes += workout.minutes();
+      else strengthMinutes += workout.minutes();
+      workout.targetAreas().forEach(area -> areas.merge(area, 1, Integer::sum));
+    }
+    List<FitnessDtos.CurrentGoalTrainingVolumePoint> trainingVolume =
+        weeks.stream()
+            .map(
+                week -> {
+                  int[] aggregate = workoutByWeek.getOrDefault(week, new int[2]);
+                  return new FitnessDtos.CurrentGoalTrainingVolumePoint(
+                      week, aggregate[0], aggregate[1]);
+                })
+            .toList();
+    int totalAreas = areas.values().stream().mapToInt(Integer::intValue).sum();
+    List<FitnessDtos.CurrentGoalTrainingStructureItem> structure =
+        areas.entrySet().stream()
+            .sorted((left, right) -> Integer.compare(right.getValue(), left.getValue()))
+            .map(
+                entry ->
+                    new FitnessDtos.CurrentGoalTrainingStructureItem(
+                        entry.getKey(), percent(entry.getValue(), totalAreas)))
+            .toList();
+    int totalMinutes = cardioMinutes + strengthMinutes;
+    BigDecimal cardioPercent = percent(cardioMinutes, totalMinutes);
+    BigDecimal strengthPercent = percent(strengthMinutes, totalMinutes);
+    BigDecimal currentWeight =
+        weights.isEmpty() ? goal.startWeightJin() : weights.get(weights.size() - 1).weightJin();
+    BigDecimal previousWeight =
+        weights.size() < 2 ? null : weights.get(weights.size() - 2).weightJin();
+    BigDecimal progress = goalProgress(goal, currentWeight);
+    int workoutCount = source.workouts().size();
+    BigDecimal calories =
+        source.meals().stream()
+            .flatMap(meal -> meal.items().stream())
+            .map(item -> BigDecimal.valueOf(item.estimatedKcal()))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    List<FitnessDtos.CurrentGoalReportMetric> metrics =
+        List.of(
+            new FitnessDtos.CurrentGoalReportMetric(
+                "GOAL_PROGRESS", "目标进度", progress, "%", null, "NOT_AVAILABLE"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "WEIGHT",
+                "当前体重",
+                currentWeight,
+                "斤",
+                previousWeight == null ? null : currentWeight.subtract(previousWeight),
+                direction(currentWeight, previousWeight, true)),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "WORKOUT_COUNT",
+                "完成训练",
+                BigDecimal.valueOf(workoutCount),
+                "次",
+                null,
+                workoutCount == 0 ? "NOT_AVAILABLE" : "UP"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "WORKOUT_MINUTES",
+                "训练时长",
+                BigDecimal.valueOf(totalMinutes),
+                "分钟",
+                null,
+                totalMinutes == 0 ? "NOT_AVAILABLE" : "UP"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "CALORIES",
+                "饮食记录热量",
+                calories,
+                "kcal",
+                null,
+                calories.signum() == 0 ? "NOT_AVAILABLE" : "STABLE"));
+    return new FitnessDtos.CurrentGoalReportFacts(
+        goal.name(),
+        start,
+        end,
+        metrics,
+        weightTrend,
+        trainingVolume,
+        structure,
+        cardioPercent,
+        strengthPercent);
+  }
+
+  private static BigDecimal goalProgress(FitnessDtos.GoalState goal, BigDecimal currentWeight) {
+    BigDecimal denominator = goal.startWeightJin().subtract(goal.targetWeightJin());
+    if (denominator.signum() == 0) return BigDecimal.ZERO;
+    BigDecimal value =
+        goal.startWeightJin()
+            .subtract(currentWeight)
+            .multiply(BigDecimal.valueOf(100))
+            .divide(denominator, 0, RoundingMode.HALF_UP);
+    return value.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100));
+  }
+
+  private static BigDecimal percent(int value, int total) {
+    return total == 0
+        ? BigDecimal.ZERO
+        : BigDecimal.valueOf(value)
+            .multiply(BigDecimal.valueOf(100))
+            .divide(BigDecimal.valueOf(total), 0, RoundingMode.HALF_UP);
+  }
+
+  private static String direction(BigDecimal current, BigDecimal previous, boolean lowerIsBetter) {
+    if (previous == null) return "NOT_AVAILABLE";
+    int compare = current.compareTo(previous);
+    if (compare == 0) return "STABLE";
+    if (lowerIsBetter) return compare < 0 ? "DOWN" : "UP";
+    return compare > 0 ? "UP" : "DOWN";
   }
 
   public WorkoutCompletionDto completeWorkout(

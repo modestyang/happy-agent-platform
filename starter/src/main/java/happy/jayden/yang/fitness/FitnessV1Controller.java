@@ -5,13 +5,14 @@ import static happy.jayden.yang.fitness.LocalAuthController.SESSION_COOKIE;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecognitionJobRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecommendationFeedbackRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMediaUploadTicketRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
-import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecommendationFeedbackRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackDto;
-import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.FeedbackReason;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
@@ -43,9 +44,7 @@ public class FitnessV1Controller {
   private final ObjectMapper mapper;
 
   public FitnessV1Controller(
-      FitnessApplicationService application,
-      MediaUploadPort media,
-      ObjectMapper mapper) {
+      FitnessApplicationService application, MediaUploadPort media, ObjectMapper mapper) {
     this.application = application;
     this.media = media;
     this.mapper = mapper;
@@ -127,6 +126,36 @@ public class FitnessV1Controller {
     return FitnessV1Responses.mealPage(application.mealRecords(token));
   }
 
+  @GetMapping("/reports/current-goal")
+  Object currentGoalReport(@CookieValue(name = SESSION_COOKIE, required = false) String token) {
+    return FitnessV1Responses.currentGoalReport(application.currentGoalReport(token));
+  }
+
+  @PostMapping("/reports/current-goal")
+  ResponseEntity<Object> refreshCurrentGoalReport(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody RefreshCurrentGoalReportBody request) {
+    if (request == null
+        || !("USER_REFRESH".equals(request.reason()) || "RETRY_FAILED".equals(request.reason()))) {
+      throw new InvalidRequestException("报告刷新原因不合法");
+    }
+    CurrentGoalReportRunDto report =
+        application.idempotently(
+            token,
+            "current-goal-report-refresh",
+            key,
+            hash(request),
+            () -> application.enqueueCurrentGoalReport(token),
+            CurrentGoalReportRunDto::reportId,
+            this::write,
+            json -> read(json, CurrentGoalReportRunDto.class));
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .header(HttpHeaders.LOCATION, "/api/v1/app/reports/current-goal")
+        .header(HttpHeaders.RETRY_AFTER, "1")
+        .body(FitnessV1Responses.currentGoalReport(report));
+  }
+
   @GetMapping("/meal-plans/daily")
   happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto dailyMealPlan(
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
@@ -135,23 +164,25 @@ public class FitnessV1Controller {
   }
 
   @PostMapping("/meal-plans/daily/generate")
-  ResponseEntity<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto> generateDailyMealPlan(
-      @CookieValue(name = SESSION_COOKIE, required = false) String token,
-      @RequestHeader(name = "Idempotency-Key", required = false) String key,
-      @RequestBody happy.jayden.yang.fitness.service.FitnessDtos.GenerateDailyMealPlanRequest request) {
+  ResponseEntity<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto>
+      generateDailyMealPlan(
+          @CookieValue(name = SESSION_COOKIE, required = false) String token,
+          @RequestHeader(name = "Idempotency-Key", required = false) String key,
+          @RequestBody
+              happy.jayden.yang.fitness.service.FitnessDtos.GenerateDailyMealPlanRequest request) {
     var state =
         application.idempotently(
-        token,
-        "daily-meal-plan-generate",
-        key,
-        hash(request),
-        () -> application.enqueueDailyMealPlan(token, request == null ? null : request.date()),
-        value -> value.run().mealPlanId(),
-        this::write,
-        json ->
-            read(
-                json,
-                happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto.class));
+            token,
+            "daily-meal-plan-generate",
+            key,
+            hash(request),
+            () -> application.enqueueDailyMealPlan(token, request == null ? null : request.date()),
+            value -> value.run().mealPlanId(),
+            this::write,
+            json ->
+                read(
+                    json,
+                    happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto.class));
     java.time.LocalDate date = request == null || request.date() == null ? null : request.date();
     return ResponseEntity.status(HttpStatus.ACCEPTED)
         .header(HttpHeaders.LOCATION, "/api/v1/app/meal-plans/daily")
@@ -170,7 +201,11 @@ public class FitnessV1Controller {
         "meal-feedback",
         key,
         hash(body),
-        () -> application.upsertMealRecommendationFeedback(token, new CreateMealRecommendationFeedbackRequest(recommendationId, body.sentiment(), body.reason(), body.note())),
+        () ->
+            application.upsertMealRecommendationFeedback(
+                token,
+                new CreateMealRecommendationFeedbackRequest(
+                    recommendationId, body.sentiment(), body.reason(), body.note())),
         MealRecommendationFeedbackDto::recommendationId,
         this::write,
         json -> read(json, MealRecommendationFeedbackDto.class));
@@ -241,8 +276,12 @@ public class FitnessV1Controller {
     if (response instanceof FitnessV1Responses.MealRecord meal) {
       return meal.mealRecordId();
     }
-    if (response instanceof happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto plan) {
+    if (response
+        instanceof happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto plan) {
       return plan.run().mealPlanId();
+    }
+    if (response instanceof CurrentGoalReportRunDto report) {
+      return report.reportId();
     }
     throw new IllegalArgumentException("不支持的幂等响应类型");
   }
@@ -257,4 +296,6 @@ public class FitnessV1Controller {
   }
 
   record MealRecommendationFeedbackBody(Sentiment sentiment, FeedbackReason reason, String note) {}
+
+  record RefreshCurrentGoalReportBody(String reason) {}
 }

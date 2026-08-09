@@ -7,15 +7,16 @@ import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
-import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
-import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
-import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
-import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.CurrentGoalReportGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
+import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.TransactionRunner;
 import javax.sql.DataSource;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -67,14 +68,18 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
-  @ConditionalOnProperty(name = "happy.fitness.local-media.enabled", havingValue = "false", matchIfMissing = true)
+  @ConditionalOnProperty(
+      name = "happy.fitness.local-media.enabled",
+      havingValue = "false",
+      matchIfMissing = true)
   MediaUploadPort ossMediaUploadPort(
       @Qualifier("fitnessDataSource") DataSource dataSource,
       @Value("${happy.fitness.oss.endpoint:}") String endpoint,
       @Value("${happy.fitness.oss.bucket:}") String bucket,
       @Value("${happy.fitness.oss.access-key-id:}") String accessKeyId,
       @Value("${happy.fitness.oss.access-key-secret:}") String accessKeySecret) {
-    return new OssPresignedMediaUploadPort(dataSource, java.time.Clock.systemUTC(), endpoint, bucket, accessKeyId, accessKeySecret);
+    return new OssPresignedMediaUploadPort(
+        dataSource, java.time.Clock.systemUTC(), endpoint, bucket, accessKeyId, accessKeySecret);
   }
 
   @Bean
@@ -82,7 +87,8 @@ public class FitnessExperienceConfig {
       @Qualifier("agentDataSource") DataSource agentDataSource,
       ObjectMapper mapper,
       MediaUploadPort mediaUploadPort,
-      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}") String masterKeyFile) {
+      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
+          String masterKeyFile) {
     return new MealRecognitionRuntime(agentDataSource, mapper, masterKeyFile, mediaUploadPort);
   }
 
@@ -96,6 +102,15 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
+  CurrentGoalReportGenerationPort currentGoalReportGenerationPort(
+      @Qualifier("agentDataSource") DataSource agentDataSource,
+      ObjectMapper mapper,
+      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
+          String masterKeyFile) {
+    return new CurrentGoalReportRuntime(agentDataSource, mapper, masterKeyFile);
+  }
+
+  @Bean
   FitnessApplicationService fitnessApplicationService(
       FitnessStore store,
       PasswordVerifier passwordVerifier,
@@ -103,7 +118,9 @@ public class FitnessExperienceConfig {
       AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
       DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
-      @Qualifier("fitnessTransactionManager") PlatformTransactionManager fitnessTransactionManager) {
+      CurrentGoalReportGenerationPort currentGoalReportGenerationPort,
+      @Qualifier("fitnessTransactionManager")
+          PlatformTransactionManager fitnessTransactionManager) {
     TransactionTemplate transaction = new TransactionTemplate(fitnessTransactionManager);
     TransactionRunner runner =
         new TransactionRunner() {
@@ -120,6 +137,7 @@ public class FitnessExperienceConfig {
         aiConversation,
         mediaUploadPort,
         dailyMealPlanGenerationPort,
+        currentGoalReportGenerationPort,
         runner);
   }
 
@@ -132,6 +150,12 @@ public class FitnessExperienceConfig {
   DailyMealPlanGenerationWorker dailyMealPlanGenerationWorker(
       FitnessApplicationService application) {
     return new DailyMealPlanGenerationWorker(application);
+  }
+
+  @Bean
+  CurrentGoalReportGenerationWorker currentGoalReportGenerationWorker(
+      FitnessApplicationService application) {
+    return new CurrentGoalReportGenerationWorker(application);
   }
 
   @Bean

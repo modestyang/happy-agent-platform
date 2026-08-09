@@ -111,7 +111,7 @@ class DualSchemaIntegrationTest {
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(11L);
+        .isEqualTo(12L);
   }
 
   @Test
@@ -124,6 +124,11 @@ class DualSchemaIntegrationTest {
                 "select count(*) from information_schema.columns where table_schema='fitness' and table_name in ('meals','meal_recognition_jobs') and column_name='goal_id'",
                 Long.class))
         .isZero();
+    assertThat(
+            fitnessJdbc.queryForObject(
+                "select count(*) from information_schema.columns where table_schema='fitness' and table_name='current_goal_reports' and column_name in ('report_id','goal_id','deterministic_snapshot','narrative')",
+                Long.class))
+        .isEqualTo(4L);
     assertThat(
             agentJdbc.queryForObject(
                 "select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid"

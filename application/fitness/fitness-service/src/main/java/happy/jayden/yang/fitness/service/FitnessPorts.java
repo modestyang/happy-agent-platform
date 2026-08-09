@@ -3,14 +3,19 @@ package happy.jayden.yang.fitness.service;
 import happy.jayden.yang.fitness.service.FitnessDtos.AiMessageResponse;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
-import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
-import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto;
-import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedCurrentGoalReportRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedDailyMealPlanRunDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportRunDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportSourceData;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
@@ -68,8 +73,11 @@ public final class FitnessPorts {
 
     java.util.List<MealDto> listMealRecords(UUID userId);
 
-    FitnessDtos.MealRecommendationFeedbackDto upsertMealRecommendationFeedback(UUID userId, FitnessDtos.CreateMealRecommendationFeedbackRequest request);
-    FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(UUID userId, Instant since);
+    FitnessDtos.MealRecommendationFeedbackDto upsertMealRecommendationFeedback(
+        UUID userId, FitnessDtos.CreateMealRecommendationFeedbackRequest request);
+
+    FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(
+        UUID userId, Instant since);
 
     /** Reads the durable state and the persisted recommendation rows for one local date. */
     Optional<DailyMealPlanStateDto> findDailyMealPlan(UUID userId, LocalDate date);
@@ -90,6 +98,34 @@ public final class FitnessPorts {
     /** Returns false when a newer lease has fenced this worker out. */
     boolean failDailyMealPlanGeneration(
         ClaimedDailyMealPlanRunDto claim, String failureCode, String failureMessage);
+
+    /**
+     * Returns the active goal's durable report; READY is read as STALE when objective data moved
+     * on.
+     */
+    Optional<CurrentGoalReportRunDto> findCurrentGoalReport(UUID userId);
+
+    /**
+     * Reads objective facts only by the current goal's time window, never by a goal_id on records.
+     */
+    CurrentGoalReportSourceData loadCurrentGoalReportSource(UUID userId, UUID goalId);
+
+    /** Creates or atomically re-queues the one report identified by (user, goal, goal version). */
+    CurrentGoalReportRunDto enqueueCurrentGoalReport(UUID userId);
+
+    /** Atomically leases one QUEUED report or an expired GENERATING lease. */
+    Optional<ClaimedCurrentGoalReportRunDto> claimNextCurrentGoalReportGeneration();
+
+    /** Returns false when the claim was fenced by a newer worker or an expired lease. */
+    boolean completeCurrentGoalReportGeneration(
+        ClaimedCurrentGoalReportRunDto claim,
+        CurrentGoalReportFacts facts,
+        CurrentGoalReportGenerationResult result,
+        Instant computedThrough);
+
+    /** Returns false when the claim was fenced by a newer worker or an expired lease. */
+    boolean failCurrentGoalReportGeneration(
+        ClaimedCurrentGoalReportRunDto claim, String failureCode, String failureMessage);
 
     java.util.List<UUID> activeUserIds();
 
@@ -141,9 +177,12 @@ public final class FitnessPorts {
    */
   public interface DailyMealPlanGenerationPort {
     DailyMealPlanGenerationResult generate(
-        UUID userId,
-        LocalDate date,
-        FitnessDtos.MealRecommendationFeedbackContext feedbackContext);
+        UUID userId, LocalDate date, FitnessDtos.MealRecommendationFeedbackContext feedbackContext);
+  }
+
+  /** Isolated, non-conversational Agent boundary for the report's narrative-only JSON result. */
+  public interface CurrentGoalReportGenerationPort {
+    CurrentGoalReportGenerationResult generate(CurrentGoalReportFacts facts);
   }
 
   public interface PasswordVerifier {

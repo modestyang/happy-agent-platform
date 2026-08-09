@@ -5,14 +5,23 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
-import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedMealRecognitionJob;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedCurrentGoalReportRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedDailyMealPlanRunDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedMealRecognitionJob;
 import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecommendationFeedbackRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportNarrative;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportRunDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportSourceData;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWorkoutRecord;
 import happy.jayden.yang.fitness.service.FitnessDtos.ExerciseDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.FeedbackReason;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.IdempotencyEntry;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
@@ -22,17 +31,15 @@ import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationDto;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackDto;
-import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecommendationFeedbackRequest;
-import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
-import happy.jayden.yang.fitness.service.FitnessDtos.FeedbackReason;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
-import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -47,8 +54,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 public final class JdbcFitnessStore implements FitnessStore {
@@ -191,7 +198,9 @@ public final class JdbcFitnessStore implements FitnessStore {
         Timestamp.from(occurredAt),
         request.mealType().name(),
         json(request.items()));
-    Instant createdAt = jdbc.queryForObject("SELECT created_at FROM meals WHERE meal_id=?", Timestamp.class, id).toInstant();
+    Instant createdAt =
+        jdbc.queryForObject("SELECT created_at FROM meals WHERE meal_id=?", Timestamp.class, id)
+            .toInstant();
     return new MealDto(
         id,
         occurredAt,
@@ -326,7 +335,9 @@ public final class JdbcFitnessStore implements FitnessStore {
         request.source(),
         request.recognitionJobId(),
         request.note());
-    Instant createdAt = jdbc.queryForObject("SELECT created_at FROM meals WHERE meal_id=?", Timestamp.class, id).toInstant();
+    Instant createdAt =
+        jdbc.queryForObject("SELECT created_at FROM meals WHERE meal_id=?", Timestamp.class, id)
+            .toInstant();
     return new MealDto(
         id,
         occurredAt,
@@ -350,13 +361,21 @@ public final class JdbcFitnessStore implements FitnessStore {
   @Override
   public MealRecommendationFeedbackDto upsertMealRecommendationFeedback(
       UUID userId, CreateMealRecommendationFeedbackRequest request) {
-    Long owned = jdbc.queryForObject(
-        "SELECT count(*) FROM daily_meal_recommendations WHERE recommendation_id=? AND user_id=?",
-        Long.class, request.recommendationId(), userId);
+    Long owned =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM daily_meal_recommendations WHERE recommendation_id=? AND user_id=?",
+            Long.class,
+            request.recommendationId(),
+            userId);
     if (owned == null || owned == 0) throw new NotFoundException("饮食推荐不存在");
     return jdbc.queryForObject(
         "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?,?,?,?) ON CONFLICT (user_id,recommendation_id) DO UPDATE SET sentiment=EXCLUDED.sentiment,reason=EXCLUDED.reason,note=EXCLUDED.note,updated_at=CURRENT_TIMESTAMP RETURNING recommendation_id,sentiment AS feedback_sentiment,reason AS feedback_reason,note AS feedback_note,created_at AS feedback_created_at,updated_at AS feedback_updated_at",
-        (rs, row) -> feedback(rs), userId, request.recommendationId(), request.sentiment().name(), request.reason() == null ? null : request.reason().name(), request.note() == null ? null : request.note().trim());
+        (rs, row) -> feedback(rs),
+        userId,
+        request.recommendationId(),
+        request.sentiment().name(),
+        request.reason() == null ? null : request.reason().name(),
+        request.note() == null ? null : request.note().trim());
   }
 
   @Override
@@ -484,8 +503,7 @@ public final class JdbcFitnessStore implements FitnessStore {
     }
     var run = claim.run();
     boolean owned =
-        !jdbc
-            .query(
+        !jdbc.query(
                 "SELECT meal_plan_id FROM daily_meal_plan_runs WHERE meal_plan_id=? AND status='GENERATING'"
                     + " AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP FOR UPDATE",
                 (rs, row) -> rs.getObject(1, UUID.class),
@@ -507,32 +525,185 @@ public final class JdbcFitnessStore implements FitnessStore {
           json(recommendation.items()),
           recommendation.reason());
     }
-    int changed = jdbc.update(
-        "UPDATE daily_meal_plan_runs SET status='READY',generated_at=CURRENT_TIMESTAMP,"
-            + " failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP"
-            + " WHERE meal_plan_id=? AND status='GENERATING' AND version=? AND lease_token=?"
-            + " AND lease_until > CURRENT_TIMESTAMP",
-        run.mealPlanId(),
-        run.version(),
-        run.leaseToken());
+    int changed =
+        jdbc.update(
+            "UPDATE daily_meal_plan_runs SET status='READY',generated_at=CURRENT_TIMESTAMP,"
+                + " failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP"
+                + " WHERE meal_plan_id=? AND status='GENERATING' AND version=? AND lease_token=?"
+                + " AND lease_until > CURRENT_TIMESTAMP",
+            run.mealPlanId(),
+            run.version(),
+            run.leaseToken());
     return changed == 1;
   }
 
   @Override
   public boolean failDailyMealPlanGeneration(
-      ClaimedDailyMealPlanRunDto claim,
-      String failureCode,
-      String failureMessage) {
+      ClaimedDailyMealPlanRunDto claim, String failureCode, String failureMessage) {
     var run = claim.run();
     return jdbc.update(
-        "UPDATE daily_meal_plan_runs SET status='FAILED',failure_code=?,failure_message=?,"
-            + " lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE meal_plan_id=?"
-            + " AND status='GENERATING' AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP",
-        failureCode,
-        failureMessage,
-        run.mealPlanId(),
-        run.version(),
-        run.leaseToken()) == 1;
+            "UPDATE daily_meal_plan_runs SET status='FAILED',failure_code=?,failure_message=?,"
+                + " lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE meal_plan_id=?"
+                + " AND status='GENERATING' AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP",
+            failureCode,
+            failureMessage,
+            run.mealPlanId(),
+            run.version(),
+            run.leaseToken())
+        == 1;
+  }
+
+  @Override
+  public Optional<CurrentGoalReportRunDto> findCurrentGoalReport(UUID userId) {
+    return jdbc
+        .query(
+            "SELECT r.report_id,r.user_id,r.goal_id,r.goal_version,"
+                + " CASE WHEN r.state='READY' AND EXISTS (SELECT 1 FROM ("
+                + " SELECT recorded_at AS observed_at FROM body_records WHERE user_id=r.user_id"
+                + " UNION ALL SELECT occurred_at FROM meals WHERE user_id=r.user_id"
+                + " UNION ALL SELECT completed_at FROM workout_plans WHERE user_id=r.user_id AND completed_at IS NOT NULL"
+                + " ) objective WHERE objective.observed_at > r.computed_through) THEN 'STALE' ELSE r.state END AS state,"
+                + " r.window_start,r.window_end,r.deterministic_snapshot::text,r.narrative::text,r.computed_through,"
+                + " r.failure_code,r.failure_message,r.version,r.lease_token,r.lease_until,r.updated_at"
+                + " FROM current_goal_reports r JOIN goals g ON g.goal_id=r.goal_id"
+                + " WHERE r.user_id=? AND g.status='ACTIVE' ORDER BY g.created_at DESC LIMIT 1",
+            (rs, row) -> currentGoalReportRun(rs),
+            userId)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public CurrentGoalReportSourceData loadCurrentGoalReportSource(UUID userId, UUID goalId) {
+    GoalState goal = currentGoal(userId, goalId);
+    Instant start = goal.startedAt();
+    Instant end = Instant.now();
+    List<BodyRecordDto> bodyRecords =
+        jdbc.query(
+            "SELECT body_record_id,recorded_at,weight_jin,waist_cm FROM body_records WHERE user_id=?"
+                + " AND recorded_at>=? AND recorded_at<=? ORDER BY recorded_at",
+            (rs, row) ->
+                new BodyRecordDto(
+                    rs.getObject("body_record_id", UUID.class),
+                    rs.getTimestamp("recorded_at").toInstant(),
+                    rs.getBigDecimal("weight_jin"),
+                    rs.getBigDecimal("waist_cm")),
+            userId,
+            Timestamp.from(start),
+            Timestamp.from(end));
+    List<MealDto> meals =
+        jdbc.query(
+            "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note,created_at FROM meals"
+                + " WHERE user_id=? AND occurred_at>=? AND occurred_at<=? ORDER BY occurred_at",
+            (rs, row) -> meal(rs),
+            userId,
+            Timestamp.from(start),
+            Timestamp.from(end));
+    List<CurrentGoalWorkoutRecord> workouts =
+        jdbc.query(
+            "SELECT w.completed_at,w.estimated_minutes,w.title,"
+                + " COALESCE(jsonb_agg(DISTINCT e.target_area) FILTER (WHERE e.target_area IS NOT NULL),'[]'::jsonb)::text AS areas"
+                + " FROM workout_plans w LEFT JOIN workout_plan_exercises pe ON pe.workout_plan_id=w.workout_plan_id"
+                + " LEFT JOIN exercises e ON e.exercise_id=pe.exercise_id WHERE w.user_id=? AND w.status='COMPLETED'"
+                + " AND w.completed_at>=? AND w.completed_at<=? GROUP BY w.workout_plan_id,w.completed_at,w.estimated_minutes,w.title"
+                + " ORDER BY w.completed_at",
+            (rs, row) ->
+                new CurrentGoalWorkoutRecord(
+                    rs.getTimestamp("completed_at").toInstant(),
+                    rs.getInt("estimated_minutes"),
+                    strings(rs.getString("areas")),
+                    rs.getString("title")),
+            userId,
+            Timestamp.from(start),
+            Timestamp.from(end));
+    return new CurrentGoalReportSourceData(goal, end, bodyRecords, meals, workouts);
+  }
+
+  @Override
+  public CurrentGoalReportRunDto enqueueCurrentGoalReport(UUID userId) {
+    GoalState goal = currentGoal(userId, null);
+    LocalDate windowStart = goal.startedAt().atZone(USER_ZONE).toLocalDate();
+    LocalDate windowEnd = LocalDate.now(USER_ZONE);
+    List<CurrentGoalReportRunDto> values =
+        jdbc.query(
+            "INSERT INTO current_goal_reports(report_id,user_id,goal_id,goal_version,state,window_start,window_end)"
+                + " VALUES (?,?,?,?, 'QUEUED',?,?) ON CONFLICT (user_id,goal_id,goal_version) DO UPDATE SET"
+                + " state=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN 'QUEUED' ELSE current_goal_reports.state END,"
+                + " deterministic_snapshot=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN NULL ELSE current_goal_reports.deterministic_snapshot END,"
+                + " narrative=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN NULL ELSE current_goal_reports.narrative END,"
+                + " computed_through=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN NULL ELSE current_goal_reports.computed_through END,"
+                + " failure_code=NULL,failure_message=NULL,lease_token=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN NULL ELSE current_goal_reports.lease_token END,"
+                + " lease_until=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN NULL ELSE current_goal_reports.lease_until END,"
+                + " version=CASE WHEN current_goal_reports.state IN ('READY','STALE','FAILED') THEN current_goal_reports.version+1 ELSE current_goal_reports.version END,"
+                + " updated_at=CURRENT_TIMESTAMP RETURNING report_id,user_id,goal_id,goal_version,state,window_start,window_end,"
+                + " deterministic_snapshot::text,narrative::text,computed_through,failure_code,failure_message,version,lease_token,lease_until,updated_at",
+            (rs, row) -> currentGoalReportRun(rs),
+            UUID.randomUUID(),
+            userId,
+            goal.id(),
+            goal.version(),
+            windowStart,
+            windowEnd);
+    return values.get(0);
+  }
+
+  @Override
+  public Optional<ClaimedCurrentGoalReportRunDto> claimNextCurrentGoalReportGeneration() {
+    UUID leaseToken = UUID.randomUUID();
+    return jdbc
+        .query(
+            "WITH candidate AS (SELECT report_id FROM current_goal_reports WHERE state='QUEUED'"
+                + " OR (state='GENERATING' AND lease_until < CURRENT_TIMESTAMP) ORDER BY created_at"
+                + " FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE current_goal_reports r SET state='GENERATING',"
+                + " lease_token=?,lease_until=CURRENT_TIMESTAMP + INTERVAL '2 minutes',version=r.version+1,updated_at=CURRENT_TIMESTAMP"
+                + " FROM candidate WHERE r.report_id=candidate.report_id RETURNING r.report_id,r.user_id,r.goal_id,r.goal_version,r.state,"
+                + " r.window_start,r.window_end,r.deterministic_snapshot::text,r.narrative::text,r.computed_through,r.failure_code,"
+                + " r.failure_message,r.version,r.lease_token,r.lease_until,r.updated_at",
+            (rs, row) -> new ClaimedCurrentGoalReportRunDto(currentGoalReportRun(rs)),
+            leaseToken)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public boolean completeCurrentGoalReportGeneration(
+      ClaimedCurrentGoalReportRunDto claim,
+      CurrentGoalReportFacts facts,
+      CurrentGoalReportGenerationResult result,
+      Instant computedThrough) {
+    if (!"SUCCEEDED".equals(result.status()) || result.narrative() == null) {
+      throw new IllegalArgumentException("只可持久化成功的当前目标报告");
+    }
+    CurrentGoalReportRunDto run = claim.run();
+    return jdbc.update(
+            "UPDATE current_goal_reports SET state='READY',window_start=?,window_end=?,deterministic_snapshot=?::jsonb,narrative=?::jsonb,"
+                + " computed_through=?,failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP"
+                + " WHERE report_id=? AND state='GENERATING' AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP",
+            facts.windowStart(),
+            facts.windowEnd(),
+            json(facts),
+            json(result.narrative()),
+            Timestamp.from(computedThrough),
+            run.reportId(),
+            run.version(),
+            run.leaseToken())
+        == 1;
+  }
+
+  @Override
+  public boolean failCurrentGoalReportGeneration(
+      ClaimedCurrentGoalReportRunDto claim, String failureCode, String failureMessage) {
+    CurrentGoalReportRunDto run = claim.run();
+    return jdbc.update(
+            "UPDATE current_goal_reports SET state='FAILED',failure_code=?,failure_message=?,lease_token=NULL,"
+                + " lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE report_id=? AND state='GENERATING'"
+                + " AND version=? AND lease_token=? AND lease_until > CURRENT_TIMESTAMP",
+            failureCode,
+            failureMessage,
+            run.reportId(),
+            run.version(),
+            run.leaseToken())
+        == 1;
   }
 
   @Override
@@ -653,7 +824,15 @@ public final class JdbcFitnessStore implements FitnessStore {
         current,
         request.targetWeightJin(),
         request.targetDate());
-    return new GoalState(id, request.name().trim(), current, request.targetWeightJin(), "ACTIVE");
+    return new GoalState(
+        id,
+        request.name().trim(),
+        current,
+        request.targetWeightJin(),
+        "ACTIVE",
+        1,
+        jdbc.queryForObject("SELECT created_at FROM goals WHERE goal_id=?", Timestamp.class, id)
+            .toInstant());
   }
 
   @Override
@@ -853,7 +1032,7 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   private GoalState latestGoal(UUID userId) {
     return required(
-        "SELECT goal_id,name,start_weight_jin,target_weight_jin,status FROM goals WHERE user_id=?"
+        "SELECT goal_id,name,start_weight_jin,target_weight_jin,status,version,created_at FROM goals WHERE user_id=?"
             + " ORDER BY created_at DESC LIMIT 1",
         (rs, row) ->
             new GoalState(
@@ -861,8 +1040,33 @@ public final class JdbcFitnessStore implements FitnessStore {
                 rs.getString("name"),
                 rs.getBigDecimal("start_weight_jin"),
                 rs.getBigDecimal("target_weight_jin"),
-                rs.getString("status")),
+                rs.getString("status"),
+                rs.getInt("version"),
+                rs.getTimestamp("created_at").toInstant()),
         userId);
+  }
+
+  private GoalState currentGoal(UUID userId, UUID requestedGoalId) {
+    String where = requestedGoalId == null ? "" : " AND goal_id=?";
+    List<GoalState> values =
+        jdbc.query(
+            "SELECT goal_id,name,start_weight_jin,target_weight_jin,status,version,created_at FROM goals"
+                + " WHERE user_id=? AND status='ACTIVE'"
+                + where
+                + " ORDER BY created_at DESC LIMIT 1",
+            (rs, row) ->
+                new GoalState(
+                    rs.getObject("goal_id", UUID.class),
+                    rs.getString("name"),
+                    rs.getBigDecimal("start_weight_jin"),
+                    rs.getBigDecimal("target_weight_jin"),
+                    rs.getString("status"),
+                    rs.getInt("version"),
+                    rs.getTimestamp("created_at").toInstant()),
+            requestedGoalId == null
+                ? new Object[] {userId}
+                : new Object[] {userId, requestedGoalId});
+    return values.stream().findFirst().orElseThrow(() -> new NotFoundException("当前目标不存在"));
   }
 
   private PlanDto planForDate(UUID userId, LocalDate scheduledFor) {
@@ -954,6 +1158,37 @@ public final class JdbcFitnessStore implements FitnessStore {
         rs.getTimestamp("lease_until") == null ? null : rs.getTimestamp("lease_until").toInstant());
   }
 
+  private CurrentGoalReportRunDto currentGoalReportRun(ResultSet rs) throws SQLException {
+    try {
+      Timestamp computedThrough = rs.getTimestamp("computed_through");
+      Timestamp leaseUntil = rs.getTimestamp("lease_until");
+      return new CurrentGoalReportRunDto(
+          rs.getObject("report_id", UUID.class),
+          rs.getObject("user_id", UUID.class),
+          rs.getObject("goal_id", UUID.class),
+          rs.getInt("goal_version"),
+          rs.getString("state"),
+          rs.getObject("window_start", LocalDate.class),
+          rs.getObject("window_end", LocalDate.class),
+          rs.getString("deterministic_snapshot") == null
+              ? null
+              : objectMapper.readValue(
+                  rs.getString("deterministic_snapshot"), CurrentGoalReportFacts.class),
+          rs.getString("narrative") == null
+              ? null
+              : objectMapper.readValue(rs.getString("narrative"), CurrentGoalReportNarrative.class),
+          computedThrough == null ? null : computedThrough.toInstant(),
+          rs.getString("failure_code"),
+          rs.getString("failure_message"),
+          rs.getInt("version"),
+          rs.getObject("lease_token", UUID.class),
+          leaseUntil == null ? null : leaseUntil.toInstant(),
+          rs.getTimestamp("updated_at").toInstant());
+    } catch (JsonProcessingException exception) {
+      throw new SQLException("Invalid current goal report JSON", exception);
+    }
+  }
+
   private MealRecognitionJobDto recognitionJob(ResultSet rs) throws SQLException {
     try {
       return new MealRecognitionJobDto(
@@ -992,7 +1227,9 @@ public final class JdbcFitnessStore implements FitnessStore {
     return new MealRecommendationFeedbackDto(
         rs.getObject("recommendation_id", UUID.class),
         Sentiment.valueOf(rs.getString("feedback_sentiment")),
-        rs.getString("feedback_reason") == null ? null : FeedbackReason.valueOf(rs.getString("feedback_reason")),
+        rs.getString("feedback_reason") == null
+            ? null
+            : FeedbackReason.valueOf(rs.getString("feedback_reason")),
         rs.getString("feedback_note"),
         rs.getTimestamp("feedback_created_at").toInstant(),
         rs.getTimestamp("feedback_updated_at").toInstant());

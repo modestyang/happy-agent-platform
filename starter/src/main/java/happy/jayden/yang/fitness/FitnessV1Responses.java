@@ -1,5 +1,7 @@
 package happy.jayden.yang.fitness;
 
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
@@ -52,6 +54,71 @@ final class FitnessV1Responses {
         values.stream().map(FitnessV1Responses::meal).toList(), new Page(false));
   }
 
+  static Object currentGoalReport(CurrentGoalReportRunDto value) {
+    return switch (value.state()) {
+      case "QUEUED" ->
+          new QueuedCurrentGoalReport(
+              value.reportId(),
+              value.goalId(),
+              value.goalVersion(),
+              "QUEUED",
+              value.windowStart(),
+              value.windowEnd(),
+              value.updatedAt());
+      case "GENERATING" ->
+          new GeneratingCurrentGoalReport(
+              value.reportId(),
+              value.goalId(),
+              value.goalVersion(),
+              "GENERATING",
+              value.windowStart(),
+              value.windowEnd(),
+              value.updatedAt());
+      case "FAILED" ->
+          new FailedCurrentGoalReport(
+              value.reportId(),
+              value.goalId(),
+              value.goalVersion(),
+              "FAILED",
+              value.windowStart(),
+              value.windowEnd(),
+              new Failure(
+                  value.failureCode(),
+                  value.failureMessage(),
+                  "TASK_FAILED".equals(value.failureCode())),
+              value.updatedAt());
+      case "READY", "STALE" -> completeCurrentGoalReport(value);
+      default -> throw new IllegalArgumentException("未知当前目标报告状态");
+    };
+  }
+
+  private static CompleteCurrentGoalReport completeCurrentGoalReport(
+      CurrentGoalReportRunDto value) {
+    CurrentGoalReportFacts facts = value.facts();
+    if (facts == null || value.narrative() == null || value.computedThrough() == null) {
+      throw new IllegalStateException("完成报告缺少快照或叙事");
+    }
+    return new CompleteCurrentGoalReport(
+        value.reportId(),
+        value.goalId(),
+        value.goalVersion(),
+        value.state(),
+        value.windowStart(),
+        value.windowEnd(),
+        value.narrative().conclusion(),
+        facts.metrics(),
+        facts.weightTrend(),
+        facts.trainingVolume(),
+        facts.trainingStructure(),
+        facts.cardioPercent(),
+        facts.strengthPercent(),
+        value.narrative().highlights(),
+        value.narrative().weaknesses(),
+        value.narrative().nextActions(),
+        value.computedThrough(),
+        value.updatedAt());
+  }
+
   record Failure(String code, String message, boolean retryable) {}
 
   record Job(
@@ -79,6 +146,56 @@ final class FitnessV1Responses {
       Instant createdAt) {}
 
   record MealRecordPage(List<MealRecord> items, Page page) {}
+
+  record QueuedCurrentGoalReport(
+      UUID reportId,
+      UUID goalId,
+      int goalVersion,
+      String state,
+      java.time.LocalDate windowStart,
+      java.time.LocalDate windowEnd,
+      Instant updatedAt) {}
+
+  record GeneratingCurrentGoalReport(
+      UUID reportId,
+      UUID goalId,
+      int goalVersion,
+      String state,
+      java.time.LocalDate windowStart,
+      java.time.LocalDate windowEnd,
+      Instant updatedAt) {}
+
+  record FailedCurrentGoalReport(
+      UUID reportId,
+      UUID goalId,
+      int goalVersion,
+      String state,
+      java.time.LocalDate windowStart,
+      java.time.LocalDate windowEnd,
+      Failure failure,
+      Instant updatedAt) {}
+
+  record CompleteCurrentGoalReport(
+      UUID reportId,
+      UUID goalId,
+      int goalVersion,
+      String state,
+      java.time.LocalDate windowStart,
+      java.time.LocalDate windowEnd,
+      happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportConclusion conclusion,
+      List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportMetric> metrics,
+      List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWeightTrendPoint> weightTrend,
+      List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingVolumePoint>
+          trainingVolume,
+      List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingStructureItem>
+          trainingStructure,
+      java.math.BigDecimal cardioPercent,
+      java.math.BigDecimal strengthPercent,
+      List<String> highlights,
+      List<String> weaknesses,
+      List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportNextAction> nextActions,
+      Instant computedThrough,
+      Instant updatedAt) {}
 
   record Page(boolean hasMore) {}
 }

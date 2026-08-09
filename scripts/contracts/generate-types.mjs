@@ -23,6 +23,12 @@ const schemaType = (schema, context) => {
   if (schema.oneOf) return schema.oneOf.map((item, index) => schemaType(item, `${context}.oneOf[${index}]`)).join(' | ');
   if (schema.anyOf && schema.type !== 'object') return schema.anyOf.map((item, index) => schemaType(item, `${context}.anyOf[${index}]`)).join(' | ');
   if (schema.allOf) return schema.allOf.map((item, index) => schemaType(item, `${context}.allOf[${index}]`)).join(' & ');
+  if (Array.isArray(schema.type)) {
+    return schema.type
+      .map((type) => schemaType({ ...schema, type }, `${context}.${type}`))
+      .join(' | ');
+  }
+  if (schema.type === 'null') return 'null';
   if (schema.type === 'string') return 'string';
   if (schema.type === 'number' || schema.type === 'integer') return 'number';
   if (schema.type === 'boolean') return 'boolean';

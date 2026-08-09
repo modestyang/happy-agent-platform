@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { ApiError, api } from './api';
 import { ChatMarkdown } from './components/ChatMarkdown';
+import { CurrentGoalReportCard } from './components/CurrentGoalReport';
 import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { MealRecordForm } from './components/MealRecordForm';
@@ -120,7 +121,7 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
     { title: '训练', eyebrow: '今日主题', headline: data.plan?.title ?? '今天还没安排', meta: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 动作 · ${totalSets} 组` : '去看看本周计划', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
     { title: '饮食', eyebrow: nextMeal ? `${mealTimingLabel(now, nextMeal.mealType)} · ${mealName}` : '今日推荐', headline: nextMeal?.items[0]?.name ?? '今日建议尚未生成', meta: nextMeal ? `约 ${recommendationKcal(nextMeal)} kcal` : '生成后会展示在这里', icon: Salad, tone: 'butter', action: () => navigate('/meal/today') },
     { title: '记录', eyebrow: '留下真实数据', headline: '记录身材或一餐', meta: '体重 · 腰围 · 饮食', icon: Plus, tone: 'mint', action: () => onOpenRecord('body') },
-    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由瘦瘦整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?prompt=请生成我的当前目标累计报告') },
+    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由瘦瘦整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?report=current') },
   ];
 
   return <section className="page home-page">
@@ -129,7 +130,7 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
       <Mascot />
     </header>
     {goal ? <section className="goal-card">
-      <div className="goal-card__top"><span><Target /> 当前目标</span><button aria-label="查看目标进度" onClick={() => navigate('/ai?prompt=分析我的当前目标进度')}><ChevronRight /></button></div>
+      <div className="goal-card__top"><span><Target /> 当前目标</span><button aria-label="查看目标进度" onClick={() => navigate('/ai?report=current')}><ChevronRight /></button></div>
       <h2>{goal.name}</h2>
       <div className="goal-card__numbers"><strong>{goal.currentWeightJin}<small>斤</small></strong><span>目标<br /><b>{goal.targetWeightJin} 斤</b></span></div>
       <div className="progress" role="progressbar" aria-label={`目标已完成 ${goal.progressPercent}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={goal.progressPercent}><i style={{ width: `${goal.progressPercent}%` }} /></div>
@@ -217,14 +218,18 @@ const aiFeatures = [
   { title: '看看最近状态', description: '训练、饮食和身体一起看', prompt: '帮我看看最近的训练、饮食和身体变化', icon: Activity, tone: 'sky' },
 ];
 
-function AiPage({ data }: { data: Dashboard }) {
+function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: RecordTab) => void }) {
   const [searchParams] = useSearchParams();
   const preparedPrompt = searchParams.get('prompt') ?? '';
+  const reportRequested = searchParams.get('report') === 'current';
   const preparedSent = useRef('');
+  const preparedReport = useRef(false);
   const sessionKey = `happy-fitness-ai-session:${data.user.id}`;
   const [messages, setMessages] = useState<ChatMessage[]>(() => readAiSession(sessionKey));
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
+  const [report, setReport] = useState<import('./api/generated/public').CurrentGoalReport>();
+  const [reportError, setReportError] = useState('');
   const [sending, setSending] = useState(false);
   const conversationGeneration = useRef(0);
   useEffect(() => {
@@ -252,11 +257,37 @@ function AiPage({ data }: { data: Dashboard }) {
     preparedSent.current = preparedPrompt;
     void submit(preparedPrompt);
   }, [preparedPrompt]);
+  async function refreshCurrentGoalReport(reason: 'USER_REFRESH' | 'RETRY_FAILED') {
+    setReportError('');
+    try {
+      setReport(await api.refreshCurrentGoalReport(reason, crypto.randomUUID()));
+    } catch (err) {
+      setReportError(errorText(err));
+    }
+  }
+  async function readCurrentGoalReport() {
+    try {
+      setReport(await api.currentGoalReport());
+      setReportError('');
+    } catch (err) {
+      setReportError(errorText(err));
+    }
+  }
+  useEffect(() => {
+    if (!reportRequested || preparedReport.current) return;
+    preparedReport.current = true;
+    void refreshCurrentGoalReport('USER_REFRESH');
+  }, [reportRequested]);
+  useEffect(() => {
+    if (report?.state !== 'QUEUED' && report?.state !== 'GENERATING') return;
+    const timer = window.setTimeout(() => void readCurrentGoalReport(), 1000);
+    return () => window.clearTimeout(timer);
+  }, [report?.state, report?.updatedAt]);
   const isWelcome = messages.length === 0;
 
   return <section className="page ai-page">
     <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>瘦瘦</h1></div><button aria-label="新建会话" onClick={() => { conversationGeneration.current += 1; setMessages([]); setError(''); setSending(false); }}><MessageCirclePlus /></button></header>
-    <div className="ai-scroll">{isWelcome ? <>
+    <div className="ai-scroll">{report && <CurrentGoalReportCard report={report} onRetry={() => void refreshCurrentGoalReport(report.state === 'FAILED' ? 'RETRY_FAILED' : 'USER_REFRESH')} onGeneratePlan={() => setReportError('训练计划生成能力暂不可用：请先在 Agent 工作台发布计划生成能力。')} onOpenRecord={() => onOpenRecord('body')} />}{reportError && <p className="error">{reportError}</p>}{isWelcome ? <>
       <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
       <section className="ai-capabilities" role="region" aria-label="瘦瘦快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
       {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
@@ -337,7 +368,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
     restoreFocus.current?.focus();
     setRecordTab(undefined);
   }, []);
-  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
+  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} onOpenRecord={openRecord} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
 function MobileApp() {

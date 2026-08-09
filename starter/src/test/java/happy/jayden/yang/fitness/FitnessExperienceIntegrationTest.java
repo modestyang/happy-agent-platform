@@ -19,11 +19,16 @@ import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportConclusion;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportNarrative;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportNextAction;
 import happy.jayden.yang.fitness.service.FitnessDtos.GeneratedMealRecommendation;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.CurrentGoalReportGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import jakarta.servlet.http.Cookie;
@@ -107,6 +112,8 @@ class FitnessExperienceIntegrationTest {
   @Autowired private ControlledDailyMealPlanPort dailyMealPlanPort;
   @Autowired private DailyMealPlanGenerationWorker dailyMealPlanWorker;
   @Autowired private DailyMealPlanScheduler dailyMealPlanScheduler;
+  @Autowired private ControlledCurrentGoalReportPort currentGoalReportPort;
+  @Autowired private CurrentGoalReportGenerationWorker currentGoalReportWorker;
 
   @Autowired
   @Qualifier("fitnessDataSource")
@@ -126,6 +133,7 @@ class FitnessExperienceIntegrationTest {
     registry.add("happy.fitness.local-media.enabled", () -> "true");
     registry.add("happy.fitness.recognition.initial-delay-ms", () -> "3600000");
     registry.add("happy.fitness.meal-plan.initial-delay-ms", () -> "3600000");
+    registry.add("happy.fitness.current-goal-report.initial-delay-ms", () -> "3600000");
   }
 
   @Test
@@ -1020,6 +1028,60 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
+  void currentGoalReportRuntimeUsesPublishedBindingsAndRejectsNonSchemaNarrative()
+      throws Exception {
+    JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
+    agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+    agentJdbc.update(
+        "UPDATE agent_drafts SET provider_key='mutable-draft-provider',model_key='mutable-draft-model' WHERE agent_key='fitness.coach'");
+    upsertMealRuntimeComponents(
+        agentJdbc,
+        "published-provider",
+        "published-model",
+        "{\"providerKey\":\"published-provider\",\"model\":\"published-model\"}");
+    publishMealRuntimeSnapshot(
+        agentJdbc, 91, "{\"providerKey\":\"published-provider\",\"modelKey\":\"published-model\"}");
+    CurrentGoalReportRuntime runtime =
+        new CurrentGoalReportRuntime(agentDataSource, objectMapper, "build/missing-agent-master-key");
+
+    var publishedConfig = runtime.config();
+    assertThat(publishedConfig.providerKey()).isEqualTo("published-provider");
+    assertThat(publishedConfig.model()).isEqualTo("published-model");
+    JsonNode request = objectMapper.valueToTree(runtime.requestBody(publishedConfig, currentGoalReportFacts()));
+    assertThat(request.path("response_format").path("type").asText()).isEqualTo("json_schema");
+    assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean()).isTrue();
+    assertThat(
+            request
+                .path("response_format")
+                .path("json_schema")
+                .path("schema")
+                .path("properties")
+                .size())
+        .isEqualTo(4);
+
+    var narrative =
+        runtime.narrative(
+            objectMapper.readTree(
+                """
+                {"conclusion":{"summary":"节奏稳定","score":82,"grade":"B"},"highlights":["完成本周记录","体重趋势清晰"],"weaknesses":["训练量还可增加"],"nextActions":[{"title":"补齐记录","rationale":"让报告保持最新","action":"OPEN_RECORD"}]}
+                """));
+    assertThat(narrative.conclusion().score()).isEqualTo(82);
+    assertThatThrownBy(
+            () ->
+                runtime.narrative(
+                    objectMapper.readTree(
+                        """
+                        {"conclusion":{"summary":"<b>不安全</b>","score":"82","grade":"B"},"highlights":["一","二"],"weaknesses":["三"],"nextActions":[{"title":"四","rationale":"五","action":"OPEN_RECORD"}]}
+                        """)))
+        .isInstanceOf(IllegalArgumentException.class);
+
+    agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+    publishMealRuntimeSnapshot(agentJdbc, 92, "{\"modelKey\":\"published-model\"}");
+    assertThat(runtime.generate(currentGoalReportFacts()).failureMessage())
+        .isEqualTo("已发布 Agent 未绑定 Provider");
+  }
+
+  @Test
   void mealRecordCreatedAtComesFromTheDatabaseInsteadOfOccurredAt() throws Exception {
     Cookie owner = login();
     mvc.perform(
@@ -1461,6 +1523,64 @@ class FitnessExperienceIntegrationTest {
     }
   }
 
+  private void drainCurrentGoalReportQueue() {
+    for (int ignored = 0; ignored < 8; ignored++) {
+      currentGoalReportWorker.runOne();
+    }
+  }
+
+  private static happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts
+      currentGoalReportFacts() {
+    LocalDate week = LocalDate.now().minusWeeks(3).with(java.time.DayOfWeek.MONDAY);
+    return new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts(
+        "当前减脂目标",
+        week,
+        LocalDate.now(),
+        List.of(
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportMetric(
+                "GOAL_PROGRESS",
+                "目标进度",
+                new java.math.BigDecimal("50.0"),
+                "%",
+                new java.math.BigDecimal("1.0"),
+                "UP")),
+        List.of(
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWeightTrendPoint(
+                week, new java.math.BigDecimal("140.0")),
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWeightTrendPoint(
+                week.plusWeeks(1), new java.math.BigDecimal("139.5")),
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWeightTrendPoint(
+                week.plusWeeks(2), null),
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWeightTrendPoint(
+                week.plusWeeks(3), null)),
+        List.of(
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingVolumePoint(
+                week, 30, 1),
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingVolumePoint(
+                week.plusWeeks(1), 0, 0),
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingVolumePoint(
+                week.plusWeeks(2), 0, 0),
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingVolumePoint(
+                week.plusWeeks(3), 0, 0)),
+        List.of(
+            new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingStructureItem(
+                "全身", new java.math.BigDecimal("100"))),
+        new java.math.BigDecimal("20"),
+        new java.math.BigDecimal("80"));
+  }
+
+  private static CurrentGoalReportGenerationResult currentGoalReportSuccess() {
+    return new CurrentGoalReportGenerationResult(
+        "SUCCEEDED",
+        new CurrentGoalReportNarrative(
+            new CurrentGoalReportConclusion("当前目标处于稳定执行阶段", 82, "B"),
+            List.of("已持续记录训练", "体重趋势可追踪"),
+            List.of("本周训练密度仍可提高"),
+            List.of(new CurrentGoalReportNextAction("补齐今天记录", "便于报告保持最新", "OPEN_RECORD"))),
+        null,
+        null);
+  }
+
   private static UUID ownedRecommendation(JdbcTemplate jdbc, UUID userId, LocalDate date) {
     UUID recommendationId = UUID.randomUUID();
     jdbc.update(
@@ -1579,6 +1699,156 @@ class FitnessExperienceIntegrationTest {
         null);
   }
 
+  @Test
+  void currentGoalReportPostQueuesASeparateDurableReportWithPollingHeaders() throws Exception {
+    currentGoalReportPort.succeed();
+    drainCurrentGoalReportQueue();
+    currentGoalReportPort.succeed();
+    Cookie owner = login();
+
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(owner)
+                .header("Idempotency-Key", "current-goal-report-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REFRESH\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(header().string("Location", "/api/v1/app/reports/current-goal"))
+        .andExpect(header().string("Retry-After", "1"))
+        .andExpect(jsonPath("$.state").value("QUEUED"));
+    assertThat(currentGoalReportPort.calls()).isZero();
+  }
+
+  @Test
+  void currentGoalReportWorkerPersistsFactsAndMarksNewObjectiveDataStale() throws Exception {
+    currentGoalReportPort.succeed();
+    drainCurrentGoalReportQueue();
+    currentGoalReportPort.succeed();
+    Cookie owner = login();
+
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(owner)
+                .header("Idempotency-Key", "current-goal-report-ready-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REFRESH\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.state").value("QUEUED"));
+    assertThat(currentGoalReportPort.calls()).isZero();
+
+    currentGoalReportWorker.runOne();
+    assertThat(currentGoalReportPort.calls()).isEqualTo(1);
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("READY"))
+        .andExpect(jsonPath("$.metrics[0].key").value("GOAL_PROGRESS"))
+        .andExpect(
+            jsonPath(
+                "$.weightTrend.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
+        .andExpect(
+            jsonPath(
+                "$.trainingVolume.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
+        .andExpect(jsonPath("$.conclusion.summary").value("当前目标处于稳定执行阶段"))
+        .andExpect(jsonPath("$.highlights.length()").value(2))
+        .andExpect(jsonPath("$.nextActions[0].action").value("OPEN_RECORD"));
+
+    UUID ownerId = UUID.fromString(bootstrap(owner).path("user").path("id").asText());
+    fitnessStore.createBodyRecord(
+        ownerId,
+        new happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest(
+            new java.math.BigDecimal("139.8"), new java.math.BigDecimal("80.0"), Instant.now()));
+
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("STALE"))
+        .andExpect(jsonPath("$.conclusion.summary").value("当前目标处于稳定执行阶段"));
+  }
+
+  @Test
+  void currentGoalReportFailureCanBeExplicitlyRetriedWithoutModelWorkOnHttpThread()
+      throws Exception {
+    currentGoalReportPort.succeed();
+    drainCurrentGoalReportQueue();
+    currentGoalReportPort.failWith("DEPENDENCY_NOT_CONFIGURED", "报告 Agent 尚未发布");
+    Cookie owner = login();
+
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(owner)
+                .header("Idempotency-Key", "current-goal-report-fail-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REFRESH\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.state").value("QUEUED"));
+    assertThat(currentGoalReportPort.calls()).isZero();
+
+    currentGoalReportWorker.runOne();
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("FAILED"))
+        .andExpect(jsonPath("$.failure.code").value("DEPENDENCY_NOT_CONFIGURED"))
+        .andExpect(jsonPath("$.failure.message").value("报告 Agent 尚未发布"))
+        .andExpect(jsonPath("$.failure.retryable").value(false));
+
+    currentGoalReportPort.succeed();
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(owner)
+                .header("Idempotency-Key", "current-goal-report-retry-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"RETRY_FAILED\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.state").value("QUEUED"));
+    currentGoalReportWorker.runOne();
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("READY"));
+  }
+
+  @Test
+  void currentGoalReportIsOwnedByTheAuthenticatedActiveGoalAndFencesLateWorkers()
+      throws Exception {
+    currentGoalReportPort.succeed();
+    drainCurrentGoalReportQueue();
+    currentGoalReportPort.succeed();
+    Cookie other = createOtherUser();
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(other)).andExpect(status().isNotFound());
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(other)
+                .header("Idempotency-Key", "other-current-goal-report-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REFRESH\"}"))
+        .andExpect(status().isNotFound());
+
+    UUID ownerId = UUID.fromString(bootstrap(login()).path("user").path("id").asText());
+    var run = fitnessStore.enqueueCurrentGoalReport(ownerId);
+    var abandonedClaim = fitnessStore.claimNextCurrentGoalReportGeneration().orElseThrow();
+    assertThat(abandonedClaim.run().reportId()).isEqualTo(run.reportId());
+    JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
+    jdbc.update(
+        "UPDATE current_goal_reports SET lease_until=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE report_id=?",
+        run.reportId());
+    var facts = currentGoalReportFacts();
+    var result = currentGoalReportSuccess();
+    assertThat(
+            fitnessStore.completeCurrentGoalReportGeneration(
+                abandonedClaim, facts, result, Instant.now()))
+        .isFalse();
+    assertThat(
+            fitnessStore.failCurrentGoalReportGeneration(
+                abandonedClaim, "TASK_FAILED", "旧 worker"))
+        .isFalse();
+
+    var reclaimedClaim = fitnessStore.claimNextCurrentGoalReportGeneration().orElseThrow();
+    assertThat(reclaimedClaim.run().reportId()).isEqualTo(run.reportId());
+    assertThat(reclaimedClaim.run().version()).isGreaterThan(abandonedClaim.run().version());
+    assertThat(
+            fitnessStore.completeCurrentGoalReportGeneration(
+                reclaimedClaim, facts, result, Instant.now()))
+        .isTrue();
+  }
+
   @TestConfiguration(proxyBeanMethods = false)
   static class RecognitionPortConfiguration {
     @Bean
@@ -1591,6 +1861,12 @@ class FitnessExperienceIntegrationTest {
     @Primary
     ControlledDailyMealPlanPort controlledDailyMealPlanPort() {
       return new ControlledDailyMealPlanPort();
+    }
+
+    @Bean
+    @Primary
+    ControlledCurrentGoalReportPort controlledCurrentGoalReportPort() {
+      return new ControlledCurrentGoalReportPort();
     }
   }
 
@@ -1669,6 +1945,32 @@ class FitnessExperienceIntegrationTest {
 
     MealRecommendationFeedbackContext lastFeedback() {
       return lastFeedback;
+    }
+  }
+
+  static final class ControlledCurrentGoalReportPort implements CurrentGoalReportGenerationPort {
+    private final AtomicInteger calls = new AtomicInteger();
+    private CurrentGoalReportGenerationResult result = currentGoalReportSuccess();
+
+    @Override
+    public CurrentGoalReportGenerationResult generate(
+        happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts facts) {
+      calls.incrementAndGet();
+      return result;
+    }
+
+    void succeed() {
+      calls.set(0);
+      result = currentGoalReportSuccess();
+    }
+
+    void failWith(String code, String message) {
+      calls.set(0);
+      result = new CurrentGoalReportGenerationResult("FAILED", null, code, message);
+    }
+
+    int calls() {
+      return calls.get();
     }
   }
 }

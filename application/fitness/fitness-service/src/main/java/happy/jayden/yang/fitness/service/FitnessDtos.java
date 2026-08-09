@@ -28,7 +28,13 @@ public final class FitnessDtos {
       int progressPercent) {}
 
   public record GoalState(
-      UUID id, String name, BigDecimal startWeightJin, BigDecimal targetWeightJin, String status) {}
+      UUID id,
+      String name,
+      BigDecimal startWeightJin,
+      BigDecimal targetWeightJin,
+      String status,
+      int version,
+      Instant startedAt) {}
 
   public record CreateGoalRequest(String name, BigDecimal targetWeightJin, LocalDate targetDate) {}
 
@@ -114,11 +120,36 @@ public final class FitnessDtos {
       String note,
       Instant createdAt) {}
 
-  public enum Sentiment { LIKE, DISLIKE }
-  public enum FeedbackReason { TASTE, PORTION, INGREDIENT, CALORIES, COOKING, OTHER }
-  public record CreateMealRecommendationFeedbackRequest(UUID recommendationId, Sentiment sentiment, FeedbackReason reason, String note) {}
-  public record MealRecommendationFeedbackDto(UUID recommendationId, Sentiment sentiment, FeedbackReason reason, String note, Instant createdAt, Instant updatedAt) {}
-  public record MealRecommendationFeedbackContext(List<String> likedFoods, List<String> dislikedFoods, List<String> dislikeReasons, List<String> notes) {}
+  public enum Sentiment {
+    LIKE,
+    DISLIKE
+  }
+
+  public enum FeedbackReason {
+    TASTE,
+    PORTION,
+    INGREDIENT,
+    CALORIES,
+    COOKING,
+    OTHER
+  }
+
+  public record CreateMealRecommendationFeedbackRequest(
+      UUID recommendationId, Sentiment sentiment, FeedbackReason reason, String note) {}
+
+  public record MealRecommendationFeedbackDto(
+      UUID recommendationId,
+      Sentiment sentiment,
+      FeedbackReason reason,
+      String note,
+      Instant createdAt,
+      Instant updatedAt) {}
+
+  public record MealRecommendationFeedbackContext(
+      List<String> likedFoods,
+      List<String> dislikedFoods,
+      List<String> dislikeReasons,
+      List<String> notes) {}
 
   public record MealRecommendationDto(
       UUID id,
@@ -166,10 +197,7 @@ public final class FitnessDtos {
       BigDecimal caloriesKcal, BigDecimal proteinG, BigDecimal carbohydrateG, BigDecimal fatG) {}
 
   public record DailyMealPlanSectionDto(
-      MealType mealType,
-      String title,
-      List<DailyMealPlanFoodItem> items,
-      NutritionDto nutrition) {}
+      MealType mealType, String title, List<DailyMealPlanFoodItem> items, NutritionDto nutrition) {}
 
   /**
    * Status-specific public wire values. Each record exactly matches one OpenAPI oneOf branch and
@@ -225,6 +253,82 @@ public final class FitnessDtos {
   public record DailyMealPlanFailureDto(String code, String message, boolean retryable) {}
 
   public record GenerateDailyMealPlanRequest(LocalDate date) {}
+
+  /** Raw, time-windowed objective records. They deliberately contain no goal foreign key. */
+  public record CurrentGoalReportSourceData(
+      GoalState goal,
+      Instant observedThrough,
+      List<BodyRecordDto> bodyRecords,
+      List<MealDto> meals,
+      List<CurrentGoalWorkoutRecord> workouts) {}
+
+  public record CurrentGoalWorkoutRecord(
+      Instant completedAt, int minutes, List<String> targetAreas, String title) {}
+
+  public record CurrentGoalReportMetric(
+      String key,
+      String label,
+      BigDecimal value,
+      String unit,
+      BigDecimal comparison,
+      String trend) {}
+
+  public record CurrentGoalWeightTrendPoint(LocalDate weekStart, BigDecimal valueJin) {}
+
+  public record CurrentGoalTrainingVolumePoint(LocalDate weekStart, int minutes, int sessions) {}
+
+  public record CurrentGoalTrainingStructureItem(String area, BigDecimal percent) {}
+
+  /**
+   * Deterministic snapshot calculated solely by the fitness service before the Agent is invoked.
+   */
+  public record CurrentGoalReportFacts(
+      String goalName,
+      LocalDate windowStart,
+      LocalDate windowEnd,
+      List<CurrentGoalReportMetric> metrics,
+      List<CurrentGoalWeightTrendPoint> weightTrend,
+      List<CurrentGoalTrainingVolumePoint> trainingVolume,
+      List<CurrentGoalTrainingStructureItem> trainingStructure,
+      BigDecimal cardioPercent,
+      BigDecimal strengthPercent) {}
+
+  public record CurrentGoalReportConclusion(String summary, int score, String grade) {}
+
+  /** The only fields a report Agent may generate; it cannot alter facts, charts, or percentages. */
+  public record CurrentGoalReportNarrative(
+      CurrentGoalReportConclusion conclusion,
+      List<String> highlights,
+      List<String> weaknesses,
+      List<CurrentGoalReportNextAction> nextActions) {}
+
+  public record CurrentGoalReportNextAction(String title, String rationale, String action) {}
+
+  public record CurrentGoalReportGenerationResult(
+      String status,
+      CurrentGoalReportNarrative narrative,
+      String failureCode,
+      String failureMessage) {}
+
+  public record CurrentGoalReportRunDto(
+      UUID reportId,
+      UUID userId,
+      UUID goalId,
+      int goalVersion,
+      String state,
+      LocalDate windowStart,
+      LocalDate windowEnd,
+      CurrentGoalReportFacts facts,
+      CurrentGoalReportNarrative narrative,
+      Instant computedThrough,
+      String failureCode,
+      String failureMessage,
+      int version,
+      UUID leaseToken,
+      Instant leaseUntil,
+      Instant updatedAt) {}
+
+  public record ClaimedCurrentGoalReportRunDto(CurrentGoalReportRunDto run) {}
 
   public record CreateMealRequest(MealType mealType, List<MealItemDto> items, Instant occurredAt) {}
 

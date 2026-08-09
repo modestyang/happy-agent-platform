@@ -1,5 +1,5 @@
 import type { AgentDraft, AgentDraftUpdate, AgentRun, Provider, Publication, ValidationResult, WorkbenchComponent, WorkbenchComponentUpdate, WorkbenchSnapshot } from './admin/types';
-import type { CreateMealRecommendationFeedbackRequest, MealFeedback } from './api/generated/public';
+import type { CreateMealRecommendationFeedbackRequest, CurrentGoalReport, MealFeedback } from './api/generated/public';
 
 export class ApiError extends Error {
   constructor(
@@ -58,6 +58,8 @@ export const api = {
   getMealRecognitionJob: (jobId: string) => request<{ jobId: string; status: string; candidates: { name: string; estimatedKcal: number; confidence: number }[]; failure?: { message: string } }>(`/api/v1/app/meal-recognition-jobs/${jobId}`),
   createMealRecord: (body: unknown, idempotencyKey: string) => request<unknown>('/api/v1/app/meal-records', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body) }),
   upsertMealRecommendationFeedback: (recommendationId: string, body: CreateMealRecommendationFeedbackRequest, idempotencyKey: string) => request<MealFeedback>(`/api/v1/app/meal-recommendations/${recommendationId}/feedback`, { method: 'PUT', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body) }),
+  currentGoalReport: () => request<CurrentGoalReport>('/api/v1/app/reports/current-goal'),
+  refreshCurrentGoalReport: (reason: 'USER_REFRESH' | 'RETRY_FAILED', idempotencyKey: string) => request<CurrentGoalReport>('/api/v1/app/reports/current-goal', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ reason }) }),
   completeWorkout: (id: string, completionRatio: number) => request<unknown>(`/api/app/workouts/${id}/complete`, { method: 'POST', body: JSON.stringify({ completionRatio }) }),
   goal: (body: unknown) => request<unknown>('/api/app/goals', { method: 'POST', body: JSON.stringify(body) }),
   aiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),

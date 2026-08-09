@@ -28,6 +28,19 @@ public final class FitnessExceptions {
     }
   }
 
+  public static final class IdempotencyConflictException extends RuntimeException {
+    public IdempotencyConflictException(String message) {
+      super(message);
+    }
+  }
+
+  /** Signals a V6 idempotency unique-key race after the transaction has rolled back. */
+  public static final class IdempotencyConcurrencyException extends RuntimeException {
+    public IdempotencyConcurrencyException(Throwable cause) {
+      super(cause);
+    }
+  }
+
   public static final class DependencyNotConfiguredException extends RuntimeException {
     public DependencyNotConfiguredException() {
       super("请在 Agent 工作台配置模型 Provider");

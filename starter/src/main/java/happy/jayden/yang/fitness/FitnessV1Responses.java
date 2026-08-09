@@ -17,11 +17,10 @@ final class FitnessV1Responses {
         value.failureCode() == null
             ? null
             : new Failure(
-                "DEPENDENCY_NOT_CONFIGURED".equals(value.failureCode())
-                    ? value.failureCode()
-                    : "TASK_FAILED",
+                value.failureCode(),
                 value.failureMessage() == null ? "识别失败" : value.failureMessage(),
-                "DEPENDENCY_NOT_CONFIGURED".equals(value.failureCode()));
+                "TIMEOUT".equals(value.failureCode())
+                    || "DEPENDENCY_UNAVAILABLE".equals(value.failureCode()));
     return new Job(
         value.jobId(),
         value.status(),

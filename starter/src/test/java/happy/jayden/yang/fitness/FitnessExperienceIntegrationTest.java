@@ -16,6 +16,7 @@ import happy.jayden.yang.StarterApplication;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
+import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import jakarta.servlet.http.Cookie;
 import java.io.IOException;
@@ -86,6 +87,7 @@ class FitnessExperienceIntegrationTest {
   @Autowired private ObjectMapper objectMapper;
   @Autowired private MealRecognitionWorker recognitionWorker;
   @Autowired private ControlledRecognitionPort recognitionPort;
+  @Autowired private FitnessStore fitnessStore;
 
   @Autowired
   @Qualifier("fitnessDataSource")
@@ -263,7 +265,7 @@ class FitnessExperienceIntegrationTest {
     JsonNode ticket = objectMapper.readTree(ticketResult.getResponse().getContentAsString());
     String mediaId = ticket.path("mediaId").asText();
     assertThat(ticket.path("uploadUrl").asText())
-        .isEqualTo("http://localhost/api/v1/app/media-uploads/" + mediaId);
+        .isEqualTo("/api/v1/app/media-uploads/" + mediaId);
 
     mvc.perform(
             post("/api/v1/app/media-upload-tickets")
@@ -343,6 +345,14 @@ class FitnessExperienceIntegrationTest {
                 .cookie(owner)
                 .contentType(MediaType.IMAGE_PNG)
                 .content(image))
+        .andExpect(status().isNoContent());
+
+    mvc.perform(
+            post("/api/v1/app/media-uploads/{mediaId}/complete", mediaId)
+                .cookie(owner)
+                .header("Idempotency-Key", "ticket-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DIRECT_UPLOAD_COMPLETED\"}"))
         .andExpect(status().isNoContent());
 
     String jobRequest =
@@ -491,9 +501,82 @@ class FitnessExperienceIntegrationTest {
     mvc.perform(get("/api/v1/app/meal-recognition-jobs/{jobId}", failedJobId).cookie(owner))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("FAILED"))
-        .andExpect(jsonPath("$.failure.code").value("TASK_FAILED"))
+        .andExpect(jsonPath("$.failure.code").value("TIMEOUT"))
         .andExpect(jsonPath("$.failure.message").value("视觉模型超时"))
-        .andExpect(jsonPath("$.failure.retryable").value(false));
+        .andExpect(jsonPath("$.failure.retryable").value(true));
+  }
+
+  @Test
+  @Order(7)
+  void workerReclaimsAnExpiredRunningRecognitionJob() throws Exception {
+    Cookie owner = login();
+    UUID mediaId = UUID.randomUUID();
+    UUID jobId = UUID.randomUUID();
+    new org.springframework.jdbc.core.JdbcTemplate(fitnessDataSource)
+        .update(
+            "INSERT INTO media_objects(media_id,user_id,object_key,content_type,content_length,sha256,status,expires_at)"
+                + " VALUES (?,?,'reclaim/media','image/png',1,?,'UPLOADED',CURRENT_TIMESTAMP + INTERVAL '10 minutes')",
+            mediaId,
+            UUID.fromString("10000000-0000-0000-0000-000000000001"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    new org.springframework.jdbc.core.JdbcTemplate(fitnessDataSource)
+        .update(
+            "INSERT INTO meal_recognition_jobs(job_id,user_id,media_id,meal_type,occurred_at,status,candidates,created_at,updated_at)"
+                + " VALUES (?,?,?,'LUNCH',CURRENT_TIMESTAMP - INTERVAL '10 minutes','RUNNING','[]'::jsonb,CURRENT_TIMESTAMP - INTERVAL '10 minutes',CURRENT_TIMESTAMP - INTERVAL '10 minutes')",
+            jobId,
+            UUID.fromString("10000000-0000-0000-0000-000000000001"),
+            mediaId);
+    recognitionPort.succeedWith("恢复任务", 300, 0.9);
+
+    recognitionWorker.runOne();
+
+    mvc.perform(get("/api/v1/app/meal-recognition-jobs/{jobId}", jobId).cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+        .andExpect(jsonPath("$.candidates[0].name").value("恢复任务"));
+  }
+
+  @Test
+  @Order(8)
+  void supersededRecognitionClaimCannotOverwriteTheReclaimingWorker() {
+    UUID mediaId = UUID.randomUUID();
+    UUID jobId = UUID.randomUUID();
+    UUID userId = UUID.fromString("10000000-0000-0000-0000-000000000001");
+    org.springframework.jdbc.core.JdbcTemplate jdbc =
+        new org.springframework.jdbc.core.JdbcTemplate(fitnessDataSource);
+    jdbc.update(
+        "INSERT INTO media_objects(media_id,user_id,object_key,content_type,content_length,sha256,status,expires_at)"
+            + " VALUES (?,?,'reclaim/fenced-media','image/png',1,?,'UPLOADED',CURRENT_TIMESTAMP + INTERVAL '10 minutes')",
+        mediaId,
+        userId,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    jdbc.update(
+        "INSERT INTO meal_recognition_jobs(job_id,user_id,media_id,meal_type,occurred_at,status,candidates,created_at,updated_at)"
+            + " VALUES (?,?,?,'LUNCH',CURRENT_TIMESTAMP,'QUEUED','[]'::jsonb,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+        jobId,
+        userId,
+        mediaId);
+
+    var abandonedClaim = fitnessStore.claimNextRecognitionJob().orElseThrow();
+    jdbc.update(
+        "UPDATE meal_recognition_jobs SET updated_at=CURRENT_TIMESTAMP - INTERVAL '10 minutes' WHERE job_id=?",
+        jobId);
+    var recoveredClaim = fitnessStore.claimNextRecognitionJob().orElseThrow();
+
+    fitnessStore.updateRecognitionJob(
+        abandonedClaim,
+        new MealRecognitionResult(
+            "SUCCEEDED", List.of(new MealRecognitionCandidate("旧 worker", 1, 1.0)), null, null));
+    assertThat(fitnessStore.findRecognitionJob(userId, jobId).orElseThrow().status())
+        .isEqualTo("RUNNING");
+
+    fitnessStore.updateRecognitionJob(
+        recoveredClaim,
+        new MealRecognitionResult(
+            "SUCCEEDED", List.of(new MealRecognitionCandidate("恢复 worker", 1, 1.0)), null, null));
+    assertThat(fitnessStore.findRecognitionJob(userId, jobId).orElseThrow().candidates())
+        .extracting(MealRecognitionCandidate::name)
+        .containsExactly("恢复 worker");
   }
 
   private String createAndUpload(Cookie owner, byte[] image, String sha256, String key)

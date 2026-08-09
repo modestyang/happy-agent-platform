@@ -2,11 +2,11 @@ package happy.jayden.yang.fitness;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcCredentialAccess;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.UploadedMedia;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
@@ -33,19 +33,31 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(45);
   private final JdbcTemplate agentJdbc;
-  private final JdbcTemplate fitnessJdbc;
   private final ObjectMapper mapper;
-  private final JdbcCredentialAccess credentials;
+  private final FitnessProviderCredentialAccess credentials;
+  private final MediaUploadPort mediaUploadPort;
 
   public MealRecognitionRuntime(
       DataSource agentDataSource,
       DataSource fitnessDataSource,
       ObjectMapper mapper,
       String masterKeyFile) {
+    this(
+        agentDataSource,
+        mapper,
+        masterKeyFile,
+        new LocalMediaUploadPort(fitnessDataSource));
+  }
+
+  public MealRecognitionRuntime(
+      DataSource agentDataSource,
+      ObjectMapper mapper,
+      String masterKeyFile,
+      MediaUploadPort mediaUploadPort) {
     this.agentJdbc = new JdbcTemplate(agentDataSource);
-    this.fitnessJdbc = new JdbcTemplate(fitnessDataSource);
     this.mapper = mapper;
-    this.credentials = new JdbcCredentialAccess(agentDataSource, Path.of(masterKeyFile));
+    this.credentials = new FitnessProviderCredentialAccess(agentDataSource, Path.of(masterKeyFile));
+    this.mediaUploadPort = mediaUploadPort;
   }
 
   @Override
@@ -58,7 +70,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
       if (apiKey == null) return failed("DEPENDENCY_NOT_CONFIGURED", "视觉 Provider 凭据未配置");
       Image image = image(mediaId);
       JsonNode response = post(config, apiKey, image);
-      return new MealRecognitionResult("SUCCEEDED", parseItems(response), null, null);
+      return result(response);
     } catch (ConfigurationException exception) {
       return failed("DEPENDENCY_NOT_CONFIGURED", exception.getMessage());
     } catch (java.net.SocketTimeoutException exception) {
@@ -111,19 +123,12 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
   }
 
   private Image image(UUID mediaId) throws IOException, ConfigurationException {
-    var rows =
-        fitnessJdbc.query(
-            "SELECT object_key,content_type,status FROM media_objects WHERE media_id=?",
-            (rs, row) ->
-                new String[] {
-                  rs.getString("object_key"), rs.getString("content_type"), rs.getString("status")
-                },
-            mediaId);
-    if (rows.isEmpty() || !"UPLOADED".equals(rows.get(0)[2]))
-      throw new ConfigurationException("图片未上传完成");
-    Path image = Path.of("deploy", ".local", "media", mediaId + ".upload");
-    if (!Files.isRegularFile(image)) throw new ConfigurationException("本地上传图片不可读取");
-    return new Image(rows.get(0)[1], Files.readAllBytes(image));
+    try {
+      UploadedMedia uploaded = mediaUploadPort.readUploaded(mediaId);
+      return new Image(uploaded.contentType(), uploaded.bytes());
+    } catch (IllegalStateException exception) {
+      throw new ConfigurationException("已上传图片不可读取");
+    }
   }
 
   JsonNode post(RuntimeConfig config, char[] key, Image image) throws IOException, HttpException {
@@ -154,9 +159,9 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
                         "properties",
                         Map.of(
                             "name",
-                            Map.of("type", "string"),
+                            Map.of("type", "string", "minLength", 1, "maxLength", 160),
                             "estimatedKcal",
-                            Map.of("type", "integer", "minimum", 0),
+                            Map.of("type", "integer", "minimum", 0, "maximum", 20000),
                             "confidence",
                             Map.of("type", "number", "minimum", 0, "maximum", 1))))));
     Map<String, Object> body =
@@ -207,19 +212,49 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
     return mapper.readTree(content);
   }
 
-  private List<MealRecognitionCandidate> parseItems(JsonNode result) {
-    JsonNode items = result.path("items");
-    if (!items.isArray() || items.isEmpty()) throw new IllegalArgumentException("items");
+  List<MealRecognitionCandidate> parseItems(JsonNode result) {
+    if (!result.isObject() || result.size() != 1 || !result.has("items")) {
+      throw new IllegalArgumentException("response must contain only items");
+    }
+    JsonNode items = result.get("items");
+    if (!items.isArray() || items.isEmpty() || items.size() > 50) {
+      throw new IllegalArgumentException("items");
+    }
     List<MealRecognitionCandidate> parsed = new ArrayList<>();
     for (JsonNode item : items) {
-      String name = item.path("name").asText();
-      int kcal = item.path("estimatedKcal").asInt(-1);
-      double confidence = item.path("confidence").asDouble(-1);
-      if (name.isBlank() || kcal < 0 || confidence < 0 || confidence > 1)
+      if (!item.isObject()
+          || item.size() != 3
+          || !item.has("name")
+          || !item.has("estimatedKcal")
+          || !item.has("confidence")
+          || !item.get("name").isTextual()
+          || !item.get("estimatedKcal").isInt()
+          || !item.get("confidence").isNumber()) {
+        throw new IllegalArgumentException("item shape");
+      }
+      String name = item.get("name").textValue();
+      int kcal = item.get("estimatedKcal").intValue();
+      double confidence = item.get("confidence").doubleValue();
+      if (name.isBlank()
+          || name.length() > 160
+          || kcal < 0
+          || kcal > 20_000
+          || !Double.isFinite(confidence)
+          || confidence < 0
+          || confidence > 1) {
         throw new IllegalArgumentException("item");
+      }
       parsed.add(new MealRecognitionCandidate(name, kcal, confidence));
     }
     return parsed;
+  }
+
+  MealRecognitionResult result(JsonNode response) {
+    try {
+      return new MealRecognitionResult("SUCCEEDED", parseItems(response), null, null);
+    } catch (IllegalArgumentException exception) {
+      return failed("INVALID_MODEL_RESPONSE", "视觉模型返回不符合食物结果约束");
+    }
   }
 
   private static MealRecognitionResult failed(String code, String message) {
@@ -274,7 +309,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
       return new MediaUploadTicket(
           id,
           "PUT",
-          "http://localhost/api/v1/app/media-uploads/" + id,
+          "/api/v1/app/media-uploads/" + id,
           List.of(),
           expiresAt,
           10_485_760);
@@ -303,6 +338,53 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
       } catch (IOException exception) {
         throw new IllegalStateException(exception);
       }
+    }
+
+    @Override
+    public void verifyUploaded(UUID userId, UUID mediaId) {
+      Object[] meta = metadata(userId, mediaId);
+      if ("UPLOADED".equals(meta[3])) return;
+      Path target = Path.of("deploy", ".local", "media", mediaId + ".upload");
+      try {
+        byte[] bytes = Files.readAllBytes(target);
+        if (bytes.length != (long) meta[0]
+            || !meta[1].equals(HexFormat.of().formatHex(digest(bytes)))) {
+          throw new InvalidRequestException("上传内容与票据不一致");
+        }
+      } catch (IOException exception) {
+        throw new NotFoundException("上传内容不存在");
+      }
+    }
+
+    @Override
+    public UploadedMedia readUploaded(UUID mediaId) {
+      var rows =
+          fitnessJdbc.query(
+              "SELECT content_type,status FROM media_objects WHERE media_id=?",
+              (rs, row) -> new String[] {rs.getString(1), rs.getString(2)},
+              mediaId);
+      if (rows.isEmpty() || !"UPLOADED".equals(rows.get(0)[1])) {
+        throw new IllegalStateException("图片未上传完成");
+      }
+      try {
+        return new UploadedMedia(
+            rows.get(0)[0],
+            Files.readAllBytes(Path.of("deploy", ".local", "media", mediaId + ".upload")));
+      } catch (IOException exception) {
+        throw new IllegalStateException("本地上传图片不可读取", exception);
+      }
+    }
+
+    private Object[] metadata(UUID userId, UUID mediaId) {
+      var meta =
+          fitnessJdbc.query(
+              "SELECT content_length,sha256,content_type,status FROM media_objects WHERE media_id=?"
+                  + " AND user_id=? AND expires_at > CURRENT_TIMESTAMP",
+              (rs, row) -> new Object[] {rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)},
+              mediaId,
+              userId);
+      if (meta.isEmpty()) throw new NotFoundException("上传票据不存在或已失效");
+      return meta.get(0);
     }
 
     private static byte[] digest(byte[] value) {

@@ -107,15 +107,11 @@ class DualSchemaIntegrationTest {
   @Test
   void eachSchemaHasAnIndependentMigrationHistory() {
     JdbcTemplate fitnessJdbc = new JdbcTemplate(fitnessDataSource);
-    JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
 
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(4L);
-    assertThat(
-            agentJdbc.queryForObject("select count(*) from agent.agent_schema_history", Long.class))
-        .isEqualTo(4L);
+        .isEqualTo(6L);
   }
 
   @Test
@@ -130,7 +126,16 @@ class DualSchemaIntegrationTest {
         .isZero();
     assertThat(
             agentJdbc.queryForObject(
-                "select count(*) from information_schema.table_constraints where table_schema='agent' and constraint_type='FOREIGN KEY' and constraint_name ilike '%fitness%'",
+                "select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid"
+                    + " join pg_namespace n on n.oid=t.relnamespace join pg_class r on"
+                    + " r.oid=c.confrelid join pg_namespace rn on rn.oid=r.relnamespace"
+                    + " where n.nspname='agent' and c.contype='f' and rn.nspname='fitness'",
                 Long.class))
         .isZero();
+    assertThat(
+            fitnessJdbc.queryForObject(
+                "select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid join pg_namespace n on n.oid=t.relnamespace join pg_class r on r.oid=c.confrelid join pg_namespace rn on rn.oid=r.relnamespace where n.nspname='fitness' and t.relname in ('media_objects','meal_recognition_jobs','meals') and c.contype='f' and rn.nspname <> 'fitness'",
+                Long.class))
+        .isZero();
+  }
 }

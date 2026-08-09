@@ -15,9 +15,9 @@ describe('MealRecordForm', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/v1/app/media-upload-tickets') {
-        return json({ mediaId: '11111111-1111-1111-1111-111111111111', method: 'PUT', uploadUrl: '/api/app/media-uploads/11111111-1111-1111-1111-111111111111', headers: [], expiresAt: '2026-08-09T01:00:00Z', maxBytes: 10485760 });
+        return json({ mediaId: '11111111-1111-1111-1111-111111111111', method: 'PUT', uploadUrl: '/api/v1/app/media-uploads/11111111-1111-1111-1111-111111111111', headers: [], expiresAt: '2026-08-09T01:00:00Z', maxBytes: 10485760 });
       }
-      if (path.startsWith('/api/app/media-uploads/')) return new Response(null, { status: 204 });
+      if (path.startsWith('/api/v1/app/media-uploads/')) return new Response(null, { status: 204 });
       if (path === '/api/v1/app/meal-recognition-jobs') {
         return json({ jobId: '22222222-2222-2222-2222-222222222222', status: 'SUCCEEDED', mediaId: '11111111-1111-1111-1111-111111111111', mealType: 'LUNCH', occurredAt: '2026-08-09T00:00:00Z', candidates: [{ name: '番茄牛肉饭', estimatedKcal: 530, confidence: 0.91 }], createdAt: '2026-08-09T00:00:00Z', updatedAt: '2026-08-09T00:00:01Z' });
       }
@@ -38,8 +38,26 @@ describe('MealRecordForm', () => {
     await user.click(screen.getByRole('button', { name: '保存饮食记录' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    const ticketCall = fetchMock.mock.calls.find(
+      ([path]) => path === '/api/v1/app/media-upload-tickets',
+    );
+    const jobCall = fetchMock.mock.calls.find(
+      ([path]) => path === '/api/v1/app/meal-recognition-jobs',
+    );
+    const recordCall = fetchMock.mock.calls.find(
+      ([path]) => path === '/api/v1/app/meal-records',
+    );
+    const ticketKey = (ticketCall?.[1] as RequestInit).headers as Record<string, string>;
+    const jobKey = (jobCall?.[1] as RequestInit).headers as Record<string, string>;
+    const recordKey = (recordCall?.[1] as RequestInit).headers as Record<string, string>;
+    expect(ticketKey['Idempotency-Key']).toEqual(expect.any(String));
+    expect(jobKey['Idempotency-Key']).toEqual(expect.any(String));
+    expect(recordKey['Idempotency-Key']).toEqual(expect.any(String));
+    expect(jobKey['Idempotency-Key']).not.toBe(ticketKey['Idempotency-Key']);
+    expect(recordKey['Idempotency-Key']).not.toBe(jobKey['Idempotency-Key']);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/app/meal-records', expect.objectContaining({
       method: 'POST',
+      headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
       body: expect.stringContaining('RECOGNITION_CONFIRMED'),
     }));
   });
@@ -47,8 +65,8 @@ describe('MealRecordForm', () => {
   it('retains the preview on recognition failure and lets the user switch to manual entry', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path === '/api/v1/app/media-upload-tickets') return json({ mediaId: '11111111-1111-1111-1111-111111111111', method: 'PUT', uploadUrl: '/api/app/media-uploads/11111111-1111-1111-1111-111111111111', headers: [], expiresAt: '2026-08-09T01:00:00Z', maxBytes: 10485760 });
-      if (path.startsWith('/api/app/media-uploads/')) return new Response(null, { status: 204 });
+      if (path === '/api/v1/app/media-upload-tickets') return json({ mediaId: '11111111-1111-1111-1111-111111111111', method: 'PUT', uploadUrl: '/api/v1/app/media-uploads/11111111-1111-1111-1111-111111111111', headers: [], expiresAt: '2026-08-09T01:00:00Z', maxBytes: 10485760 });
+      if (path.startsWith('/api/v1/app/media-uploads/')) return new Response(null, { status: 204 });
       if (path === '/api/v1/app/meal-recognition-jobs') return json({ jobId: '22222222-2222-2222-2222-222222222222', status: 'FAILED', mediaId: '11111111-1111-1111-1111-111111111111', mealType: 'LUNCH', occurredAt: '2026-08-09T00:00:00Z', candidates: [], failure: { code: 'DEPENDENCY_NOT_CONFIGURED', message: '视觉模型未配置', retryable: false }, createdAt: '2026-08-09T00:00:00Z', updatedAt: '2026-08-09T00:00:01Z' });
       throw new Error(`unexpected ${path}`);
     }));

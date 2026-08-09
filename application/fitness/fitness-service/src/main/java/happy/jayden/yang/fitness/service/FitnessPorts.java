@@ -14,6 +14,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.UploadedMedia;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -51,7 +52,9 @@ public final class FitnessPorts {
     MealRecognitionJobDto createRecognitionJob(
         UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
 
-    MealRecognitionJobDto updateRecognitionJob(UUID jobId, MealRecognitionResult result);
+    /** Completes only the durable claim represented by {@code job}. */
+    MealRecognitionJobDto updateRecognitionJob(
+        FitnessDtos.ClaimedMealRecognitionJob job, MealRecognitionResult result);
 
     Optional<FitnessDtos.ClaimedMealRecognitionJob> claimNextRecognitionJob();
 
@@ -76,6 +79,26 @@ public final class FitnessPorts {
   public interface MediaUploadPort {
     MediaUploadTicket createTicket(
         UUID userId, String contentType, long contentLength, String sha256);
+
+    /** Verifies that the direct-upload target contains the exact ticketed object. */
+    default void verifyUploaded(UUID userId, UUID mediaId) {
+      throw new UnsupportedOperationException("媒体存储不支持上传确认");
+    }
+
+    /** Reads an already verified object for the asynchronous recognition worker. */
+    default UploadedMedia readUploaded(UUID mediaId) {
+      throw new UnsupportedOperationException("媒体存储不支持读取");
+    }
+  }
+
+  /** Infrastructure-supplied transaction boundary; use cases, not HTTP adapters, own it. */
+  public interface TransactionRunner {
+    <T> T inTransaction(TransactionWork<T> work);
+  }
+
+  @FunctionalInterface
+  public interface TransactionWork<T> {
+    T run();
   }
 
   public interface MealRecognitionPort {

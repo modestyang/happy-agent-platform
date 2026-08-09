@@ -23,6 +23,8 @@ import happy.jayden.yang.fitness.service.FitnessDtos.ReportDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.ReportMetric;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConflictException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.UnauthorizedException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
@@ -30,6 +32,7 @@ import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
+import happy.jayden.yang.fitness.service.FitnessPorts.TransactionRunner;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +46,8 @@ import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public final class FitnessApplicationService {
 
@@ -54,6 +59,7 @@ public final class FitnessApplicationService {
   private final AgentProviderStatus providerStatus;
   private final AiConversation aiConversation;
   private final MediaUploadPort mediaUploadPort;
+  private final TransactionRunner transactionRunner;
   private final SecureRandom secureRandom = new SecureRandom();
 
   public FitnessApplicationService(
@@ -62,11 +68,33 @@ public final class FitnessApplicationService {
       AgentProviderStatus providerStatus,
       AiConversation aiConversation,
       MediaUploadPort mediaUploadPort) {
+    this(
+        store,
+        passwordVerifier,
+        providerStatus,
+        aiConversation,
+        mediaUploadPort,
+        new TransactionRunner() {
+          @Override
+          public <T> T inTransaction(FitnessPorts.TransactionWork<T> work) {
+            return work.run();
+          }
+        });
+  }
+
+  public FitnessApplicationService(
+      FitnessStore store,
+      PasswordVerifier passwordVerifier,
+      AgentProviderStatus providerStatus,
+      AiConversation aiConversation,
+      MediaUploadPort mediaUploadPort,
+      TransactionRunner transactionRunner) {
     this.store = store;
     this.passwordVerifier = passwordVerifier;
     this.providerStatus = providerStatus;
     this.aiConversation = aiConversation;
     this.mediaUploadPort = mediaUploadPort;
+    this.transactionRunner = transactionRunner;
   }
 
   public LoginResult login(LoginRequest request) {
@@ -128,6 +156,58 @@ public final class FitnessApplicationService {
     store.saveIdempotency(userId, operation, key, hash, resourceId, responseJson);
   }
 
+  /** Persists a write and its replay representation in one use-case transaction. */
+  public <T> T idempotently(
+      String sessionToken,
+      String operation,
+      String key,
+      String requestHash,
+      Supplier<T> create,
+      Function<T, UUID> resourceId,
+      Function<T, String> serialize,
+      Function<String, T> deserialize) {
+    UUID userId = authenticate(sessionToken);
+    if (blank(key)) throw new InvalidRequestException("Idempotency-Key 必填");
+    T replay = replay(userId, operation, key, requestHash, deserialize);
+    if (replay != null) return replay;
+    try {
+      return transactionRunner.inTransaction(
+          () -> {
+            T inTransactionReplay = replay(userId, operation, key, requestHash, deserialize);
+            if (inTransactionReplay != null) return inTransactionReplay;
+            T created = create.get();
+            store.saveIdempotency(
+                userId,
+                operation,
+                key,
+                requestHash,
+                resourceId.apply(created),
+                serialize.apply(created));
+            return created;
+          });
+    } catch (IdempotencyConcurrencyException exception) {
+      T winner = replay(userId, operation, key, requestHash, deserialize);
+      if (winner == null) {
+        throw new IdempotencyConflictException("Idempotency-Key 并发请求未能找到已提交结果");
+      }
+      return winner;
+    }
+  }
+
+  private <T> T replay(
+      UUID userId,
+      String operation,
+      String key,
+      String requestHash,
+      Function<String, T> deserialize) {
+    var entry = store.findIdempotency(userId, operation, key);
+    if (entry.isEmpty()) return null;
+    if (!entry.get().requestHash().equals(requestHash)) {
+      throw new IdempotencyConflictException("Idempotency-Key 已用于不同请求");
+    }
+    return deserialize.apply(entry.get().responseJson());
+  }
+
   /** Loads data for a trusted in-process Agent Tool context. */
   public BootstrapData loadForTool(UUID userId) {
     return store.loadBootstrap(
@@ -179,6 +259,13 @@ public final class FitnessApplicationService {
 
   public void markMediaUploaded(String sessionToken, UUID mediaId) {
     store.markMediaUploaded(authenticate(sessionToken), mediaId);
+  }
+
+  /** Marks media available only after its storage adapter has verified the direct upload. */
+  public void completeMediaUpload(String sessionToken, UUID mediaId) {
+    UUID userId = authenticate(sessionToken);
+    mediaUploadPort.verifyUploaded(userId, mediaId);
+    store.markMediaUploaded(userId, mediaId);
   }
 
   public MealRecognitionJobDto createMealRecognitionJob(

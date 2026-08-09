@@ -56,3 +56,79 @@
 - Important — persistence/schema boundaries: V4/V5 are unchanged and V6 contention is covered. The unrelated, currently dirty dual-schema count assertion must be updated from five to six by its owner before the aggregate reactor is fully green.
 - Important — idempotency semantics: all three POST operations have missing-key, replay, and conflict assertions; the new barrier test covers the database race.
 - Important — client lifecycle: the focused `MealRecordForm` suite still passes its upload/edit/failure/manual-fallback cases, while the new server lifecycle test covers the job states it consumes.
+
+## Release closure — 2026-08-09
+
+- The previously unstaged `FitnessProviderCredentialAccess`, polling client method, OSS completion
+  contract, durable worker test, and strengthened dual-schema test are included with the Task 2
+  source set. The release no longer relies on a worktree-only credential reader or a browser API
+  method absent from the committed client.
+- Production direct OSS uploads now require a separate authenticated completion request. The
+  server performs a signed OSS `HEAD` and compares content type, byte count, and SHA-256 metadata
+  before changing the media row to `UPLOADED`; the worker obtains the same bytes through a signed
+  OSS `GET` and verifies them again. The presigned `PUT` now signs the required
+  `x-oss-meta-sha256` header as well as `Content-Type`.
+- The browser supplies distinct stable `Idempotency-Key` values for ticket creation, recognition
+  job creation, and meal confirmation. The service-owned transaction stores each resource and its
+  replay response atomically; integration coverage exercises concurrent equal-key ticket, job,
+  and meal requests plus changed-payload conflicts.
+- Runtime throwables become durable `RUNTIME_ERROR` terminal states. The JDBC claim query also
+  reclaims a `RUNNING` job whose lease timestamp is older than five minutes. Local JSON parsing
+  rejects non-schema fields, coercions, invalid item counts, strings, bounds, and confidences.
+- `DualSchemaIntegrationTest` asserts all six fitness migrations and joins PostgreSQL constraint
+  metadata to prove neither schema has a foreign key into the other. Local upload tickets now use
+  a relative `/api/v1/app/media-uploads/{mediaId}` URL for Vite proxy compatibility.
+
+### Verification after takeover
+
+- Initial typecheck found two `useRef` calls missing their required `undefined` initializer; both
+  were corrected. Initial lifecycle coverage still expected the obsolete public `TASK_FAILED`
+  alias, while the public response correctly exposes persisted `TIMEOUT`; the assertion now
+  reflects the contract and retryability.
+- `npm --prefix frontend run typecheck` and `npm --prefix frontend test -- MealRecordForm.test.tsx`: passed (3 tests).
+- `./mvnw -pl starter -am test -Dtest=FitnessExperienceIntegrationTest,FitnessV1IdempotencyConcurrencyIntegrationTest,MealRecognitionRuntimeTest,MealRecognitionWorkerTest,OssPresignedMediaUploadPortTest -Dsurefire.failIfNoSpecifiedTests=false`: passed (14 tests).
+- `./mvnw -pl starter -am test -Dtest=OssPresignedMediaUploadPortTest -Dsurefire.failIfNoSpecifiedTests=false`: passed (2 tests) after the metadata-signature regression test.
+
+## Independent review remediation
+
+- Production OSS object URLs are now HTTPS virtual-hosted URLs
+  (`https://{bucket}.{endpoint}/{key}`) for browser `PUT` tickets and server-side `HEAD`/`GET`.
+  The canonical resource remains `/{bucket}/{key}` and the regression test asserts the exact
+  virtual-hosted signed URL. Direct HTTP is accepted only for the loopback in-process test
+  server; every non-loopback endpoint is rejected unless it is HTTPS.
+- Server-side `HEAD` and `GET` set both connect and read timeouts (10 seconds), close response
+  streams, and disconnect in all cases, so a stalled object store cannot leave the scheduled
+  worker permanently blocked.
+- Recognition claims carry the durable `updated_at` instant returned by the claim statement.
+  The terminal update predicates on that instant as well as `RUNNING`; a stale worker that has
+  been superseded by the five-minute reclaimer cannot overwrite the new worker's result. The
+  integration test creates exactly that interleaving and proves only the recovering worker wins.
+- A clean-source Testcontainers run exposed that the Task 2 commit contains four Agent migrations
+  while unrelated dirty Admin work adds V5--V7. The dual-schema test therefore asserts the
+  required six Fitness migrations and real PostgreSQL cross-schema FK metadata, without coupling
+  Task 2 to those excluded Agent migrations.
+- Changed-payload key reuse now maps to the public `IDEMPOTENCY_CONFLICT` problem code, including
+  the unique-key race fallback, and the MVC concurrency test asserts it.
+
+## Final clean-source verification
+
+- Clean test source commit: `b9ac708444a31bf8e3ae619bc2e9dbad189aec5c`. A fresh detached
+  worktree at `/tmp/happy-agent-task2-release-final` started clean at that exact SHA. The final
+  release commit adds this verification report only; all executable source and tests are identical.
+- `./mvnw clean -q && ./mvnw -DskipTests compile`: passed from a clean reactor (all 15 modules
+  recompiled as required).
+- `./mvnw -q test`: passed from that clean worktree. The focused Task 2 suite also passed all 18
+  tests: dual schema (3), recognition lifecycle (8), idempotency concurrency (2), runtime (2),
+  worker (1), and OSS adapter (2).
+- `npm --prefix frontend ci`, `node scripts/contracts/lint.mjs`, and
+  `node scripts/contracts/generate-types.mjs` passed; lint validates 97 clean-source fixture
+  operations and generated public/admin clients have no diff.
+- A temporary minimal Task 2 TypeScript config that includes `api.ts`, `MealRecordForm.tsx`, its
+  test, and test setup passed `tsc`; the focused Vitest run passed all 3 form tests.
+- The required full frontend commands were also run from the clean worktree. They are not release
+  gates for Task 2 because the committed baseline has unrelated failures: `ComponentType.tsx`
+  imports missing Admin modules (`../api` and `../components/PageHeading`), `App.test.tsx`
+  imports `node:fs` without Node typings, and full Vitest reports 1 legacy App expectation plus 8
+  AdminWorkbench expectation mismatches. `ComponentType.tsx` and its missing imports are already
+  present in baseline `fa26821` (from `9adf2ad`); the excluded dirty Admin worktree files supply
+  the absent modules. No Task 2 typecheck or `MealRecordForm` test failed.

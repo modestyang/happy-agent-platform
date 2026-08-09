@@ -8,23 +8,17 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecognitionJobReq
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMediaUploadTicketRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
-import happy.jayden.yang.fitness.service.FitnessExceptions.ConflictException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import java.security.MessageDigest;
 import java.util.HexFormat;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,18 +36,14 @@ public class FitnessV1Controller {
   private final FitnessApplicationService application;
   private final MediaUploadPort media;
   private final ObjectMapper mapper;
-  private final TransactionTemplate fitnessTransaction;
 
   public FitnessV1Controller(
       FitnessApplicationService application,
       MediaUploadPort media,
-      ObjectMapper mapper,
-      @Qualifier("fitnessTransactionManager")
-          PlatformTransactionManager fitnessTransactionManager) {
+      ObjectMapper mapper) {
     this.application = application;
     this.media = media;
     this.mapper = mapper;
-    this.fitnessTransaction = new TransactionTemplate(fitnessTransactionManager);
   }
 
   @PostMapping("/media-upload-tickets")
@@ -61,9 +51,8 @@ public class FitnessV1Controller {
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
       @RequestHeader(name = "Idempotency-Key", required = false) String key,
       @RequestBody CreateMediaUploadTicketRequest request) {
-    UUID user = application.authenticateSession(token);
     return idempotent(
-        user,
+        token,
         "ticket",
         key,
         hash(request),
@@ -83,7 +72,21 @@ public class FitnessV1Controller {
       throw new DependencyNotConfiguredException();
     }
     local.upload(user, mediaId, contentType.split(";", 2)[0].trim(), bytes);
-    application.markMediaUploaded(token, mediaId);
+    application.completeMediaUpload(token, mediaId);
+    return ResponseEntity.noContent().build();
+  }
+
+  @PostMapping("/media-uploads/{mediaId}/complete")
+  ResponseEntity<Void> completeUpload(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @PathVariable("mediaId") UUID mediaId,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody java.util.Map<String, Object> body) {
+    if (key == null || key.isBlank()) throw new InvalidRequestException("Idempotency-Key 必填");
+    if (body.size() != 1 || !"DIRECT_UPLOAD_COMPLETED".equals(body.get("confirmation"))) {
+      throw new InvalidRequestException("完成上传确认不合法");
+    }
+    application.completeMediaUpload(token, mediaId);
     return ResponseEntity.noContent().build();
   }
 
@@ -92,9 +95,8 @@ public class FitnessV1Controller {
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
       @RequestHeader(name = "Idempotency-Key", required = false) String key,
       @RequestBody CreateMealRecognitionJobRequest request) {
-    UUID user = application.authenticateSession(token);
     return idempotent(
-        user,
+        token,
         "job",
         key,
         hash(request),
@@ -125,9 +127,8 @@ public class FitnessV1Controller {
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
       @RequestHeader(name = "Idempotency-Key", required = false) String key,
       @RequestBody CreateMealRecordRequest request) {
-    UUID user = application.authenticateSession(token);
     return idempotent(
-        user,
+        token,
         "record",
         key,
         hash(request),
@@ -140,75 +141,37 @@ public class FitnessV1Controller {
   }
 
   private <T> ResponseEntity<T> idempotent(
-      UUID user,
+      String token,
       String operation,
       String key,
       String requestHash,
       Class<T> responseType,
       Supplier<T> create,
       Function<T, ResponseEntity<T>> response) {
-    T prior = replay(user, operation, key, requestHash, responseType);
-    if (prior != null) {
-      return response.apply(prior);
-    }
-    try {
-      return Objects.requireNonNull(
-          fitnessTransaction.execute(
-              ignored -> {
-                T committed = replay(user, operation, key, requestHash, responseType);
-                if (committed != null) {
-                  return response.apply(committed);
-                }
-                T created = create.get();
-                save(user, operation, key, requestHash, resourceId(created), created);
-                return response.apply(created);
-              }));
-    } catch (DuplicateKeyException exception) {
-      return response.apply(
-          replayAfterUniqueConflict(user, operation, key, requestHash, responseType));
-    }
+    T value =
+        application.idempotently(
+            token,
+            operation,
+            key,
+            requestHash,
+            create,
+            FitnessV1Controller::resourceId,
+            this::write,
+            json -> read(json, responseType));
+    return response.apply(value);
   }
 
-  private <T> T replayAfterUniqueConflict(
-      UUID user, String operation, String key, String requestHash, Class<T> responseType) {
-    T replay = replay(user, operation, key, requestHash, responseType);
-    if (replay == null) {
-      throw new ConflictException("Idempotency-Key 并发请求未能找到已提交结果");
-    }
-    return replay;
-  }
-
-  private <T> T replay(
-      UUID user, String operation, String key, String requestHash, Class<T> responseType) {
-    if (key == null || key.isBlank()) {
-      throw new InvalidRequestException("Idempotency-Key 必填");
-    }
-    var found = application.idempotency(user, operation, key);
-    if (found.isEmpty()) {
-      return null;
-    }
-    if (!found.get().requestHash().equals(requestHash)) {
-      throw new ConflictException("Idempotency-Key 已用于不同请求");
-    }
+  private <T> T read(String json, Class<T> responseType) {
     try {
-      return mapper.readValue(found.get().responseJson(), responseType);
+      return mapper.readValue(json, responseType);
     } catch (Exception exception) {
       throw new IllegalStateException("无法读取已提交的幂等响应", exception);
     }
   }
 
-  private void save(
-      UUID user,
-      String operation,
-      String key,
-      String requestHash,
-      UUID resourceId,
-      Object response) {
+  private String write(Object response) {
     try {
-      application.saveIdempotency(
-          user, operation, key, requestHash, resourceId, mapper.writeValueAsString(response));
-    } catch (DuplicateKeyException exception) {
-      throw exception;
+      return mapper.writeValueAsString(response);
     } catch (Exception exception) {
       throw new IllegalStateException("无法保存幂等响应", exception);
     }

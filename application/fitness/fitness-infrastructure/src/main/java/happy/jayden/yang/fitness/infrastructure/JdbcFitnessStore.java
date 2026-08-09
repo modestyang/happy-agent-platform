@@ -27,6 +27,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +43,7 @@ import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 public final class JdbcFitnessStore implements FitnessStore {
@@ -182,7 +184,13 @@ public final class JdbcFitnessStore implements FitnessStore {
         request.mealType().name(),
         json(request.items()));
     return new MealDto(
-        id, occurredAt, request.mealType(), List.copyOf(request.items()), "MANUAL", null, null);
+        id,
+        occurredAt,
+        request.mealType(),
+        List.copyOf(request.items()),
+        "MANUAL",
+        null,
+        null);
   }
 
   @Override
@@ -193,7 +201,17 @@ public final class JdbcFitnessStore implements FitnessStore {
                 + " status='PENDING' AND expires_at > CURRENT_TIMESTAMP",
             mediaId,
             userId);
-    if (changed == 0) throw new NotFoundException("上传票据不存在或已失效");
+    if (changed == 0) {
+      Long alreadyUploaded =
+          jdbc.queryForObject(
+              "SELECT COUNT(*) FROM media_objects WHERE media_id=? AND user_id=? AND status='UPLOADED'",
+              Long.class,
+              mediaId,
+              userId);
+      if (alreadyUploaded == null || alreadyUploaded == 0) {
+        throw new NotFoundException("上传票据不存在或已失效");
+      }
+    }
   }
 
   @Override
@@ -222,7 +240,8 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   @Override
-  public MealRecognitionJobDto updateRecognitionJob(UUID jobId, MealRecognitionResult result) {
+  public MealRecognitionJobDto updateRecognitionJob(
+      ClaimedMealRecognitionJob job, MealRecognitionResult result) {
     if ("SUCCEEDED".equals(result.status()) && result.candidates().isEmpty()) {
       throw new IllegalArgumentException("SUCCEEDED recognition requires candidates");
     }
@@ -230,22 +249,18 @@ public final class JdbcFitnessStore implements FitnessStore {
         jdbc.update(
             "UPDATE meal_recognition_jobs SET"
                 + " status=?,candidates=?::jsonb,failure_code=?,failure_message=?,updated_at=CURRENT_TIMESTAMP"
-                + " WHERE job_id=? AND status='RUNNING'",
+                + " WHERE job_id=? AND status='RUNNING' AND updated_at=?",
             result.status(),
             json(result.candidates()),
             result.failureCode(),
             result.failureMessage(),
-            jobId);
-    if (changed != 1) throw new IllegalStateException("识别任务不是运行中状态");
-    return jdbc
-        .query(
-            "SELECT"
-                + " job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at"
-                + " FROM meal_recognition_jobs WHERE job_id=?",
-            (rs, row) -> recognitionJob(rs),
-            jobId)
-        .stream()
-        .findFirst()
+            job.jobId(),
+            Timestamp.from(job.claimedAt()));
+    if (changed != 1) {
+      return findRecognitionJob(job.userId(), job.jobId())
+          .orElseThrow(() -> new NotFoundException("识别任务不存在"));
+    }
+    return findRecognitionJob(job.userId(), job.jobId())
         .orElseThrow(() -> new NotFoundException("识别任务不存在"));
   }
 
@@ -253,18 +268,20 @@ public final class JdbcFitnessStore implements FitnessStore {
   public Optional<ClaimedMealRecognitionJob> claimNextRecognitionJob() {
     return jdbc
         .query(
-            "WITH next AS (SELECT job_id FROM meal_recognition_jobs WHERE status='QUEUED' ORDER BY"
+            "WITH next AS (SELECT job_id FROM meal_recognition_jobs WHERE status='QUEUED' OR"
+                + " (status='RUNNING' AND updated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes') ORDER BY"
                 + " created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE meal_recognition_jobs j SET"
                 + " status='RUNNING',updated_at=CURRENT_TIMESTAMP FROM next WHERE"
                 + " j.job_id=next.job_id RETURNING"
-                + " j.job_id,j.user_id,j.media_id,j.meal_type,j.occurred_at",
+                + " j.job_id,j.user_id,j.media_id,j.meal_type,j.occurred_at,j.updated_at AS claimed_at",
             (rs, row) ->
                 new ClaimedMealRecognitionJob(
                     rs.getObject("job_id", UUID.class),
                     rs.getObject("user_id", UUID.class),
                     rs.getObject("media_id", UUID.class),
                     MealType.valueOf(rs.getString("meal_type")),
-                    rs.getTimestamp("occurred_at").toInstant()))
+                    rs.getTimestamp("occurred_at").toInstant(),
+                    rs.getTimestamp("claimed_at").toInstant()))
         .stream()
         .findFirst();
   }
@@ -341,16 +358,20 @@ public final class JdbcFitnessStore implements FitnessStore {
       String requestHash,
       UUID resourceId,
       String responseJson) {
-    jdbc.update(
-        "INSERT INTO"
-            + " fitness_idempotency_keys(user_id,operation,idempotency_key,request_hash,resource_id,response_json)"
-            + " VALUES (?,?,?,?,?,?::jsonb)",
-        userId,
-        operation,
-        key,
-        requestHash,
-        resourceId,
-        responseJson);
+    try {
+      jdbc.update(
+          "INSERT INTO"
+              + " fitness_idempotency_keys(user_id,operation,idempotency_key,request_hash,resource_id,response_json)"
+              + " VALUES (?,?,?,?,?,?::jsonb)",
+          userId,
+          operation,
+          key,
+          requestHash,
+          resourceId,
+          responseJson);
+    } catch (DuplicateKeyException exception) {
+      throw new IdempotencyConcurrencyException(exception);
+    }
   }
 
   @Override

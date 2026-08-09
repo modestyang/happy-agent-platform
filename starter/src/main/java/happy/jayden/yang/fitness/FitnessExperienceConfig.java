@@ -11,6 +11,7 @@ import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.TransactionRunner;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -22,6 +23,8 @@ import org.springframework.context.annotation.DependsOn;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration
 @EnableScheduling
@@ -76,10 +79,10 @@ public class FitnessExperienceConfig {
   @Bean
   MealRecognitionPort mealRecognitionPort(
       @Qualifier("agentDataSource") DataSource agentDataSource,
-      @Qualifier("fitnessDataSource") DataSource fitnessDataSource,
       ObjectMapper mapper,
+      MediaUploadPort mediaUploadPort,
       @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}") String masterKeyFile) {
-    return new MealRecognitionRuntime(agentDataSource, fitnessDataSource, mapper, masterKeyFile);
+    return new MealRecognitionRuntime(agentDataSource, mapper, masterKeyFile, mediaUploadPort);
   }
 
   @Bean
@@ -88,8 +91,19 @@ public class FitnessExperienceConfig {
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
       AiConversation aiConversation,
-      MediaUploadPort mediaUploadPort) {
-    return new FitnessApplicationService(store, passwordVerifier, providerStatus, aiConversation, mediaUploadPort);
+      MediaUploadPort mediaUploadPort,
+      @Qualifier("fitnessTransactionManager") PlatformTransactionManager fitnessTransactionManager) {
+    TransactionTemplate transaction = new TransactionTemplate(fitnessTransactionManager);
+    TransactionRunner runner =
+        new TransactionRunner() {
+          @Override
+          public <T> T inTransaction(
+              happy.jayden.yang.fitness.service.FitnessPorts.TransactionWork<T> work) {
+            return transaction.execute(ignored -> work.run());
+          }
+        };
+    return new FitnessApplicationService(
+        store, passwordVerifier, providerStatus, aiConversation, mediaUploadPort, runner);
   }
 
   @Bean

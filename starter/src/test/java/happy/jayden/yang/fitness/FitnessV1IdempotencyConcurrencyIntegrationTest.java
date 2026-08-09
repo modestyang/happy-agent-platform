@@ -122,21 +122,117 @@ class FitnessV1IdempotencyConcurrencyIntegrationTest {
                     + " idempotency_key='same-key-0001'",
                 Long.class))
         .isEqualTo(1L);
+    assertThat(
+            mvc.perform(
+                    post("/api/v1/app/media-upload-tickets")
+                        .cookie(owner)
+                        .header("Idempotency-Key", "same-key-0001")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request.replace("\"contentLength\":3", "\"contentLength\":4")))
+                .andReturn()
+                .getResponse()
+                .getStatus())
+        .isEqualTo(409);
+    assertThat(
+            mvc.perform(
+                    post("/api/v1/app/media-upload-tickets")
+                        .cookie(owner)
+                        .header("Idempotency-Key", "same-key-0001")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request.replace("\"contentLength\":3", "\"contentLength\":4")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString())
+        .contains("\"code\":\"IDEMPOTENCY_CONFLICT\"");
+  }
+
+  @Test
+  void concurrentJobAndMealKeysReplayOneRowAndRejectChangedPayloads() throws Exception {
+    Cookie owner = login();
+    JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
+    UUID mediaId = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO media_objects(media_id,user_id,object_key,content_type,content_length,sha256,status,expires_at)"
+            + " VALUES (?,?,'race/uploaded','image/png',3,?,'UPLOADED',CURRENT_TIMESTAMP + INTERVAL '10 minutes')",
+        mediaId,
+        UUID.fromString("10000000-0000-0000-0000-000000000001"),
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    String jobBody =
+        "{\"mediaId\":\"%s\",\"mealType\":\"LUNCH\",\"occurredAt\":\"2026-08-09T08:00:00Z\"}"
+            .formatted(mediaId);
+
+    List<MvcResult> jobs = concurrentPost(owner, "/api/v1/app/meal-recognition-jobs", "job-race-0001", jobBody);
+    assertThat(jobs).allSatisfy(result -> assertThat(result.getResponse().getStatus()).isEqualTo(202));
+    assertThat(jobs.get(0).getResponse().getContentAsString())
+        .isEqualTo(jobs.get(1).getResponse().getContentAsString());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM meal_recognition_jobs WHERE media_id=?", Long.class, mediaId))
+        .isEqualTo(1L);
+    assertThat(
+            performPost(owner, "/api/v1/app/meal-recognition-jobs", "job-race-0001", jobBody.replace("08:00", "09:00"))
+                .getResponse()
+                .getStatus())
+        .isEqualTo(409);
+
+    String mealBody =
+        """
+        {"mealType":"DINNER","occurredAt":"2026-08-09T10:00:00Z","source":"MANUAL","note":"race-note","items":[{"name":"rice","estimatedKcal":200}]}
+        """;
+    List<MvcResult> meals = concurrentPost(owner, "/api/v1/app/meal-records", "meal-race-0001", mealBody);
+    assertThat(meals).allSatisfy(result -> assertThat(result.getResponse().getStatus()).isEqualTo(201));
+    assertThat(meals.get(0).getResponse().getContentAsString())
+        .isEqualTo(meals.get(1).getResponse().getContentAsString());
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM meals WHERE note='race-note'", Long.class))
+        .isEqualTo(1L);
+    assertThat(
+            performPost(owner, "/api/v1/app/meal-records", "meal-race-0001", mealBody.replace("race-note", "other-note"))
+                .getResponse()
+                .getStatus())
+        .isEqualTo(409);
   }
 
   private MvcResult createTicket(CountDownLatch start, Cookie owner, String request) {
     try {
       start.await(10, TimeUnit.SECONDS);
-      return mvc.perform(
-              post("/api/v1/app/media-upload-tickets")
-                  .cookie(owner)
-                  .header("Idempotency-Key", "same-key-0001")
-                  .contentType(MediaType.APPLICATION_JSON)
-                  .content(request))
-          .andReturn();
+      return performPost(owner, "/api/v1/app/media-upload-tickets", "same-key-0001", request);
     } catch (Exception exception) {
       throw new IllegalStateException(exception);
     }
+  }
+
+  private List<MvcResult> concurrentPost(Cookie owner, String path, String key, String request)
+      throws Exception {
+    CountDownLatch start = new CountDownLatch(1);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      var first = executor.submit(() -> awaitAndPost(start, owner, path, key, request));
+      var second = executor.submit(() -> awaitAndPost(start, owner, path, key, request));
+      start.countDown();
+      return List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  private MvcResult awaitAndPost(CountDownLatch start, Cookie owner, String path, String key, String request) {
+    try {
+      start.await(10, TimeUnit.SECONDS);
+      return performPost(owner, path, key, request);
+    } catch (Exception exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
+  private MvcResult performPost(Cookie owner, String path, String key, String request)
+      throws Exception {
+    return mvc.perform(
+            post(path)
+                .cookie(owner)
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
+        .andReturn();
   }
 
   private Cookie login() throws Exception {

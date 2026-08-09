@@ -45,4 +45,21 @@ class MealRecognitionRuntimeTest {
       server.stop(0);
     }
   }
+
+  @Test
+  void convertsAClosedSchemaViolationIntoInvalidModelResponse() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    var ds = new DriverManagerDataSource("jdbc:postgresql://localhost:1/not-used");
+    var runtime = new MealRecognitionRuntime(ds, ds, mapper, Path.of("build/no-key").toString());
+
+    var result =
+        runtime.result(
+            mapper.readTree(
+                """
+                {"items":[{"name":"rice","estimatedKcal":"200","confidence":0.8,"extra":true}]}
+                """));
+
+    assertThat(result.status()).isEqualTo("FAILED");
+    assertThat(result.failureCode()).isEqualTo("INVALID_MODEL_RESPONSE");
+  }
 }

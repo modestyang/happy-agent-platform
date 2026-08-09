@@ -197,6 +197,14 @@
         "responses":{"201":{"description":"Upload ticket","headers":{"Location":{"$ref":"#/components/headers/Location"}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/MediaUploadTicket"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"422":{"$ref":"#/components/responses/Unprocessable"},"429":{"$ref":"#/components/responses/TooManyRequests"},"503":{"$ref":"#/components/responses/ServiceUnavailable"},"default":{"$ref":"#/components/responses/Problem"}}
       }
     },
+    "/api/v1/app/media-uploads/{mediaId}/complete": {
+      "parameters":[{"$ref":"#/components/parameters/MediaId"}],
+      "post": {
+        "tags":["Media"],"operationId":"completeMediaUpload","summary":"Verify a direct media upload","description":"Performs a server-side object-store verification before marking the ticketed media available to recognition.","x-error-codes":["UNAUTHORIZED","FORBIDDEN","RESOURCE_NOT_FOUND","VALIDATION_FAILED","DEPENDENCY_NOT_CONFIGURED","IDEMPOTENCY_CONFLICT"],
+        "parameters":[{"$ref":"#/components/parameters/IdempotencyKey"}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompleteMediaUploadRequest"}}}},
+        "responses":{"204":{"description":"Upload verified"},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"404":{"$ref":"#/components/responses/NotFound"},"409":{"$ref":"#/components/responses/Conflict"},"422":{"$ref":"#/components/responses/Unprocessable"},"503":{"$ref":"#/components/responses/ServiceUnavailable"},"default":{"$ref":"#/components/responses/Problem"}}
+      }
+    },
     "/api/v1/app/ai/sessions": {
       "get": {
         "tags":["AI"],"operationId":"listAiSessions","summary":"List AI sessions","description":"Lists retained 24-hour AI Flower Grandpa sessions.","x-error-codes":["UNAUTHORIZED","FORBIDDEN","INVALID_CURSOR"],
@@ -261,6 +269,7 @@
       "WorkoutPlanId":{"name":"workoutPlanId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
       "ExerciseId":{"name":"exerciseId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
       "JobId":{"name":"jobId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
+      "MediaId":{"name":"mediaId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
       "SessionId":{"name":"sessionId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
       "RunId":{"name":"runId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}
     },
@@ -351,8 +360,9 @@
       "CurrentGoalReport":{"oneOf":[{"$ref":"#/components/schemas/QueuedCurrentGoalReport"},{"$ref":"#/components/schemas/GeneratingCurrentGoalReport"},{"$ref":"#/components/schemas/ReadyCurrentGoalReport"},{"$ref":"#/components/schemas/StaleCurrentGoalReport"},{"$ref":"#/components/schemas/FailedCurrentGoalReport"}]},
       "RefreshCurrentGoalReportRequest":{"type":"object","additionalProperties":false,"required":["reason"],"properties":{"reason":{"type":"string","enum":["USER_REFRESH","RETRY_FAILED"]}}},
       "CreateMediaUploadTicketRequest":{"type":"object","additionalProperties":false,"required":["purpose","contentType","contentLength","sha256"],"properties":{"purpose":{"type":"string","enum":["MEAL_RECOGNITION","EXERCISE_NOTE"]},"contentType":{"type":"string","enum":["image/jpeg","image/png","image/webp"]},"contentLength":{"type":"integer","minimum":1,"maximum":10485760},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}}},
+      "CompleteMediaUploadRequest":{"type":"object","additionalProperties":false,"required":["confirmation"],"properties":{"confirmation":{"type":"string","const":"DIRECT_UPLOAD_COMPLETED"}}},
       "UploadHeader":{"type":"object","additionalProperties":false,"required":["name","value"],"properties":{"name":{"type":"string","minLength":1,"maxLength":120},"value":{"type":"string","minLength":1,"maxLength":2000}}},
-      "MediaUploadTicket":{"type":"object","additionalProperties":false,"required":["mediaId","method","uploadUrl","headers","expiresAt","maxBytes"],"properties":{"mediaId":{"type":"string","format":"uuid"},"method":{"type":"string","const":"PUT"},"uploadUrl":{"type":"string","format":"uri"},"headers":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/UploadHeader"}},"expiresAt":{"type":"string","format":"date-time"},"maxBytes":{"type":"integer","minimum":1,"maximum":10485760}}},
+      "MediaUploadTicket":{"type":"object","additionalProperties":false,"required":["mediaId","method","uploadUrl","headers","expiresAt","maxBytes"],"properties":{"mediaId":{"type":"string","format":"uuid"},"method":{"type":"string","const":"PUT"},"uploadUrl":{"type":"string","format":"uri-reference"},"headers":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/UploadHeader"}},"expiresAt":{"type":"string","format":"date-time"},"maxBytes":{"type":"integer","minimum":1,"maximum":10485760}}},
       "CreateAiSessionRequest":{"type":"object","additionalProperties":false,"required":["topic"],"properties":{"topic":{"type":"string","enum":["GENERAL","GOAL","WORKOUT","MEAL","BODY","REPORT"]},"clientTimezone":{"type":"string","minLength":1,"maxLength":64}}},
       "AiSession":{"type":"object","additionalProperties":false,"required":["sessionId","status","agentKey","agentVersion","createdAt","expiresAt"],"properties":{"sessionId":{"type":"string","format":"uuid"},"status":{"type":"string","enum":["ACTIVE","EXPIRED","CLOSED"]},"agentKey":{"type":"string","minLength":1,"maxLength":120},"agentVersion":{"type":"integer","minimum":1},"createdAt":{"type":"string","format":"date-time"},"expiresAt":{"type":"string","format":"date-time"},"closedAt":{"type":"string","format":"date-time"}}},
       "AiSessionPage":{"type":"object","additionalProperties":false,"required":["items","page"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/AiSession"}},"page":{"$ref":"#/components/schemas/CursorPageInfo"}}},

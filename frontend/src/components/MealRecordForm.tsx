@@ -22,6 +22,8 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
   const [error, setError] = useState('');
   const [manualFallback, setManualFallback] = useState(false);
   const lastFile = useRef<File | undefined>(undefined);
+  const recognitionKeys = useRef<{ ticket: string; job: string } | undefined>(undefined);
+  const recordKey = useRef<string | undefined>(undefined);
   const previewUrl = 'previewUrl' in state ? state.previewUrl : undefined;
   const locked = state.status === 'UPLOADING' || state.status === 'RECOGNIZING';
 
@@ -45,19 +47,23 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
     setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: key === 'estimatedKcal' ? Number(value) : value } : item));
   };
 
-  async function startRecognition(file: File) {
+  async function startRecognition(file: File, retry = false) {
     setError('');
     setManualFallback(false);
     if (!ALLOWED_TYPES.has(file.type)) { setError('仅支持 JPEG、PNG 或 WebP 图片。'); return; }
     if (file.size > MAX_BYTES) { setError('图片不能超过 10 MB。'); return; }
+    if (!retry || !recognitionKeys.current) {
+      recognitionKeys.current = { ticket: idempotencyKey(), job: idempotencyKey() };
+    }
     lastFile.current = file;
     const preview = URL.createObjectURL(file);
     setState({ status: 'UPLOADING', previewUrl: preview });
     try {
       const sha256 = await digest(file);
-      const ticket = await api.createMediaUploadTicket(file.type, file.size, sha256);
+      const ticket = await api.createMediaUploadTicket(file.type, file.size, sha256, recognitionKeys.current.ticket);
       await api.uploadMedia(ticket.uploadUrl, file, ticket.headers);
-      const job = await api.createMealRecognitionJob(ticket.mediaId, mealType, new Date().toISOString());
+      await api.completeMediaUpload(ticket.mediaId, recognitionKeys.current.ticket);
+      const job = await api.createMealRecognitionJob(ticket.mediaId, mealType, new Date().toISOString(), recognitionKeys.current.job);
       if (job.status === 'SUCCEEDED' && job.candidates.length > 0) {
         const recognized = job.candidates.map(({ name, estimatedKcal }) => ({ name, estimatedKcal }));
         setItems(recognized);
@@ -86,8 +92,10 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
         ...(state.status === 'READY' ? { recognitionJobId: state.jobId } : {}),
         items: items.map((item) => ({ name: item.name.trim(), estimatedKcal: item.estimatedKcal })),
       };
-      await api.createMealRecord(body);
+      recordKey.current ??= idempotencyKey();
+      await api.createMealRecord(body, recordKey.current);
       await onSaved();
+      recordKey.current = undefined;
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败，请重试。'); } finally { setSaving(false); }
   }
 
@@ -97,7 +105,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
     {previewUrl && <img className="meal-photo-preview" src={previewUrl} alt="已选择的饮食照片" />}
     {state.status === 'UPLOADING' && <p className="notice">正在上传照片，暂时锁定编辑区…</p>}
     {state.status === 'RECOGNIZING' && <p className="notice">正在识别食物，暂时锁定编辑区…</p>}
-    {state.status === 'FAILED' && !manualFallback && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setManualFallback(true)}>改为手动填写</button></div>}
+    {state.status === 'FAILED' && !manualFallback && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current, true)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setManualFallback(true)}>改为手动填写</button></div>}
     <div aria-disabled={locked}>{items.map((item, index) => <div className="food-row" key={index}><label>食物名称 {index + 1}<input aria-label={`食物名称 ${index + 1}`} value={item.name} disabled={locked} onChange={(event) => updateItem(index, 'name', event.target.value)} required /></label><label>热量 (kcal)<input aria-label={`热量 ${index + 1}`} type="number" min="0" value={item.estimatedKcal || ''} disabled={locked} onChange={(event) => updateItem(index, 'estimatedKcal', event.target.value)} required /></label>{items.length > 1 && <button aria-label={`删除食物 ${index + 1}`} type="button" disabled={locked} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 /></button>}</div>)}</div>
     <button type="button" className="soft-button" disabled={locked} onClick={() => setItems((current) => [...current, { name: '', estimatedKcal: 0 }])}><Plus /> 新增食物</button>
     {error && <p className="error">{error}</p>}<button className="primary" disabled={locked || saving}>{saving ? '正在保存…' : '保存饮食记录'}</button>
@@ -109,4 +117,8 @@ async function digest(file: File) {
   const bytes = await file.arrayBuffer();
   const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function idempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 }

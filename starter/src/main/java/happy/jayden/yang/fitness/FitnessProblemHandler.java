@@ -3,6 +3,7 @@ package happy.jayden.yang.fitness;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyUnavailableException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConflictException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.UnauthorizedException;
 import java.net.URI;
@@ -30,6 +31,11 @@ public class FitnessProblemHandler {
   }
   @ExceptionHandler(happy.jayden.yang.fitness.service.FitnessExceptions.ConflictException.class)
   ProblemDetail conflict(RuntimeException exception) { return problem(HttpStatus.CONFLICT, "CONFLICT", exception.getMessage()); }
+
+  @ExceptionHandler(IdempotencyConflictException.class)
+  ProblemDetail idempotencyConflict(IdempotencyConflictException exception) {
+    return problem(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", exception.getMessage());
+  }
 
   @ExceptionHandler(DependencyNotConfiguredException.class)
   ProblemDetail dependencyNotConfigured(DependencyNotConfiguredException exception) {

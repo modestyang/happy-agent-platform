@@ -13,6 +13,7 @@ describe('MealRecordForm', () => {
 
   it('uploads a selected image, exposes editable recognition candidates, and saves their edits', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
       const path = String(input);
       if (path === '/api/v1/app/media-upload-tickets') {
         return json({ mediaId: '11111111-1111-1111-1111-111111111111', method: 'PUT', uploadUrl: '/api/v1/app/media-uploads/11111111-1111-1111-1111-111111111111', headers: [], expiresAt: '2026-08-09T01:00:00Z', maxBytes: 10485760 });
@@ -90,6 +91,7 @@ describe('MealRecordForm', () => {
     let ticketAttempt = 0;
     let jobAttempt = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
       const path = String(input);
       if (path === '/api/v1/app/media-upload-tickets') {
         ticketAttempt += 1;
@@ -127,7 +129,6 @@ describe('MealRecordForm', () => {
   it('rejects unsupported and oversized files before creating an upload ticket', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
     render(<MealRecordForm onSaved={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText('拍照识别'), { target: { files: [new File(['text'], 'note.txt', { type: 'text/plain' })] } });

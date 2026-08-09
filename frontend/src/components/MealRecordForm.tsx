@@ -20,11 +20,26 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
   const [state, setState] = useState<MealRecognitionState>({ status: 'IDLE' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [manualFallback, setManualFallback] = useState(false);
   const lastFile = useRef<File | undefined>(undefined);
   const previewUrl = 'previewUrl' in state ? state.previewUrl : undefined;
   const locked = state.status === 'UPLOADING' || state.status === 'RECOGNIZING';
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+  useEffect(() => {
+    if (state.status !== 'RECOGNIZING') return;
+    let active = true;
+    const timer = window.setInterval(() => void api.getMealRecognitionJob(state.jobId).then((job) => {
+      if (!active || (job.status !== 'SUCCEEDED' && job.status !== 'FAILED')) return;
+      window.clearInterval(timer);
+      if (job.status === 'SUCCEEDED' && job.candidates.length > 0) {
+        const recognized = job.candidates.map(({ name, estimatedKcal }) => ({ name, estimatedKcal }));
+        setItems(recognized); setState({ status: 'READY', jobId: job.jobId, previewUrl: state.previewUrl, items: recognized });
+      } else setState({ status: 'FAILED', message: job.failure?.message ?? '识别未返回可编辑食物，请改为手动填写。', previewUrl: state.previewUrl });
+    }).catch(() => { /* keep polling; a transient read failure must not discard the preview */ }), 800);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [state]);
 
   const updateItem = (index: number, key: keyof Food, value: string) => {
     setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: key === 'estimatedKcal' ? Number(value) : value } : item));
@@ -32,6 +47,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
 
   async function startRecognition(file: File) {
     setError('');
+    setManualFallback(false);
     if (!ALLOWED_TYPES.has(file.type)) { setError('仅支持 JPEG、PNG 或 WebP 图片。'); return; }
     if (file.size > MAX_BYTES) { setError('图片不能超过 10 MB。'); return; }
     lastFile.current = file;
@@ -41,14 +57,15 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
       const sha256 = await digest(file);
       const ticket = await api.createMediaUploadTicket(file.type, file.size, sha256);
       await api.uploadMedia(ticket.uploadUrl, file, ticket.headers);
-      setState({ status: 'RECOGNIZING', jobId: ticket.mediaId, previewUrl: preview });
       const job = await api.createMealRecognitionJob(ticket.mediaId, mealType, new Date().toISOString());
       if (job.status === 'SUCCEEDED' && job.candidates.length > 0) {
         const recognized = job.candidates.map(({ name, estimatedKcal }) => ({ name, estimatedKcal }));
         setItems(recognized);
         setState({ status: 'READY', jobId: job.jobId, previewUrl: preview, items: recognized });
-      } else {
+      } else if (job.status === 'FAILED') {
         setState({ status: 'FAILED', message: job.failure?.message ?? '识别未返回可编辑食物，请重试或改为手动填写。', previewUrl: preview });
+      } else {
+        setState({ status: 'RECOGNIZING', jobId: job.jobId, previewUrl: preview });
       }
     } catch (cause) {
       setState({ status: 'FAILED', message: cause instanceof Error ? cause.message : '识别失败，请重试。', previewUrl: preview });
@@ -80,7 +97,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
     {previewUrl && <img className="meal-photo-preview" src={previewUrl} alt="已选择的饮食照片" />}
     {state.status === 'UPLOADING' && <p className="notice">正在上传照片，暂时锁定编辑区…</p>}
     {state.status === 'RECOGNIZING' && <p className="notice">正在识别食物，暂时锁定编辑区…</p>}
-    {state.status === 'FAILED' && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setState({ status: 'IDLE' })}>改为手动填写</button></div>}
+    {state.status === 'FAILED' && !manualFallback && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setManualFallback(true)}>改为手动填写</button></div>}
     <div aria-disabled={locked}>{items.map((item, index) => <div className="food-row" key={index}><label>食物名称 {index + 1}<input aria-label={`食物名称 ${index + 1}`} value={item.name} disabled={locked} onChange={(event) => updateItem(index, 'name', event.target.value)} required /></label><label>热量 (kcal)<input aria-label={`热量 ${index + 1}`} type="number" min="0" value={item.estimatedKcal || ''} disabled={locked} onChange={(event) => updateItem(index, 'estimatedKcal', event.target.value)} required /></label>{items.length > 1 && <button aria-label={`删除食物 ${index + 1}`} type="button" disabled={locked} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 /></button>}</div>)}</div>
     <button type="button" className="soft-button" disabled={locked} onClick={() => setItems((current) => [...current, { name: '', estimatedKcal: 0 }])}><Plus /> 新增食物</button>
     {error && <p className="error">{error}</p>}<button className="primary" disabled={locked || saving}>{saving ? '正在保存…' : '保存饮食记录'}</button>

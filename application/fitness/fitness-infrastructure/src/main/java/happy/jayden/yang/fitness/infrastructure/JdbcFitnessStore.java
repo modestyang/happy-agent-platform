@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedMealRecognitionJob;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
 import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
@@ -178,7 +179,7 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   @Override
   public void markMediaUploaded(UUID userId, UUID mediaId) {
-    int changed = jdbc.update("UPDATE media_objects SET status='UPLOADED' WHERE media_id=? AND user_id=? AND status='PENDING'", mediaId, userId);
+    int changed = jdbc.update("UPDATE media_objects SET status='UPLOADED' WHERE media_id=? AND user_id=? AND status='PENDING' AND expires_at > CURRENT_TIMESTAMP", mediaId, userId);
     if (changed == 0) throw new NotFoundException("上传票据不存在或已失效");
   }
 
@@ -194,8 +195,26 @@ public final class JdbcFitnessStore implements FitnessStore {
 
   @Override
   public MealRecognitionJobDto updateRecognitionJob(UUID jobId, MealRecognitionResult result) {
-    jdbc.update("UPDATE meal_recognition_jobs SET status=?,candidates=?::jsonb,failure_code=?,failure_message=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=?", result.status(), json(result.candidates()), result.failureCode(), result.failureMessage(), jobId);
+    if ("SUCCEEDED".equals(result.status()) && result.candidates().isEmpty()) {
+      throw new IllegalArgumentException("SUCCEEDED recognition requires candidates");
+    }
+    int changed = jdbc.update("UPDATE meal_recognition_jobs SET status=?,candidates=?::jsonb,failure_code=?,failure_message=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=? AND status='RUNNING'", result.status(), json(result.candidates()), result.failureCode(), result.failureMessage(), jobId);
+    if (changed != 1) throw new IllegalStateException("识别任务不是运行中状态");
     return jdbc.query("SELECT job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at FROM meal_recognition_jobs WHERE job_id=?", (rs, row) -> recognitionJob(rs), jobId).stream().findFirst().orElseThrow(() -> new NotFoundException("识别任务不存在"));
+  }
+
+  @Override
+  public Optional<ClaimedMealRecognitionJob> claimNextRecognitionJob() {
+    return jdbc.query(
+            "WITH next AS (SELECT job_id FROM meal_recognition_jobs WHERE status='QUEUED' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) "
+                + "UPDATE meal_recognition_jobs j SET status='RUNNING',updated_at=CURRENT_TIMESTAMP FROM next WHERE j.job_id=next.job_id "
+                + "RETURNING j.job_id,j.user_id,j.media_id,j.meal_type,j.occurred_at",
+            (rs, row) -> new ClaimedMealRecognitionJob(
+                rs.getObject("job_id", UUID.class), rs.getObject("user_id", UUID.class),
+                rs.getObject("media_id", UUID.class), MealType.valueOf(rs.getString("meal_type")),
+                rs.getTimestamp("occurred_at").toInstant()))
+        .stream()
+        .findFirst();
   }
 
   @Override

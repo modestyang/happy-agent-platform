@@ -11,6 +11,7 @@ import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
+import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -57,13 +58,27 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
-  MediaUploadPort mediaUploadPort(@Qualifier("fitnessDataSource") DataSource dataSource) {
+  @ConditionalOnProperty(name = "happy.fitness.local-media.enabled", havingValue = "true")
+  MediaUploadPort localMediaUploadPort(@Qualifier("fitnessDataSource") DataSource dataSource) {
     return new MealRecognitionRuntime.LocalMediaUploadPort(dataSource);
   }
 
+  /** Production must supply an object-storage signer; never silently write application-local files. */
   @Bean
-  MealRecognitionPort mealRecognitionPort(@Qualifier("agentDataSource") DataSource dataSource) {
-    return new MealRecognitionRuntime(dataSource);
+  @ConditionalOnProperty(name = "happy.fitness.local-media.enabled", havingValue = "false", matchIfMissing = true)
+  MediaUploadPort unavailableMediaUploadPort() {
+    return (userId, contentType, contentLength, sha256) -> {
+      throw new DependencyNotConfiguredException();
+    };
+  }
+
+  @Bean
+  MealRecognitionPort mealRecognitionPort(
+      @Qualifier("agentDataSource") DataSource agentDataSource,
+      @Qualifier("fitnessDataSource") DataSource fitnessDataSource,
+      ObjectMapper mapper,
+      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}") String masterKeyFile) {
+    return new MealRecognitionRuntime(agentDataSource, fitnessDataSource, mapper, masterKeyFile);
   }
 
   @Bean
@@ -72,9 +87,13 @@ public class FitnessExperienceConfig {
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
       AiConversation aiConversation,
-      MediaUploadPort mediaUploadPort,
-      MealRecognitionPort mealRecognitionPort) {
-    return new FitnessApplicationService(store, passwordVerifier, providerStatus, aiConversation, mediaUploadPort, mealRecognitionPort);
+      MediaUploadPort mediaUploadPort) {
+    return new FitnessApplicationService(store, passwordVerifier, providerStatus, aiConversation, mediaUploadPort);
+  }
+
+  @Bean
+  MealRecognitionWorker mealRecognitionWorker(FitnessStore store, MealRecognitionPort runtime) {
+    return new MealRecognitionWorker(store, runtime);
   }
 
   @Bean

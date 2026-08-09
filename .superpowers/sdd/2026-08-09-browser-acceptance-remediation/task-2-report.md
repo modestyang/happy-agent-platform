@@ -21,6 +21,13 @@
 - `./mvnw -pl starter -am test -DskipITs=false`: completed; starter reports show 16 tests, 0 failures/errors; upstream module suites passed too.
 - `git diff --check`: passed.
 
-## Self-review / concern
+## Fix round 1
 
-The runtime resolves Agent-owned vision/model/provider configuration and records explicit failures without fake food. It deliberately does **not** decrypt credentials and execute the Bailian-compatible HTTP JSON-schema request yet; configured visual models therefore resolve to `MODEL_RUNTIME_UNAVAILABLE`. This keeps production from falsely reporting recognition, but means actual configured-model inference remains an explicit follow-up.
+- Public endpoints now live exclusively below `/api/v1/app`; the legacy controller no longer exposes its accidental `/api/app/v1/app/...` duplicates.
+- Recognition submission only enqueues. A scheduled worker atomically claims one durable `QUEUED` row (`FOR UPDATE SKIP LOCKED`), moves it to `RUNNING`, invokes the runtime with the stored owner, and accepts only a `RUNNING` → terminal transition.
+- The V1 response adapter emits the public JSON shape: nested `failure`, `mealRecordId`, aggregate `nutrition`, and timestamps. Tickets require the explicit `MEAL_RECOGNITION` purpose.
+- `V5__meal_recognition_integrity.sql` stores and validates ticket expiry, enforces manual versus recognition confirmation linkage, and prevents confirming the same job twice. Local file uploads are opt-in (`happy.fitness.local-media.enabled=true`); absent a configured production signer the request returns dependency-not-configured instead of writing local disk.
+- The UI now polls the server-issued job id only, clears intervals on unmount/state change, and keeps the image preview when the user selects manual fallback.
+- Dual-schema coverage now expects five fitness migrations and asserts recognition tables have no foreign key outside `fitness`.
+
+Remaining work intentionally left open: a production OSS presigned-PUT adapter and persistent idempotency implementation for all three POST endpoints; the HTTP inference code is present but still lacks its required local HTTP-server request-body test and a full image/job lifecycle endpoint test.

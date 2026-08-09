@@ -53,6 +53,8 @@ public final class FitnessPorts {
 
     MealRecognitionJobDto updateRecognitionJob(UUID jobId, MealRecognitionResult result);
 
+    Optional<FitnessDtos.ClaimedMealRecognitionJob> claimNextRecognitionJob();
+
     Optional<MealRecognitionJobDto> findRecognitionJob(UUID userId, UUID jobId);
 
     MealDto createMealRecord(UUID userId, FitnessDtos.CreateMealRecordRequest request);

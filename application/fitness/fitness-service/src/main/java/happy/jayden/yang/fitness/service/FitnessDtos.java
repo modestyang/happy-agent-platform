@@ -58,7 +58,7 @@ public final class FitnessDtos {
       long maxBytes) {}
 
   public record CreateMediaUploadTicketRequest(
-      String contentType, long contentLength, String sha256) {}
+      String purpose, String contentType, long contentLength, String sha256) {}
 
   public record CreateMealRecognitionJobRequest(
       UUID mediaId, MealType mealType, Instant occurredAt) {}
@@ -82,6 +82,10 @@ public final class FitnessDtos {
       String failureMessage,
       Instant createdAt,
       Instant updatedAt) {}
+
+  /** Worker-only lease; owner identity is read from durable storage, never a request value. */
+  public record ClaimedMealRecognitionJob(
+      UUID jobId, UUID userId, UUID mediaId, MealType mealType, Instant occurredAt) {}
 
   public record CreateMealRecordRequest(
       MealType mealType,

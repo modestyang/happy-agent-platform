@@ -55,7 +55,6 @@ public final class FitnessApplicationService {
   private final AgentProviderStatus providerStatus;
   private final AiConversation aiConversation;
   private final MediaUploadPort mediaUploadPort;
-  private final MealRecognitionPort mealRecognitionPort;
   private final SecureRandom secureRandom = new SecureRandom();
 
   public FitnessApplicationService(
@@ -63,14 +62,12 @@ public final class FitnessApplicationService {
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
       AiConversation aiConversation,
-      MediaUploadPort mediaUploadPort,
-      MealRecognitionPort mealRecognitionPort) {
+      MediaUploadPort mediaUploadPort) {
     this.store = store;
     this.passwordVerifier = passwordVerifier;
     this.providerStatus = providerStatus;
     this.aiConversation = aiConversation;
     this.mediaUploadPort = mediaUploadPort;
-    this.mealRecognitionPort = mealRecognitionPort;
   }
 
   public LoginResult login(LoginRequest request) {
@@ -146,8 +143,8 @@ public final class FitnessApplicationService {
 
   public MediaUploadTicket createMediaUploadTicket(
       String sessionToken, CreateMediaUploadTicketRequest request) {
-    if (request == null || blank(request.contentType()) || request.contentLength() <= 0 || blank(request.sha256())) {
-      throw new InvalidRequestException("contentType、contentLength 和 sha256 必填");
+    if (request == null || !"MEAL_RECOGNITION".equals(request.purpose()) || blank(request.contentType()) || request.contentLength() <= 0 || blank(request.sha256())) {
+      throw new InvalidRequestException("purpose、contentType、contentLength 和 sha256 必填");
     }
     if (!List.of("image/jpeg", "image/png", "image/webp").contains(request.contentType())
         || request.contentLength() > 10_485_760
@@ -167,8 +164,7 @@ public final class FitnessApplicationService {
       throw new InvalidRequestException("mediaId 和 mealType 必填");
     }
     UUID userId = authenticate(sessionToken);
-    MealRecognitionJobDto queued = store.createRecognitionJob(userId, request.mediaId(), request.mealType(), request.occurredAt());
-    return store.updateRecognitionJob(queued.jobId(), mealRecognitionPort.recognize(userId, request.mediaId(), request.mealType(), queued.occurredAt()));
+    return store.createRecognitionJob(userId, request.mediaId(), request.mealType(), request.occurredAt());
   }
 
   public MealRecognitionJobDto mealRecognitionJob(String sessionToken, UUID jobId) {

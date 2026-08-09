@@ -74,6 +74,7 @@ class FitnessExperienceIntegrationTest {
     registry.add("happy.datasource.fitness.password", () -> "fitness-test-password");
     registry.add("happy.datasource.agent.password", () -> "agent-test-password");
     registry.add("happy.fitness.local-seed.enabled", () -> "true");
+    registry.add("happy.fitness.local-media.enabled", () -> "true");
   }
 
   @Test

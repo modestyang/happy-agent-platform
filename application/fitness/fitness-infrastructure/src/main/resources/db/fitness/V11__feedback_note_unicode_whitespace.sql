@@ -1,7 +1,27 @@
 -- Define OTHER-note whitespace explicitly so PostgreSQL applies the same code point policy as
 -- the public contract and service. char_length keeps the existing raw 1..300 character boundary.
 ALTER TABLE meal_recommendation_feedback
-    DROP CONSTRAINT meal_recommendation_feedback_semantics_check,
+    DROP CONSTRAINT meal_recommendation_feedback_semantics_check;
+
+-- V11 is not released yet. Normalize rows that V10 accepted with a narrower whitespace
+-- definition before adding the stricter Unicode check, preserving the original feedback branch.
+UPDATE meal_recommendation_feedback
+SET note = NULL
+WHERE sentiment = 'DISLIKE'
+    AND reason IN ('TASTE','PORTION','INGREDIENT','CALORIES','COOKING')
+    AND note IS NOT NULL
+    AND note !~ U&'[^\0009-\000D\0020\0085\00A0\1680\2000-\200A\2028\2029\202F\205F\3000\FEFF]';
+
+UPDATE meal_recommendation_feedback
+SET note = '历史反馈未提供有效说明'
+WHERE sentiment = 'DISLIKE'
+    AND reason = 'OTHER'
+    AND (
+        note IS NULL
+        OR note !~ U&'[^\0009-\000D\0020\0085\00A0\1680\2000-\200A\2028\2029\202F\205F\3000\FEFF]'
+    );
+
+ALTER TABLE meal_recommendation_feedback
     ADD CONSTRAINT meal_recommendation_feedback_semantics_check
         CHECK (
             (

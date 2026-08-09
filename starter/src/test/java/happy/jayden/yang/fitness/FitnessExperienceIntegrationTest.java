@@ -462,6 +462,39 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
+  void feedbackHttpRejectsNulButAcceptsVisibleOtherNote() throws Exception {
+    Cookie owner = login();
+    String recommendationId = firstRecommendationId(owner);
+
+    for (String note : List.of("\u0000", "a\u0000")) {
+      mvc.perform(
+              put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                  .cookie(owner)
+                  .header(
+                      "Idempotency-Key",
+                      "feedback-nul-http-" + Integer.toHexString(note.hashCode()))
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      objectMapper.writeValueAsString(
+                          java.util.Map.of(
+                              "sentiment", "DISLIKE", "reason", "OTHER", "note", note))))
+          .andExpect(status().isBadRequest());
+    }
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-visible-http")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        java.util.Map.of(
+                            "sentiment", "DISLIKE", "reason", "OTHER", "note", "正常可见说明"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.reason").value("OTHER"));
+  }
+
+  @Test
   void feedbackHttpUsesRawCodePointLimitsForOtherNotes() throws Exception {
     Cookie owner = login();
     String recommendationId = firstRecommendationId(owner);

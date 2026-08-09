@@ -300,9 +300,7 @@ final class AgentRuntimeConversation implements AiConversation {
     return capabilities
         .hook(MANDATORY_SAFETY_HOOK)
         .orElseThrow(
-            () ->
-                new DependencyUnavailableException(
-                    "必需安全 Hook fitness.safety 没有已注册的运行时 handler"));
+            () -> new DependencyUnavailableException("必需安全 Hook fitness.safety 没有已注册的运行时 handler"));
   }
 
   private List<AgentHook> resolvedHooks(RuntimeConfig config, AgentHook safetyHook) {

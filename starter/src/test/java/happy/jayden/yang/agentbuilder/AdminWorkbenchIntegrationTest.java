@@ -101,7 +101,7 @@ class AdminWorkbenchIntegrationTest {
           "promptKey":"fitness.coach.prompt",
           "toolKeys":[],
           "skillKeys":[],
-          "hookKeys":[],
+          "hookKeys":["fitness.safety"],
           "memoryKey":"fitness.daily-memory",
           "temperature":0.45,
           "maxToolCalls":6

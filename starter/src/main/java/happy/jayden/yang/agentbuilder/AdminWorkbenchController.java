@@ -61,7 +61,7 @@ public class AdminWorkbenchController {
   @PatchMapping("/agents/{agentKey}/draft")
   ResponseEntity<AgentDraftView> updateDraft(
       @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable String agentKey,
+      @PathVariable("agentKey") String agentKey,
       @RequestHeader("If-Match") String ifMatch,
       @RequestBody DraftUpdate update) {
     authenticate(sessionToken);
@@ -72,8 +72,8 @@ public class AdminWorkbenchController {
   @PatchMapping("/components/{type}/{componentKey}")
   ComponentView updateComponent(
       @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable String type,
-      @PathVariable String componentKey,
+      @PathVariable("type") String type,
+      @PathVariable("componentKey") String componentKey,
       @RequestBody ComponentUpdate request) {
     authenticate(sessionToken);
     return workbench.updateComponent(type, componentKey, request);
@@ -82,7 +82,7 @@ public class AdminWorkbenchController {
   @PostMapping("/agents/{agentKey}/validate")
   ValidationView validate(
       @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable String agentKey) {
+      @PathVariable("agentKey") String agentKey) {
     authenticate(sessionToken);
     return workbench.validate(agentKey);
   }
@@ -90,7 +90,7 @@ public class AdminWorkbenchController {
   @PostMapping("/agents/{agentKey}/publish")
   PublicationView publish(
       @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable String agentKey) {
+      @PathVariable("agentKey") String agentKey) {
     authenticate(sessionToken);
     return workbench.publish(agentKey);
   }
@@ -98,7 +98,7 @@ public class AdminWorkbenchController {
   @PutMapping("/providers/{providerKey}/credential")
   ProviderView saveCredential(
       @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable String providerKey,
+      @PathVariable("providerKey") String providerKey,
       @RequestBody CredentialRequest request) {
     authenticate(sessionToken);
     if (request == null || request.apiKey() == null)
@@ -132,7 +132,7 @@ public class AdminWorkbenchController {
   @GetMapping("/runs/{runId}")
   RunTrace runTrace(
       @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable UUID runId) {
+      @PathVariable("runId") UUID runId) {
     authenticate(sessionToken);
     return runTraces.findTrace(runId).orElseThrow(() -> new IllegalArgumentException("运行记录不存在"));
   }

@@ -78,7 +78,8 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
         "PUT",
         signedPutUrl(
             endpoint, bucket, key, contentType, sha256, expires, accessKeyId, accessKeySecret),
-        List.of(new UploadHeader("Content-Type", contentType), new UploadHeader(SHA_HEADER, sha256)),
+        List.of(
+            new UploadHeader("Content-Type", contentType), new UploadHeader(SHA_HEADER, sha256)),
         expires,
         10_485_760);
   }
@@ -92,7 +93,8 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
       try {
         int status = connection.getResponseCode();
         if (status == HttpURLConnection.HTTP_NOT_FOUND) throw new NotFoundException("OSS 上传对象不存在");
-        if (status < 200 || status >= 300) throw new IllegalStateException("OSS HEAD 失败: " + status);
+        if (status < 200 || status >= 300)
+          throw new IllegalStateException("OSS HEAD 失败: " + status);
         String actualType = normalize(connection.getHeaderField("Content-Type"));
         String actualSha = connection.getHeaderField(SHA_HEADER);
         if (connection.getContentLengthLong() != meta.contentLength()
@@ -142,7 +144,11 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
                 + " WHERE media_id=? AND user_id=? AND expires_at > CURRENT_TIMESTAMP",
             (rs, row) ->
                 new MediaMeta(
-                    rs.getString(1), rs.getString(2), rs.getLong(3), rs.getString(4), rs.getString(5)),
+                    rs.getString(1),
+                    rs.getString(2),
+                    rs.getLong(3),
+                    rs.getString(4),
+                    rs.getString(5)),
             mediaId,
             userId);
     if (rows.isEmpty()) throw new NotFoundException("上传票据不存在或已失效");
@@ -155,7 +161,11 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
             "SELECT object_key,content_type,content_length,sha256,status FROM media_objects WHERE media_id=?",
             (rs, row) ->
                 new MediaMeta(
-                    rs.getString(1), rs.getString(2), rs.getLong(3), rs.getString(4), rs.getString(5)),
+                    rs.getString(1),
+                    rs.getString(2),
+                    rs.getLong(3),
+                    rs.getString(4),
+                    rs.getString(5)),
             mediaId);
     if (rows.isEmpty()) throw new IllegalStateException("图片不存在");
     return rows.get(0);
@@ -164,14 +174,16 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
   private HttpURLConnection objectConnection(String method, String objectKey) throws IOException {
     requireConfigured();
     URI target = objectUri(endpoint, bucket, objectKey);
-    String date = DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC).format(clock.instant());
+    String date =
+        DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC).format(clock.instant());
     String canonical = method + "\n\n\n" + date + "\n/" + bucket + "/" + objectKey;
     HttpURLConnection connection = (HttpURLConnection) target.toURL().openConnection();
     connection.setRequestMethod(method);
     connection.setConnectTimeout(HTTP_TIMEOUT_MILLIS);
     connection.setReadTimeout(HTTP_TIMEOUT_MILLIS);
     connection.setRequestProperty("Date", date);
-    connection.setRequestProperty("Authorization", "OSS " + accessKeyId + ":" + hmac(accessKeySecret, canonical));
+    connection.setRequestProperty(
+        "Authorization", "OSS " + accessKeyId + ":" + hmac(accessKeySecret, canonical));
     return connection;
   }
 
@@ -185,7 +197,8 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
       String id,
       String secret) {
     URI base = endpointUri(endpoint);
-    if (!"https".equalsIgnoreCase(base.getScheme())) throw new IllegalArgumentException("OSS endpoint must use HTTPS");
+    if (!"https".equalsIgnoreCase(base.getScheme()))
+      throw new IllegalArgumentException("OSS endpoint must use HTTPS");
     String path = "/" + bucket + "/" + key;
     String canonical =
         "PUT\n\n"
@@ -199,8 +212,7 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
             + "\n"
             + path;
     String signature = hmac(secret, canonical);
-    return objectUri(endpoint, bucket, key)
-        .toString()
+    return objectUri(endpoint, bucket, key).toString()
         + "?OSSAccessKeyId="
         + enc(id)
         + "&Expires="
@@ -226,9 +238,10 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
   }
 
   private static URI endpointUri(String endpoint) {
-    String value = endpoint.startsWith("http://") || endpoint.startsWith("https://")
-        ? endpoint
-        : "https://" + endpoint;
+    String value =
+        endpoint.startsWith("http://") || endpoint.startsWith("https://")
+            ? endpoint
+            : "https://" + endpoint;
     return URI.create(value);
   }
 
@@ -254,7 +267,8 @@ final class OssPresignedMediaUploadPort implements MediaUploadPort {
     try {
       Mac mac = Mac.getInstance("HmacSHA1");
       mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA1"));
-      return Base64.getEncoder().encodeToString(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+      return Base64.getEncoder()
+          .encodeToString(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
     } catch (Exception exception) {
       throw new IllegalStateException(exception);
     }

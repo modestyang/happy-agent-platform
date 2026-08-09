@@ -1,6 +1,7 @@
 services:
   postgres:
-    image: postgres:16.14-alpine3.24
+    image: happy-agent-postgres:local
+    build: ./postgres
     environment:
       POSTGRES_DB: happy_agent
       POSTGRES_USER: postgres

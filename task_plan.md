@@ -58,4 +58,50 @@
 - 当前运行时尚未接通的能力必须显示“待配置/不可用”，不能伪造成成功。
 - Provider API Key 只写入，服务端 AES-256-GCM 加密，任何响应均只返回掩码/配置状态。
 - 先打通自用场景的单管理员主链；权限入口复用现有登录会话，复杂 RBAC 留在既有完整生产计划中。
-- Task 3 的反馈约束和三餐计划围栏及最终复审加固已占用 fitness schema 的 V8、V9、V10；Task 4 如需持久化变更必须从新的 V11 迁移开始，绝不回改 V7/V8/V9/V10。
+
+## 2026-08-09 浏览器验收整改（当前阶段）
+
+### Goal
+
+执行 `docs/superpowers/plans/2026-08-09-browser-acceptance-remediation.md`，关闭饮食图片识别、推荐反馈、结构化当前目标报告、跟练语音、Agent Skill/Hook 可用性和管理台状态残留问题。
+
+### Phases
+
+1. [complete] 将 2026-08-07 浏览器验收发现转换为工程执行清单。
+2. [in_progress] 使用 Terra 实施 Task 1～6，并对每项执行需求与代码质量审查；Task 1、Task 2 已通过独立审查。
+3. [pending] 执行全量测试与真实浏览器复验，输出 2026-08-09 验收报告。
+
+### Decisions
+
+- 正式本地入口统一为 `http://127.0.0.1:5173`。
+- 报告使用 Agent 标准结构化输出 + 固定前端渲染，不允许 Agent 直接生成 HTML。
+- 饮食识别 Job 与推荐反馈持久化在 fitness schema，且不绑定目标。
+- Skill/Hook 状态由数据库登记与真实运行时 handler 双重决定。
+- Task 3 的反馈约束、三餐计划围栏、最终复审加固与 Unicode whitespace 对齐已占用 fitness schema 的 V8、V9、V10、V11；Task 4 如需持久化变更必须从新的 V12 迁移开始，绝不回改 V7/V8/V9/V10/V11。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 当前可见子 Agent 模型列表未列出 Luna | 1 | `spawn_agent(model="luna")` 返回 Unknown model；当前仅支持 `gpt-5.6-sol`、`gpt-5.6-terra`，未静默替换 |
+| Task 2 首轮实现依赖未提交文件且 OSS 生产链路不闭环 | 1 | 经过 Terra 多轮 TDD 与独立复审，补齐自包含提交、OSS HEAD/GET、异步 fencing、service 幂等、前端重试与契约一致性；最终 Critical/Important 清零 |
+
+## 2026-08-09 开发者工作台重构（当前阶段）
+
+### Goal
+
+将工作台从错误复用健身用户登录态的实现，重构为独立开发者认证和真实 Agent 组件管理/调试控制台。
+
+### Phases
+
+1. [complete] 读取组件工作台参考页，确认目标不是复制 Demo，而是采用其卡片与编辑交互。
+2. [in_progress] 固化独立 `AGENT_ADMIN_SESSION`、组件中心、真实调试/追踪的设计与实施计划。
+3. [pending] 以 TDD 完成 Agent schema 管理员会话和 Admin API 认证替换。
+4. [pending] 重做管理员登录和组件管理 UI。
+5. [pending] 回归真实调试/追踪并提供隔离登录浏览器验收环境。
+
+### Decisions
+
+- 工作台是开发者控制面，不绑定健身用户或 `FITNESS_SESSION`。
+- 参考 `workbench-components-demo.html` 的信息密度、列表、详情和保存条，不使用其假数据或删除项目中的调试台。
+- 保留总览、Agent、提示词、技能、工具、调试台和运行追踪；Provider/Model 仍由 Agent 配置流程引用。

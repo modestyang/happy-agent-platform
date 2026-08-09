@@ -28,4 +28,12 @@
 - 前端完整回归增至 28/28，通过 TypeScript、ESLint 与 Vite production build；浏览器已验证真实数据库种子、发布门禁阻塞信息与组件状态原因。
 - 真实浏览器验收发现并修复 `If-Match` 覆盖 JSON Content-Type 的请求封装缺陷；回归测试完成 RED/GREEN，草稿 revision 1→2 且刷新后仍为 2。
 - 全量 `./mvnw verify -q` 退出码 0；管理台首轮验收记录已归档，未配置 Provider 与尚未接线的 Tool/Skill/Hook 均作为真实限制列明。
-- Task 3 已使用新的 fitness V8/V9/V10 迁移落地反馈数据库约束、每日三餐生成围栏及最终复审加固；Task 4 的任何数据库变更已明确顺延到 V11，V7/V8/V9/V10 保持不可变。
+
+## 2026-08-09
+
+- 已将浏览器验收遗留项整理为 7 个按依赖顺序执行的正式任务，计划文件为 `docs/superpowers/plans/2026-08-09-browser-acceptance-remediation.md`。
+- 计划覆盖：本地端口与工作台状态、饮食照片识别、推荐赞踩反馈、结构化目标报告、跟练语音队列、Skill/Hook 真实可用性、全量测试与浏览器复验。
+- 已显式尝试 `spawn_agent(model="luna")`，运行环境返回 Unknown model；当前可分配模型只有 `gpt-5.6-sol` 和 `gpt-5.6-terra`，因此 Luna 尚未启动，未使用其他模型冒充。
+- 用户确认改用 Terra；Task 1（管理台路由状态/本地端口）与 Task 2（饮食照片上传、OSS、百炼视觉识别、异步任务、编辑确认和幂等）均已完成实施与独立复审，最终 SPEC/QUALITY PASS。
+- 用户指出工作台应独立于健身应用用户。已审计确认现有实现错误复用 `FITNESS_SESSION`；已完成新的开发者工作台设计与分步实施计划，待从独立管理员认证开始实施。
+- Task 3 已使用新的 fitness V8/V9/V10/V11 迁移落地反馈数据库约束、每日三餐生成围栏、最终复审加固和 Unicode whitespace 一致性；Task 4 的任何数据库变更已明确顺延到 V12，V7/V8/V9/V10/V11 保持不可变。

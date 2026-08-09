@@ -4,7 +4,12 @@
 *.iml
 target/
 frontend/node_modules/
+frontend/node_modules
 frontend/dist/
 coverage/
 deploy/secrets/
+starter/deploy/.local/
 .DS_Store
+
+# Qoder CLI session state
+.qoder/

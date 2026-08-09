@@ -33,8 +33,11 @@ class FitnessV1RecognitionContractTest {
     assertThat(wire.failure().code()).isEqualTo("TIMEOUT");
     JsonNode contract =
         new ObjectMapper()
-            .readTree(Files.readString(projectRoot().resolve("docs/architecture/openapi/public-v1.yaml")));
-    assertThat(contract.at("/components/schemas/MealRecognitionJob/properties/failure/$ref").asText())
+            .readTree(
+                Files.readString(
+                    projectRoot().resolve("docs/architecture/openapi/public-v1.yaml")));
+    assertThat(
+            contract.at("/components/schemas/MealRecognitionJob/properties/failure/$ref").asText())
         .isEqualTo("#/components/schemas/RecognitionFailure");
     assertThat(contract.at("/components/schemas/RecognitionFailureCode/enum"))
         .extracting(JsonNode::asText)

@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.CreateAgentRequest;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -128,9 +130,29 @@ class JdbcAdminWorkbenchStoreTest {
   }
 
   @Test
+  void newAgentStartsFromPlatformDefaultsInsteadOfFitnessBusinessBindings() {
+    var created =
+        store.createDraft(
+            new CreateAgentRequest("baby.food", "辅食助手", "为家庭提供辅食安排建议"));
+
+    assertEquals("agent.default.prompt", created.promptKey());
+    assertEquals("agent.default.memory", created.memoryKey());
+    assertEquals(List.of(), created.toolKeys());
+    assertEquals(List.of(), created.skillKeys());
+    assertEquals(List.of(), created.hookKeys());
+    assertTrue(
+        component(store.snapshot().components(), "PROMPT", "agent.default.prompt")
+            .config()
+            .get("template")
+            .toString()
+            .contains("通用 AI 助手"));
+  }
+
+  @Test
   void startupReconciliationProjectsOnlyRegisteredSkillsAndHooksAsRuntimeReady() {
     store.reconcileRuntimeCapabilities(
-        (type, key) -> type.equals("SKILL") && key.equals("fitness.meal.skill"));
+        (RuntimeCapabilityRegistry)
+            (type, key) -> type.equals("SKILL") && key.equals("fitness.meal.skill"));
 
     var components = store.snapshot().components();
     var meal = component(components, "SKILL", "fitness.meal.skill");

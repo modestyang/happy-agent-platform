@@ -63,6 +63,11 @@
     {"method":"get","path":"/api/v1/admin/runs/{runId}","operationId":"getRun","success":"200","schema":"RunDetail"},
     {"method":"get","path":"/api/v1/admin/runs/{runId}/trace-events","operationId":"listRunTraceEvents","success":"200","schema":"TraceEventPage"},
     {"method":"post","path":"/api/v1/admin/playground/runs","operationId":"createPlaygroundRun","success":"202","schema":"RunDetail","async":true},
-    {"method":"get","path":"/api/v1/admin/playground/runs/{runId}/events","operationId":"streamPlaygroundRunEvents","success":"200","schema":"AgentRunEvent","sse":true}
+    {"method":"get","path":"/api/v1/admin/playground/runs/{runId}/events","operationId":"streamPlaygroundRunEvents","success":"200","schema":"AgentRunEvent","sse":true},
+    {"method":"get","path":"/api/v1/admin/analytics/usage","operationId":"getUsageAnalytics","success":"200","schema":"UsageAnalyticsSummary","queryParameters":["from","to","agentKey","modelKey"],"exactQueryParameters":true},
+    {"method":"get","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases","operationId":"listKnowledgeBases","success":"200","schema":"KnowledgeBasePage","queryParameters":["cursor","pageSize"],"exactQueryParameters":true},
+    {"method":"post","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases","operationId":"createKnowledgeBase","success":"201","schema":"KnowledgeBase"},
+    {"method":"patch","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases/{knowledgeId}","operationId":"updateKnowledgeBase","success":"200","schema":"KnowledgeBase","optimistic":true},
+    {"method":"get","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases/search","operationId":"searchKnowledgeBase","success":"200","schema":"KnowledgeSearchResult","queryParameters":["q","limit"],"exactQueryParameters":true}
   ]
 }

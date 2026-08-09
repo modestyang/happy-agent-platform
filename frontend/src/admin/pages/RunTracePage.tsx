@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 
 import { admin, type RunTrace } from '../api';
@@ -8,6 +8,7 @@ import { PageHeading } from '../components/PageHeading';
 export function RunTracePage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [trace, setTrace] = useState<RunTrace>();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,7 +25,10 @@ export function RunTracePage() {
   }, [runId]);
 
   if (loading) return <PageHeading eyebrow="加载中" title="Run Trace" description="正在拉取 trace…" />;
-  if (error) return <PageHeading eyebrow="错误" title="Run Trace" description={error} action={<button className="admin-text-button" onClick={() => navigate('/admin/playground')}><ChevronLeft /> 返回调试台</button>} />;
+  const returnToTrace = new URLSearchParams(location.search).get('from') === 'trace';
+  const returnPath = returnToTrace ? '/admin/traces' : '/admin/playground';
+  const returnLabel = returnToTrace ? '返回 Trace' : '返回调试台';
+  if (error) return <PageHeading eyebrow="错误" title="Run Trace" description={error} action={<button className="admin-text-button" onClick={() => navigate(returnPath)}><ChevronLeft /> {returnLabel}</button>} />;
   if (!trace) return null;
 
   return <>
@@ -32,7 +36,7 @@ export function RunTracePage() {
       eyebrow="Run Trace"
       title={trace.agentKey}
       description={`Run ${trace.runId} · v${trace.agentVersion} · ${trace.status}`}
-      action={<button className="admin-secondary" onClick={() => navigate('/admin/playground')}><ChevronLeft /> 返回调试台</button>}
+      action={<button className="admin-secondary" onClick={() => navigate(returnPath)}><ChevronLeft /> {returnLabel}</button>}
     />
     <section className="admin-trace__metrics">
       <div className="admin-trace__metric"><small>状态</small><strong>{trace.status}</strong><p>{trace.errorCode ?? '无错误'}</p></div>

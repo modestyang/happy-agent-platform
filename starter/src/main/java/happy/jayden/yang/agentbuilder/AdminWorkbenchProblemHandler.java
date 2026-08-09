@@ -3,6 +3,8 @@ package happy.jayden.yang.agentbuilder;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort.Conflict;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort.NotFound;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort.ValidationFailure;
+import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService.AdminAuthenticationException;
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.PublishedAgentPlaygroundRuntime.PlaygroundRuntimeUnavailableException;
 import java.net.URI;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -11,6 +13,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(basePackageClasses = AdminWorkbenchController.class)
 public class AdminWorkbenchProblemHandler {
+
+  @ExceptionHandler(AdminAuthenticationException.class)
+  ProblemDetail unauthorized(AdminAuthenticationException exception) {
+    return problem(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", exception.getMessage());
+  }
 
   @ExceptionHandler(NotFound.class)
   ProblemDetail notFound(NotFound exception) {
@@ -34,6 +41,11 @@ public class AdminWorkbenchProblemHandler {
   @ExceptionHandler(IllegalArgumentException.class)
   ProblemDetail invalid(IllegalArgumentException exception) {
     return problem(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", exception.getMessage());
+  }
+
+  @ExceptionHandler(PlaygroundRuntimeUnavailableException.class)
+  ProblemDetail runtimeUnavailable(PlaygroundRuntimeUnavailableException exception) {
+    return problem(HttpStatus.SERVICE_UNAVAILABLE, "DEPENDENCY_UNAVAILABLE", exception.getMessage());
   }
 
   private static ProblemDetail problem(HttpStatus status, String code, String message) {

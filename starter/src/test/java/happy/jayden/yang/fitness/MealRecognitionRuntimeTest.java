@@ -17,29 +17,55 @@ class MealRecognitionRuntimeTest {
   void sendsBailianCompatibleVisionRequestWithStrictSchemaAndParsesCompletion() throws Exception {
     AtomicReference<String> body = new AtomicReference<>();
     HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
-    server.createContext("/chat/completions", exchange -> {
-      body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-      byte[] response = "{\"choices\":[{\"message\":{\"content\":\"{\\\"items\\\":[{\\\"name\\\":\\\"rice\\\",\\\"estimatedKcal\\\":200,\\\"confidence\\\":0.8}]}\"}}]}".getBytes(StandardCharsets.UTF_8);
-      exchange.getResponseHeaders().add("Content-Type", "application/json");
-      exchange.sendResponseHeaders(200, response.length);
-      exchange.getResponseBody().write(response);
-      exchange.close();
-    });
+    server.createContext(
+        "/chat/completions",
+        exchange -> {
+          body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+          byte[] response =
+              "{\"choices\":[{\"message\":{\"content\":\"{\\\"items\\\":[{\\\"name\\\":\\\"rice\\\",\\\"estimatedKcal\\\":200,\\\"confidence\\\":0.8}]}\"}}]}"
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().add("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, response.length);
+          exchange.getResponseBody().write(response);
+          exchange.close();
+        });
     server.start();
     try {
       ObjectMapper mapper = new ObjectMapper();
       var ds = new DriverManagerDataSource("jdbc:postgresql://localhost:1/not-used");
       var runtime = new MealRecognitionRuntime(ds, ds, mapper, Path.of("build/no-key").toString());
-      JsonNode parsed = runtime.post(
-          new MealRecognitionRuntime.RuntimeConfig("bailian", "qwen-vl", "http://localhost:" + server.getAddress().getPort()),
-          "secret".toCharArray(), new MealRecognitionRuntime.Image("image/png", new byte[] {1, 2, 3}));
+      JsonNode parsed =
+          runtime.post(
+              new MealRecognitionRuntime.RuntimeConfig(
+                  "bailian", "qwen-vl", "http://localhost:" + server.getAddress().getPort()),
+              "secret".toCharArray(),
+              new MealRecognitionRuntime.Image("image/png", new byte[] {1, 2, 3}));
 
       JsonNode request = mapper.readTree(body.get());
       assertThat(request.path("model").asText()).isEqualTo("qwen-vl");
-      assertThat(request.path("messages").get(0).path("content").get(1).path("image_url").path("url").asText())
+      assertThat(
+              request
+                  .path("messages")
+                  .get(0)
+                  .path("content")
+                  .get(1)
+                  .path("image_url")
+                  .path("url")
+                  .asText())
           .startsWith("data:image/png;base64,");
-      assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean()).isTrue();
-      assertThat(request.path("response_format").path("json_schema").path("schema").path("properties").path("items").path("items").path("properties").has("confidence")).isTrue();
+      assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean())
+          .isTrue();
+      assertThat(
+              request
+                  .path("response_format")
+                  .path("json_schema")
+                  .path("schema")
+                  .path("properties")
+                  .path("items")
+                  .path("items")
+                  .path("properties")
+                  .has("confidence"))
+          .isTrue();
       assertThat(
               request
                   .path("response_format")
@@ -84,14 +110,16 @@ class MealRecognitionRuntimeTest {
 
     String atLimit = "🍅".repeat(120);
     assertThat(
-            runtime.result(
+            runtime
+                .result(
                     mapper.readTree(
                         "{\"items\":[{\"name\":\"%s\",\"estimatedKcal\":200,\"confidence\":0.8}]}"
                             .formatted(atLimit)))
                 .status())
         .isEqualTo("SUCCEEDED");
     assertThat(
-            runtime.result(
+            runtime
+                .result(
                     mapper.readTree(
                         "{\"items\":[{\"name\":\"%s\",\"estimatedKcal\":200,\"confidence\":0.8}]}"
                             .formatted("🍅".repeat(121))))

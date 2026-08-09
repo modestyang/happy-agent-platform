@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Plus } from 'lucide-react';
+import { Bot, Boxes, ChevronRight, Clock3, Plus, Wrench } from 'lucide-react';
 
 import { admin, type AgentDraft } from '../api';
 import { PageHeading } from '../components/PageHeading';
@@ -31,45 +31,33 @@ export function AgentList() {
 
   return <>
     <PageHeading
-      eyebrow="多 Agent"
-      title="Agent 草稿列表"
-      description="选择要编辑的 Agent 草稿。每条记录对应一个独立 Agent，可在工作台分别发布与回滚。"
-      action={<button className="admin-secondary" disabled title="暂未启用"> <Plus /> 新建 Agent</button>}
+      eyebrow="Agent Builder"
+      title="Agent"
+      description="每张卡片代表一个可独立配置、发布和追踪运行记录的 Agent。"
+      action={<div className="admin-page-actions"><span className="admin-page-meta">{agents.length} 个已登记</span><Link className="admin-primary" to="/admin/agents/new"><Plus /> 新建 Agent</Link></div>}
     />
-    <section className="admin-card">
-      <table className="admin-table">
-        <thead>
-          <tr>
-            <th>Agent Key</th>
-            <th>名称</th>
-            <th>状态</th>
-            <th>已发布版本</th>
-            <th>草稿 revision</th>
-            <th>更新于</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {agents.map((agent) => (
-            <tr key={agent.agentKey}>
-              <td><code>{agent.agentKey}</code></td>
-              <td>{agent.name}</td>
-              <td><span className={`admin-badge admin-badge--${agent.status.toLowerCase()}`}>{agent.status}</span></td>
-              <td>v{agent.publishedVersion}</td>
-              <td>{agent.revision}</td>
-              <td>{new Date(agent.updatedAt).toLocaleString('zh-CN')}</td>
-              <td>
-                <Link to={`/admin/agents/${encodeURIComponent(agent.agentKey)}`} className="admin-text-button">
-                  打开 <ChevronRight />
-                </Link>
-              </td>
-            </tr>
-          ))}
-          {!agents.length && (
-            <tr><td colSpan={7}><div className="admin-empty"><strong>暂无 Agent</strong><p>请新建或导入 Agent 草稿。</p></div></td></tr>
-          )}
-        </tbody>
-      </table>
+    <section className="admin-agent-grid">
+      {agents.map((agent) => (
+        <article className="admin-agent-tile" key={agent.agentKey}>
+          <header>
+            <span className="admin-agent-tile__icon"><Bot /></span>
+            <div><small>Agent Key</small><code>{agent.agentKey}</code></div>
+            <b className={`admin-badge admin-badge--${agent.status.toLowerCase()}`}>{agent.status}</b>
+          </header>
+          <h2>{agent.name}</h2>
+          <p>{agent.description}</p>
+          <div className="admin-agent-tile__facts">
+            <span><Boxes /> {agent.frameworkKey}</span>
+            <span><Wrench /> {agent.toolKeys.length} Tool · {agent.skillKeys.length} Skill</span>
+            <span><Clock3 /> {new Date(agent.updatedAt).toLocaleString('zh-CN')}</span>
+          </div>
+          <footer>
+            <span>草稿 r{agent.revision} · {agent.publishedVersion ? `已发布 v${agent.publishedVersion}` : '尚未发布'}</span>
+            <Link to={`/admin/agents/${encodeURIComponent(agent.agentKey)}`} className="admin-primary">进入配置 <ChevronRight /></Link>
+          </footer>
+        </article>
+      ))}
+      {!agents.length && <div className="admin-empty admin-empty--wide"><Bot /><strong>暂无 Agent</strong><p>当前尚未登记任何 Agent。</p></div>}
     </section>
   </>;
 }

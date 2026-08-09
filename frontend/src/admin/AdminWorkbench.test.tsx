@@ -28,6 +28,7 @@ const snapshot = {
 
 function mockFetch(overrides: Record<string, unknown> = {}) {
   const routes: Record<string, unknown> = {
+    '/api/admin/auth/session': { username: 'admin' },
     '/api/admin/workbench': snapshot,
     ...overrides,
   };
@@ -64,12 +65,76 @@ describe('AdminWorkbench', () => {
     expect(screen.getByText('等待 Fitness Tool Bean 接线')).toBeInTheDocument();
   });
 
+  it('presents Agent drafts as scannable configuration cards instead of a sparse table', async () => {
+    mockFetch();
+    renderAt('/admin/agents');
+
+    expect(await screen.findByRole('heading', { name: 'Agent' })).toBeInTheDocument();
+    expect(screen.getByText('瘦瘦健身教练')).toBeInTheDocument();
+    expect(screen.getByText('陪伴用户完成训练与饮食管理')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /进入配置/ })).toHaveAttribute('href', '/admin/agents/fitness.coach');
+  });
+
+  it('creates a persisted Agent draft from the Agent list instead of showing a placeholder action', async () => {
+    const created = { ...snapshot.agents[0], agentKey: 'baby.food.coach', name: '辅食助手', description: '安排家庭辅食', revision: 1 };
+    const fetchMock = mockFetch({ '/api/admin/agents': created });
+    const user = userEvent.setup();
+    renderAt('/admin/agents/new');
+
+    await user.type(await screen.findByLabelText('Agent Key'), 'baby.food.coach');
+    await user.type(screen.getByLabelText('新 Agent 名称'), '辅食助手');
+    await user.type(screen.getByLabelText('新 Agent 说明'), '安排家庭辅食');
+    expect(screen.getByLabelText('Agent Key')).toHaveValue('baby.food.coach');
+    expect(screen.getByLabelText('新 Agent 名称')).toHaveValue('辅食助手');
+    expect(screen.getByLabelText('新 Agent 说明')).toHaveValue('安排家庭辅食');
+    fireEvent.submit(screen.getByLabelText('新建 Agent').querySelector('form')!);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/agents',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ agentKey: 'baby.food.coach', name: '辅食助手', description: '安排家庭辅食' }) }),
+    ));
+  });
+
+  it('opens a dedicated page for creating an Agent instead of expanding a form inside the list', async () => {
+    mockFetch();
+    renderAt('/admin/agents');
+
+    expect(await screen.findByRole('link', { name: /新建 Agent/ })).toHaveAttribute('href', '/admin/agents/new');
+    expect(screen.queryByRole('region', { name: '新建 Agent' })).not.toBeInTheDocument();
+
+    renderAt('/admin/agents/new');
+    expect(await screen.findByRole('heading', { name: '创建 Agent' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Agent Key')).toBeInTheDocument();
+  });
+
+  it('keeps Trace in the developer navigation for user-scoped conversation inspection', async () => {
+    mockFetch();
+    renderAt('/admin/traces');
+
+    expect(await screen.findByRole('link', { name: 'Trace' })).toHaveAttribute('href', '/admin/traces');
+    expect(screen.getByRole('heading', { name: '会话 Trace' })).toBeInTheDocument();
+    expect(screen.getByLabelText('用户 ID')).toBeInTheDocument();
+  });
+
   it('shows an error screen with retry when the workbench is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down'); }));
     renderAt('/admin');
 
     expect(await screen.findByText('工作台暂时无法打开')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument();
+  });
+
+  it('shows developer login when the administrator session is absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/admin/auth/session') {
+        return new Response(JSON.stringify({ detail: 'Administrator authentication required', code: 'UNAUTHORIZED' }), { status: 401 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    renderAt('/admin');
+
+    expect(await screen.findByRole('heading', { name: '开发者登录' })).toBeInTheDocument();
+    expect(screen.queryByText('前往移动端登录')).not.toBeInTheDocument();
   });
 
   it('keeps Tool metadata read-only and omits framework and memory menus', async () => {
@@ -82,6 +147,27 @@ describe('AdminWorkbench', () => {
     await user.click(await screen.findByRole('button', { name: /健身计划工具/ }));
     expect(screen.getByText('运行时注册能力')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
+  });
+
+  it('edits a Skill with explicit trigger rules and a dirty save bar', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        components: [
+          ...snapshot.components,
+          { type: 'SKILL', componentKey: 'fitness.plan.skill', displayName: '训练计划编排', description: '组合目标和训练记录。', version: 1, status: 'AVAILABLE', tags: ['计划'], config: { requiredTools: ['tool.fitness.plan'] } },
+        ],
+      },
+      '/api/admin/components/SKILL/fitness.plan.skill': { type: 'SKILL', componentKey: 'fitness.plan.skill', displayName: '训练计划编排', description: '组合目标和训练记录。', version: 1, status: 'AVAILABLE', tags: ['计划'], config: { requiredTools: ['tool.fitness.plan'], whenToUse: '需要新计划时' } },
+    });
+    const user = userEvent.setup();
+    renderAt('/admin/skills');
+
+    await user.click(await screen.findByRole('button', { name: /训练计划编排/ }));
+    await user.type(screen.getByLabelText('何时使用'), ' 用户要求制定计划');
+    expect(screen.getByText('有未保存的修改')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    expect(await screen.findByText('组件配置已保存')).toBeInTheDocument();
   });
 
   it('keeps the mandatory safety Hook selected in the Agent editor', async () => {
@@ -100,6 +186,44 @@ describe('AdminWorkbench', () => {
     const safetyHook = await screen.findByRole('button', { name: /健身安全护栏/ });
     expect(safetyHook).toHaveAttribute('aria-pressed', 'true');
     expect(safetyHook).toBeDisabled();
+  });
+
+  it('does not inject a fitness safety Hook into a generic Agent', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        agents: [{ ...snapshot.agents[0], agentKey: 'baby.food', name: '辅食助手', hookKeys: [] }],
+        components: [
+          ...snapshot.components,
+          { type: 'HOOK', componentKey: 'fitness.safety', displayName: '健身安全护栏', description: '急症先拦截', version: 1, status: 'AVAILABLE', tags: ['安全'], config: { mandatory: true } },
+        ],
+      },
+    });
+    renderAt('/admin/agents/baby.food');
+
+    const safetyHook = await screen.findByRole('button', { name: /健身安全护栏/ });
+    expect(safetyHook).toHaveAttribute('aria-pressed', 'false');
+    expect(safetyHook).toBeEnabled();
+  });
+
+  it('makes the Agent system prompt visible and links to its maintenance page', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        agents: [{ ...snapshot.agents[0], agentKey: 'baby.food', name: '辅食助手', promptKey: 'agent.default.prompt' }],
+        components: [
+          ...snapshot.components,
+          { type: 'PROMPT', componentKey: 'agent.default.prompt', displayName: '通用系统提示词', description: '通用助手指令', version: 1, status: 'AVAILABLE', tags: ['通用'], config: { template: '你是一个可靠、清晰的通用 AI 助手。' } },
+          { type: 'MEMORY', componentKey: 'memory.session', displayName: '默认会话记忆', description: '保存近期上下文', version: 1, status: 'AVAILABLE', tags: ['会话'], config: {} },
+        ],
+      },
+    });
+    renderAt('/admin/agents/baby.food');
+
+    expect(await screen.findByLabelText('系统提示词')).toHaveValue('agent.default.prompt');
+    expect(screen.getByText('当前系统提示词')).toBeInTheDocument();
+    expect(screen.getByText('你是一个可靠、清晰的通用 AI 助手。')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '维护系统提示词' })).toHaveAttribute('href', '/admin/prompts');
   });
 
   it('saves a provider credential without echoing the secret', async () => {
@@ -234,10 +358,16 @@ describe('AdminWorkbench', () => {
     expect(snapshotRequests).toBe(3);
   });
 
-  it('sends a playground message through the real AI endpoint and renders the reply', async () => {
+  it('selects the published Agent before sending a playground message through the developer runtime endpoint', async () => {
     const readySnapshot = {
       ...snapshot,
-      agents: [{ ...snapshot.agents[0], publishedVersion: 4, status: 'ACTIVE' }],
+      agents: [
+        { ...snapshot.agents[0], publishedVersion: 4, status: 'ACTIVE' },
+        {
+          ...snapshot.agents[0], agentKey: 'baby.food', name: '辅食助手', description: '为家庭提供辅食安排建议',
+          promptKey: 'agent.default.prompt', publishedVersion: 2, status: 'ACTIVE',
+        },
+      ],
       providers: [{ ...snapshot.providers[0], configured: true, maskedCredential: '••••' }],
       components: snapshot.components.map((item) => item.type === 'MODEL'
         ? { ...item, status: 'AVAILABLE', config: { providerKey: 'provider.bailian' } }
@@ -246,7 +376,7 @@ describe('AdminWorkbench', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/admin/workbench') return new Response(JSON.stringify(readySnapshot), { status: 200 });
-      if (url === '/api/app/ai/messages' && init?.method === 'POST') {
+      if (url === '/api/admin/playground/messages' && init?.method === 'POST') {
         return new Response(JSON.stringify({ message: '今天也要好好吃饭。' }), { status: 200 });
       }
       return new Response('{}', { status: 200 });
@@ -255,14 +385,17 @@ describe('AdminWorkbench', () => {
     const user = userEvent.setup();
     renderAt('/admin/playground');
 
+    await screen.findByRole('option', { name: /辅食助手/ });
+    const agentSelector = screen.getByLabelText('调试 Agent');
+    await user.selectOptions(agentSelector, 'baby.food');
     const input = await screen.findByPlaceholderText('请输入测试问题');
     await user.type(input, '晚饭吃什么');
     await user.click(screen.getByRole('button', { name: /发送/ }));
 
     expect(await screen.findByText('今天也要好好吃饭。')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/app/ai/messages',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '晚饭吃什么' }) }),
+      '/api/admin/playground/messages',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ agentKey: 'baby.food', message: '晚饭吃什么' }) }),
     );
   });
 });

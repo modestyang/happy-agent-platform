@@ -37,6 +37,9 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   private static final Map<String, Object> CORRUPTED_MARKER =
       Map.of("reason", "stored workbench payload is invalid");
   private static final String CURRENT_GOAL_RUNTIME = "currentGoalReportRuntime";
+  private static final String AGENT_RUNTIME = "agentRuntime";
+  private static final String DEFAULT_PROMPT = "agent.default.prompt";
+  private static final String DEFAULT_MEMORY = "agent.default.memory";
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
@@ -78,6 +81,29 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         .query("SELECT * FROM agent_drafts WHERE agent_key=?", draftMapper(), agentKey)
         .stream()
         .findFirst();
+  }
+
+  @Override
+  public AgentDraftView createDraft(AdminWorkbenchDtos.CreateAgentRequest request) {
+    return transactions.execute(
+        ignored -> {
+          if (findDraft(request.agentKey()).isPresent()) throw new Conflict("Agent Key 已存在");
+          var created =
+              jdbc.update(
+                  "INSERT INTO agent_drafts("
+                      + "agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,"
+                      + "tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) "
+                      + "SELECT ?,?,?,'DRAFT',framework_key,provider_key,model_key,'agent.default.prompt',"
+                      + "'[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'agent.default.memory',temperature,max_tool_calls "
+                      + "FROM agent_drafts "
+                      + "ORDER BY CASE WHEN status='PUBLISHED' THEN 0 ELSE 1 END, updated_at DESC LIMIT 1",
+                  request.agentKey(), request.name(), request.description());
+          if (created == 0) {
+            throw new IllegalStateException("请先在工作台登记一套默认 Agent 运行配置");
+          }
+          return findDraft(request.agentKey())
+              .orElseThrow(() -> new IllegalStateException("新建 Agent 草稿后无法读取"));
+        });
   }
 
   @Override
@@ -186,12 +212,15 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     var configuration = new LinkedHashMap<String, Object>(read(write(draft), OBJECT_MAP));
     var provider = publishedComponent("PROVIDER", draft.providerKey());
     var model = publishedComponent("MODEL", draft.modelKey());
+    var prompt = publishedComponent("PROMPT", draft.promptKey());
     var runtime = new LinkedHashMap<String, Object>();
     runtime.put("provider", provider.asSnapshot());
     runtime.put("model", model.asSnapshot());
+    runtime.put("prompt", prompt.asSnapshot());
     var credential = publishedCredential(draft.providerKey());
     if (credential != null) runtime.put("credential", credential.asSnapshot());
     configuration.put(CURRENT_GOAL_RUNTIME, runtime);
+    configuration.put(AGENT_RUNTIME, runtime);
     return configuration;
   }
 
@@ -327,12 +356,40 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "瘦瘦系统提示词",
         "健身陪伴场景的角色、边界与输出约束",
         "AVAILABLE",
-        Map.of("format", "MUSTACHE", "variables", List.of("user_context", "current_goal")));
+        Map.of(
+            "format",
+            "MUSTACHE",
+            "variables",
+            List.of("user_context", "current_goal"),
+            "template",
+            "你是“瘦瘦 AI 花爷”，用户的 AI 健身陪伴。请使用中文，语气亲切、自然、可执行。"
+                + "基于用户输入、当前目标和已授权数据提供建议；不确定时明确说明，不夸大效果。"));
+    seedComponent(
+        "PROMPT",
+        DEFAULT_PROMPT,
+        "通用系统提示词",
+        "新建 Agent 的基础角色、边界与表达规范；可在提示词中心编辑。",
+        "AVAILABLE",
+        Map.of(
+            "format",
+            "MUSTACHE",
+            "variables",
+            List.of(),
+            "template",
+            "你是一个可靠、清晰的通用 AI 助手。使用用户指定的语言回答；"
+                + "仅根据已提供的上下文和已授权能力作答，不编造事实或执行未授权操作。"));
     seedComponent(
         "MEMORY",
         "fitness.daily-memory",
         "当日会话记忆",
         "24 小时会话窗口与摘要压缩策略",
+        "AVAILABLE",
+        Map.of("retentionHours", 24, "maxTokens", 12000));
+    seedComponent(
+        "MEMORY",
+        DEFAULT_MEMORY,
+        "默认会话记忆",
+        "平台默认的 24 小时会话窗口与上下文压缩策略",
         "AVAILABLE",
         Map.of("retentionHours", 24, "maxTokens", 12000));
     seedComponent(

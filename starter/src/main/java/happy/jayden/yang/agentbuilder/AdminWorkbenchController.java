@@ -3,24 +3,28 @@ package happy.jayden.yang.agentbuilder;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunPage;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunQuery;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunTrace;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcRunTraceRepository;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.AgentDraftView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ComponentUpdate;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ComponentView;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.CreateAgentRequest;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.DraftUpdate;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ProviderView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.PublicationView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ValidationView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.WorkbenchSnapshot;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
-import happy.jayden.yang.fitness.LocalAuthController;
-import happy.jayden.yang.fitness.service.FitnessApplicationService;
+import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -38,21 +42,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin")
 public class AdminWorkbenchController {
   private final AdminWorkbenchService workbench;
-  private final FitnessApplicationService fitness;
+  private final AdminAuthService auth;
   private final JdbcRunTraceRepository runTraces;
 
   public AdminWorkbenchController(
       AdminWorkbenchService workbench,
-      FitnessApplicationService fitness,
+      AdminAuthService auth,
       JdbcRunTraceRepository runTraces) {
     this.workbench = workbench;
-    this.fitness = fitness;
+    this.auth = auth;
     this.runTraces = runTraces;
   }
 
   @GetMapping("/workbench")
   WorkbenchSnapshot snapshot(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false)
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false)
           String sessionToken) {
     authenticate(sessionToken);
     return workbench.snapshot();
@@ -60,7 +64,7 @@ public class AdminWorkbenchController {
 
   @PatchMapping("/agents/{agentKey}/draft")
   ResponseEntity<AgentDraftView> updateDraft(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @PathVariable("agentKey") String agentKey,
       @RequestHeader("If-Match") String ifMatch,
       @RequestBody DraftUpdate update) {
@@ -69,9 +73,17 @@ public class AdminWorkbenchController {
     return ResponseEntity.ok().eTag(Long.toString(revised.revision())).body(revised);
   }
 
+  @PostMapping("/agents")
+  ResponseEntity<AgentDraftView> createDraft(
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @RequestBody CreateAgentRequest request) {
+    authenticate(sessionToken);
+    return ResponseEntity.status(HttpStatus.CREATED).body(workbench.createDraft(request));
+  }
+
   @PatchMapping("/components/{type}/{componentKey}")
   ComponentView updateComponent(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @PathVariable("type") String type,
       @PathVariable("componentKey") String componentKey,
       @RequestBody ComponentUpdate request) {
@@ -81,7 +93,7 @@ public class AdminWorkbenchController {
 
   @PostMapping("/agents/{agentKey}/validate")
   ValidationView validate(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @PathVariable("agentKey") String agentKey) {
     authenticate(sessionToken);
     return workbench.validate(agentKey);
@@ -89,7 +101,7 @@ public class AdminWorkbenchController {
 
   @PostMapping("/agents/{agentKey}/publish")
   PublicationView publish(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @PathVariable("agentKey") String agentKey) {
     authenticate(sessionToken);
     return workbench.publish(agentKey);
@@ -97,7 +109,7 @@ public class AdminWorkbenchController {
 
   @PutMapping("/providers/{providerKey}/credential")
   ProviderView saveCredential(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @PathVariable("providerKey") String providerKey,
       @RequestBody CredentialRequest request) {
     authenticate(sessionToken);
@@ -113,7 +125,7 @@ public class AdminWorkbenchController {
   /** The Playground calls the normal app runtime; this endpoint exposes its persisted trace. */
   @GetMapping("/runs")
   RunPage listRuns(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @RequestParam(value = "agent", required = false) String agentKey,
       @RequestParam(value = "status", required = false) String status,
       @RequestParam(value = "from", required = false)
@@ -131,14 +143,35 @@ public class AdminWorkbenchController {
 
   @GetMapping("/runs/{runId}")
   RunTrace runTrace(
-      @CookieValue(name = LocalAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
       @PathVariable("runId") UUID runId) {
     authenticate(sessionToken);
     return runTraces.findTrace(runId).orElseThrow(() -> new IllegalArgumentException("运行记录不存在"));
   }
 
+  /** Developer-only conversation explorer. It deliberately starts with a concrete user id. */
+  @GetMapping("/traces/conversations")
+  List<ConversationSummary> conversations(
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @RequestParam("userId") UUID userId,
+      @RequestParam(value = "page", defaultValue = "0") int page,
+      @RequestParam(value = "size", defaultValue = "30") int size) {
+    authenticate(sessionToken);
+    return runTraces.listConversationSummaries(userId, page, size);
+  }
+
+  @GetMapping("/traces/conversations/{conversationId}")
+  ConversationDetail conversationTrace(
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @PathVariable("conversationId") UUID conversationId) {
+    authenticate(sessionToken);
+    return runTraces
+        .findConversation(conversationId)
+        .orElseThrow(() -> new IllegalArgumentException("会话记录不存在"));
+  }
+
   private void authenticate(String sessionToken) {
-    fitness.authenticateSession(sessionToken);
+    auth.authenticate(sessionToken);
   }
 
   private static long revision(String ifMatch) {

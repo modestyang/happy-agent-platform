@@ -42,11 +42,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
       DataSource fitnessDataSource,
       ObjectMapper mapper,
       String masterKeyFile) {
-    this(
-        agentDataSource,
-        mapper,
-        masterKeyFile,
-        new LocalMediaUploadPort(fitnessDataSource));
+    this(agentDataSource, mapper, masterKeyFile, new LocalMediaUploadPort(fitnessDataSource));
   }
 
   public MealRecognitionRuntime(
@@ -307,12 +303,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
           sha256,
           java.sql.Timestamp.from(expiresAt));
       return new MediaUploadTicket(
-          id,
-          "PUT",
-          "/api/v1/app/media-uploads/" + id,
-          List.of(),
-          expiresAt,
-          10_485_760);
+          id, "PUT", "/api/v1/app/media-uploads/" + id, List.of(), expiresAt, 10_485_760);
     }
 
     public void upload(UUID userId, UUID mediaId, String requestContentType, byte[] bytes) {
@@ -380,7 +371,8 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
           fitnessJdbc.query(
               "SELECT content_length,sha256,content_type,status FROM media_objects WHERE media_id=?"
                   + " AND user_id=? AND expires_at > CURRENT_TIMESTAMP",
-              (rs, row) -> new Object[] {rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)},
+              (rs, row) ->
+                  new Object[] {rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)},
               mediaId,
               userId);
       if (meta.isEmpty()) throw new NotFoundException("上传票据不存在或已失效");

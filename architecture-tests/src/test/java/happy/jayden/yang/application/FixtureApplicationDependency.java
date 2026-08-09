@@ -1,4 +1,3 @@
 package happy.jayden.yang.application;
 
-public final class FixtureApplicationDependency {
-}
+public final class FixtureApplicationDependency {}

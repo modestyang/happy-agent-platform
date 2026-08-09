@@ -702,6 +702,7 @@ class FitnessExperienceIntegrationTest {
   void manualDailyMealGenerationOnlyEnqueuesBeforeTheRuntimeIsCalled() throws Exception {
     dailyMealPlanPort.succeed();
     Cookie owner = login();
+    String date = "2031-04-17";
     JsonNode bootstrap =
         objectMapper.readTree(
             mvc.perform(get("/api/app/bootstrap").cookie(owner))
@@ -724,7 +725,7 @@ class FitnessExperienceIntegrationTest {
                     .cookie(owner)
                     .header("Idempotency-Key", "daily-plan-generate-0001")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"date\":\"2026-08-10\"}"))
+                    .content("{\"date\":\"%s\"}".formatted(date)))
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.status").value("GENERATING"))
             .andReturn();
@@ -741,7 +742,7 @@ class FitnessExperienceIntegrationTest {
             .asText();
     assertThat(dailyMealPlanPort.calls()).isZero();
 
-    mvc.perform(get("/api/v1/app/meal-plans/daily?date=2026-08-10").cookie(owner))
+    mvc.perform(get("/api/v1/app/meal-plans/daily?date=" + date).cookie(owner))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.mealPlanId").value(planId))
         .andExpect(jsonPath("$.status").value("GENERATING"));
@@ -751,7 +752,7 @@ class FitnessExperienceIntegrationTest {
                 .cookie(owner)
                 .header("Idempotency-Key", "daily-plan-generate-0001")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"date\":\"2026-08-10\"}"))
+                .content("{\"date\":\"%s\"}".formatted(date)))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.mealPlanId").value(planId));
     assertThat(dailyMealPlanPort.calls()).isZero();
@@ -761,7 +762,7 @@ class FitnessExperienceIntegrationTest {
     assertThat(dailyMealPlanPort.lastFeedback().likedFoods()).isNotEmpty();
 
     MvcResult ready =
-        mvc.perform(get("/api/v1/app/meal-plans/daily?date=2026-08-10").cookie(owner))
+        mvc.perform(get("/api/v1/app/meal-plans/daily?date=" + date).cookie(owner))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.mealPlanId").value(planId))
             .andExpect(jsonPath("$.status").value("READY"))
@@ -1209,6 +1210,17 @@ class FitnessExperienceIntegrationTest {
                       + " AND event_type='RUN_BLOCKED'",
                   Integer.class))
           .isEqualTo(1);
+      assertThat(
+              agentJdbc.queryForObject(
+                  "SELECT count(*) FROM agent_conversations WHERE user_id=?",
+                  Integer.class,
+                  UUID.fromString("10000000-0000-0000-0000-000000000001")))
+          .isEqualTo(1);
+      assertThat(
+              agentJdbc.queryForObject(
+                  "SELECT count(*) FROM agent_conversation_messages WHERE conversation_id=(SELECT conversation_id FROM agent_runs WHERE agent_key='fitness.coach' ORDER BY started_at DESC LIMIT 1)",
+                  Integer.class))
+          .isEqualTo(2);
     } finally {
       server.stop(0);
     }

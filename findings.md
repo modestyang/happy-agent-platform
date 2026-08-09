@@ -13,3 +13,10 @@
 - `agent` schema 当前有版本、评测/探测任务、幂等与强类型组件表，没有 Agent 草稿、运行/Trace 的可操作读模型。
 - demo 管理台的可复用视觉语言是：浅蓝灰画布、窄侧栏、白色实体卡片、深海军蓝文本、克制蓝/绿/琥珀状态色；不复制其 demo repository 和权限假数据。
 - 用户截图要求计划卡片左侧动作图容器与右侧标题、要点、错误区整体等高；应由 grid stretch 和图片容器 `height:100%` 实现，而不是固定图片比例。
+- 2026-08-07 浏览器验收确认：健身端和 Agent 工作台核心链路可用，但饮食记录没有图片上传/识别入口，饮食推荐没有赞踩反馈，目标报告仍为对话文本。
+- 当前跟练使用 Web Speech API，但 `speak()` 每次先 `cancel()`，连续倒数可能互相打断；应改为基于训练状态 transition 的去重队列。
+- `ComponentType` 在 `type` 改变时只重新加载列表，没有清空 `selected`，因此模型详情会残留到技能/Hook 路由。
+- 当前工作台把已发布版本运行态与草稿发布准备度混合展示，容易出现“运行准备就绪”同时存在待完成组件的矛盾文案。
+- 当前 `AdminWorkbenchController` 直接注入 `FitnessApplicationService` 并认证 `FITNESS_SESSION`，与仓库 AGENTS 的“双独立 bearer boundary”约束冲突；这正是用户看到“工作台暂时无法打开”的根因。
+- `workbench-components-demo.html` 的可取之处是卡片检索/筛选、详情编辑、工具只读 Schema、Skill 与 Tool 依赖校验、浮动保存条；其不覆盖真实调试与追踪，因此本项目必须保留后两者。
+- 完整 `public-v1.yaml` 已经定义上传票据、识别 Job、饮食记录和当前目标报告等方向，但当前 `/api/app` 体验切片尚未实现对应闭环；整改必须坚持 contract-first。

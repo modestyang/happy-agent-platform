@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class FitnessAppController {
 
   private final FitnessApplicationService application;
+
   public FitnessAppController(FitnessApplicationService application) {
     this.application = application;
   }
@@ -78,5 +79,4 @@ public class FitnessAppController {
       @RequestBody AiMessageRequest request) {
     return application.sendAiMessage(sessionToken, request.message());
   }
-
 }

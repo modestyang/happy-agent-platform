@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, Bot, CheckCircle2, Cloud, Cpu, FlaskConical, LayoutDashboard,
-  LoaderCircle, Menu, MessageSquare, Search, ShieldCheck, Sparkles, Webhook, Wrench, X,
+  LoaderCircle, LogOut, Menu, MessageSquare, Search, ShieldCheck, Sparkles, Webhook, Wrench, X,
+  Network,
 } from 'lucide-react';
 
 import { admin, ApiError } from './api';
@@ -25,6 +26,7 @@ const navigation: NavItem[] = [
   { path: '/admin/skills', label: '技能', icon: Sparkles, group: 'components' },
   { path: '/admin/hooks', label: 'Hook', icon: Webhook, group: 'components' },
   { path: '/admin/playground', label: '调试台', icon: FlaskConical },
+  { path: '/admin/traces', label: 'Trace', icon: Network },
 ];
 
 function Loading() {
@@ -32,7 +34,26 @@ function Loading() {
 }
 
 function ErrorScreen({ error, status, onRetry }: { error: string; status: number; onRetry: () => void }) {
-  return <main className="admin-load"><div className="admin-load__error"><AlertTriangle /><strong>工作台暂时无法打开</strong><small>{error}</small>{status === 401 ? <a href="/">前往移动端登录</a> : <button onClick={onRetry}>重新连接</button>}</div></main>;
+  return <main className="admin-load"><div className="admin-load__error"><AlertTriangle /><strong>工作台暂时无法打开</strong><small>{error}</small>{status !== 401 && <button onClick={onRetry}>重新连接</button>}</div></main>;
+}
+
+function DeveloperLogin({ onLoggedIn }: { onLoggedIn: (session: { username: string }) => void }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setPending(true); setError('');
+    try { onLoggedIn(await admin.login(username, password)); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : '登录失败，请重试。'); }
+    finally { setPending(false); }
+  }
+  return <main className="admin-login"><section>
+    <div className="admin-login__brand"><span><Bot /></span><div><strong>Agent Console</strong><small>Developer workspace</small></div></div>
+    <div className="admin-login__copy"><p>欢迎回来</p><h1>开发者登录</h1><span>管理 Agent、组件与真实运行链路。</span></div>
+    <form onSubmit={submit}><label>用户名<input aria-label="管理员用户名" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label>密码<input aria-label="管理员密码" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>{error && <p role="alert">{error}</p>}<button className="admin-primary" disabled={pending}>{pending ? '正在验证…' : '进入工作台'}</button></form>
+    <small className="admin-login__hint">此处使用独立的开发者会话，不关联健身应用账号。</small>
+  </section></main>;
 }
 
 function Notice({ kind = 'success', children, onClose }: { kind?: 'success' | 'error'; children: ReactNode; onClose: () => void }) {
@@ -46,6 +67,7 @@ export function AdminWorkbench() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [search, setSearch] = useState('');
+  const [adminUser, setAdminUser] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -54,16 +76,19 @@ export function AdminWorkbench() {
   async function bootstrap() {
     setReady(false); setBootError(undefined); setBootStatus(0);
     try {
+      const session = await admin.session();
+      setAdminUser(session.username || 'admin');
       await admin.snapshot();
       setReady(true);
     } catch (caught) {
-      setBootError(caught instanceof Error ? caught.message : '未知错误');
-      setBootStatus(caught instanceof ApiError ? caught.status : 0);
+      if (caught instanceof ApiError && caught.status === 401) { setAdminUser(''); return; }
+      setBootError(caught instanceof Error ? caught.message : '未知错误'); setBootStatus(caught instanceof ApiError ? caught.status : 0);
     }
   }
 
   useEffect(() => { void bootstrap(); }, []);
 
+  if (!ready && !bootError && !adminUser) return <DeveloperLogin onLoggedIn={(session) => { setAdminUser(session.username); void bootstrap(); }} />;
   if (!ready && !bootError) return <Loading />;
   if (!ready && bootError) return <ErrorScreen error={bootError} status={bootStatus} onRetry={bootstrap} />;
 
@@ -108,13 +133,14 @@ export function AdminWorkbench() {
           </label>
           <div className="admin-topbar__right">
             <Link to="/admin/playground" aria-label="调试台"><FlaskConical /></Link>
-            <span className="admin-user">JY</span>
+            <button className="admin-user" aria-label="退出开发者工作台" title={`当前管理员：${adminUser}`} onClick={() => { void admin.logout().finally(() => { setReady(false); setAdminUser(''); }); }}><span>{adminUser.slice(0, 1).toUpperCase()}</span><LogOut /></button>
           </div>
         </header>
         <div className="admin-content">
           <Routes>
             <Route path="/admin" element={<OverviewNavigate />} />
             <Route path="/admin/agents" element={<AgentList />} />
+            <Route path="/admin/agents/new" element={<AgentCreatePage />} />
             <Route path="/admin/agents/:agentKey" element={<AgentEditor />} />
             <Route path="/admin/providers" element={<Providers />} />
             <Route path="/admin/models" element={<ComponentType type="MODEL" label="模型" />} />
@@ -123,6 +149,7 @@ export function AdminWorkbench() {
             <Route path="/admin/skills" element={<ComponentType type="SKILL" label="技能" />} />
             <Route path="/admin/hooks" element={<ComponentType type="HOOK" label="Hook" />} />
             <Route path="/admin/runs/:runId" element={<RunTracePage />} />
+            <Route path="/admin/traces" element={<ConversationTracePage />} />
             <Route path="/admin/playground" element={<PlaygroundPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
@@ -135,9 +162,11 @@ export function AdminWorkbench() {
 
 import { OverviewNavigate } from './pages/Overview';
 import { AgentList } from './pages/AgentList';
+import { AgentCreatePage } from './pages/AgentCreatePage';
 import { AgentEditor } from './pages/AgentEditor';
 import { ComponentType } from './pages/ComponentType';
 import { Providers } from './pages/Providers';
 import { RunTracePage } from './pages/RunTracePage';
+import { ConversationTracePage } from './pages/ConversationTracePage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { NotFound } from './pages/NotFound';

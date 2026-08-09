@@ -26,7 +26,8 @@ final class FitnessProviderCredentialAccess {
 
   Optional<char[]> readApiKey(String providerKey) {
     byte[][] encrypted =
-        jdbc.query(
+        jdbc
+            .query(
                 "SELECT credential_ciphertext,credential_iv FROM agent_provider_credentials"
                     + " WHERE provider_key=?",
                 (rs, row) -> new byte[][] {rs.getBytes(1), rs.getBytes(2)},
@@ -60,7 +61,8 @@ final class FitnessProviderCredentialAccess {
     byte[] iv = Base64.getDecoder().decode(ivBase64);
     try {
       ComponentRef ref =
-          new ComponentRef(new ComponentKey(providerKey), new ComponentVersion(credentialKeyVersion));
+          new ComponentRef(
+              new ComponentKey(providerKey), new ComponentVersion(credentialKeyVersion));
       AesGcmCredentialCipher cipher =
           AesGcmCredentialCipher.fromEnvironment(
               Map.of(AesGcmCredentialCipher.MASTER_KEY_FILE, masterKeyFile.toString()), ref);

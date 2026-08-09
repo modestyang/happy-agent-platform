@@ -58,6 +58,36 @@ class FitnessSkillRegistryTest {
     assertTrue(result.value().containsKey("facts"));
   }
 
+  @Test
+  void skillsDoNotPassUndeclaredDaysArgumentsToZeroArgumentTools() throws Exception {
+    var receivedArguments = new LinkedHashMap<String, Map<String, Object>>();
+    var context =
+        new AgentExecutionContext(
+            "fitness.coach",
+            "run-1",
+            "user-1",
+            "请帮我生成计划",
+            Set.of(
+                "fitness.profile.query",
+                "fitness.workout.query",
+                "fitness.meal.query",
+                "fitness.meal.feedback_context",
+                "fitness.plan.generate"),
+            new ToolExecutionContext("user-1", "run-1", Set.of("fitness.read"), "fitness.skill"),
+            (toolKey, input, ignored) -> {
+              receivedArguments.put(toolKey, Map.copyOf(input));
+              return Map.of("tool", toolKey);
+            });
+    var registry = new FitnessSkillRegistry(new FitnessSafetyHook());
+
+    registry.skill("fitness.meal.skill").orElseThrow().execute(context, Map.of());
+    registry.skill("fitness.plan.skill").orElseThrow().execute(context, Map.of());
+
+    assertEquals(Map.of(), receivedArguments.get("fitness.workout.query"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.meal.query"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.meal.feedback_context"));
+  }
+
   private static AgentExecutionContext context(List<String> calls) {
     return new AgentExecutionContext(
         "fitness.coach",

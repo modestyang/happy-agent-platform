@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, Check, CheckCircle2, CircleDashed, Code2, Cpu, LoaderCircle, Rocket,
   Save, ShieldCheck, Webhook, Sparkles, Wrench,
@@ -16,10 +16,12 @@ function componentOptions(components: WorkbenchComponent[], type: string) {
   return components.filter((item) => item.type === type);
 }
 
-const MANDATORY_SAFETY_HOOK = 'fitness.safety';
+const FITNESS_AGENT_KEY = 'fitness.coach';
+const FITNESS_SAFETY_HOOK = 'fitness.safety';
 
-function withMandatorySafetyHook(hookKeys: string[]) {
-  return hookKeys.includes(MANDATORY_SAFETY_HOOK) ? hookKeys : [...hookKeys, MANDATORY_SAFETY_HOOK];
+function hooksForAgent(agentKey: string, hookKeys: string[]) {
+  if (agentKey !== FITNESS_AGENT_KEY || hookKeys.includes(FITNESS_SAFETY_HOOK)) return hookKeys;
+  return [...hookKeys, FITNESS_SAFETY_HOOK];
 }
 
 export function AgentEditor() {
@@ -53,7 +55,7 @@ export function AgentEditor() {
       setDraft({
         name: found.name, description: found.description, frameworkKey: found.frameworkKey,
         providerKey: found.providerKey, modelKey: found.modelKey, promptKey: found.promptKey,
-        toolKeys: found.toolKeys, skillKeys: found.skillKeys, hookKeys: withMandatorySafetyHook(found.hookKeys),
+        toolKeys: found.toolKeys, skillKeys: found.skillKeys, hookKeys: hooksForAgent(found.agentKey, found.hookKeys),
         memoryKey: found.memoryKey, temperature: found.temperature, maxToolCalls: found.maxToolCalls,
       });
       setRevision(found.revision);
@@ -65,12 +67,14 @@ export function AgentEditor() {
   if (loading) return <PageHeading eyebrow="加载中" title="Agent 配置" description="正在拉取 Agent 草稿…" />;
   if (error) return <PageHeading eyebrow="错误" title="无法加载" description={error} action={<button className="admin-secondary" onClick={() => navigate('/admin/agents')}>返回列表</button>} />;
   if (!agent || !draft) return null;
+  const selectedPrompt = components.find((item) => item.type === 'PROMPT' && item.componentKey === draft.promptKey);
+  const systemPrompt = String((selectedPrompt?.config as Record<string, unknown> | undefined)?.template ?? selectedPrompt?.description ?? '尚未设置系统提示词内容。');
 
   function set<K extends keyof AgentDraftUpdate>(key: K, value: AgentDraftUpdate[K]) {
     setDraft((current) => current ? { ...current, [key]: value } : current);
   }
   function toggle(key: 'toolKeys' | 'skillKeys' | 'hookKeys', value: string) {
-    if (key === 'hookKeys' && value === MANDATORY_SAFETY_HOOK) return;
+    if (key === 'hookKeys' && agent?.agentKey === FITNESS_AGENT_KEY && value === FITNESS_SAFETY_HOOK) return;
     setDraft((current) => current ? { ...current, [key]: current[key].includes(value) ? current[key].filter((item) => item !== value) : [...current[key], value] } : current);
   }
 
@@ -132,10 +136,15 @@ export function AgentEditor() {
         <label>Agent 框架<select aria-label="Agent 框架" value={draft.frameworkKey} onChange={(event) => set('frameworkKey', event.target.value)}>{componentOptions(components, 'FRAMEWORK').map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label>
         <label>模型服务<select aria-label="模型服务" value={draft.providerKey} onChange={(event) => { const providerKey = event.target.value; const firstModel = components.find((item) => item.type === 'MODEL' && (item.config as Record<string, unknown>).providerKey === providerKey); setDraft((current) => current ? { ...current, providerKey, modelKey: firstModel?.componentKey ?? current.modelKey } : current); }}>{providers.map((item) => <option value={item.providerKey} key={item.providerKey}>{item.displayName}{item.configured ? '' : '（未配置）'}</option>)}</select></label>
         <label>模型<select aria-label="模型" value={draft.modelKey} onChange={(event) => set('modelKey', event.target.value)}>{components.filter((item) => item.type === 'MODEL' && ((item.config as Record<string, unknown>).providerKey === draft.providerKey || item.componentKey === draft.modelKey)).map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label>
-        <label>提示词<select aria-label="提示词" value={draft.promptKey} onChange={(event) => set('promptKey', event.target.value)}>{componentOptions(components, 'PROMPT').map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label>
+        <label>系统提示词<select aria-label="系统提示词" value={draft.promptKey} onChange={(event) => set('promptKey', event.target.value)}>{componentOptions(components, 'PROMPT').map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label>
         <label>记忆<select aria-label="记忆" value={draft.memoryKey} onChange={(event) => set('memoryKey', event.target.value)}>{componentOptions(components, 'MEMORY').map((item) => <option value={item.componentKey} key={item.componentKey}>{item.displayName}</option>)}</select></label>
         <label>最大工具调用次数<input aria-label="最大工具调用次数" type="number" min="1" max="50" value={draft.maxToolCalls} onChange={(event) => set('maxToolCalls', Number(event.target.value))} /></label>
         <label className="is-wide admin-range">温度 <b>{draft.temperature.toFixed(1)}</b><input aria-label="温度" type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => set('temperature', Number(event.target.value))} /><small>更低更稳定 · 更高更灵活</small></label>
+        <section className="is-wide admin-system-prompt" aria-label="当前系统提示词">
+          <header><div><strong>当前系统提示词</strong><span>{selectedPrompt?.displayName ?? draft.promptKey}</span></div><Link to="/admin/prompts">维护系统提示词</Link></header>
+          <p>{systemPrompt}</p>
+          <small>提示词中心的修改需要重新发布 Agent 后，才会进入运行时版本。</small>
+        </section>
       </div>
     </section>
     <section className="admin-card admin-form-card">
@@ -148,7 +157,7 @@ export function AgentEditor() {
         return <div className="admin-capability-group" key={type}>
           <h3><Icon /> {label}<small>{draft[key].length} 已选择</small></h3>
           {items.length ? <div>{items.map((item) => {
-            const mandatory = type === 'HOOK' && item.componentKey === MANDATORY_SAFETY_HOOK;
+            const mandatory = type === 'HOOK' && agent.agentKey === FITNESS_AGENT_KEY && item.componentKey === FITNESS_SAFETY_HOOK;
             return <button type="button" className={draft[key].includes(item.componentKey) ? 'is-selected' : ''} aria-pressed={draft[key].includes(item.componentKey)} key={item.componentKey} disabled={mandatory} onClick={() => toggle(key, item.componentKey)}><span>{draft[key].includes(item.componentKey) ? <Check /> : <Icon />}</span><b>{item.displayName}</b><small>{mandatory ? 'MANDATORY' : item.status}</small></button>;
           })}</div> : <p className="admin-inline-empty">当前没有登记的{label}</p>}
         </div>;

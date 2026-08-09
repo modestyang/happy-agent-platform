@@ -197,6 +197,15 @@ public final class AdminWorkbenchDtos {
     }
   }
 
+  /** Minimal operator input needed to start an editable Agent draft. */
+  public record CreateAgentRequest(String agentKey, String name, String description) {
+    public CreateAgentRequest {
+      text(agentKey, "agentKey");
+      text(name, "name");
+      text(description, "description");
+    }
+  }
+
   public record PublicationView(String agentKey, int publishedVersion, Instant publishedAt) {
     public PublicationView {
       text(agentKey, "agentKey");

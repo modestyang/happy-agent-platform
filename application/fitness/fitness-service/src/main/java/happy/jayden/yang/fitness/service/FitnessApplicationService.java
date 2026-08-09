@@ -924,6 +924,25 @@ public final class FitnessApplicationService {
 
   public AiMessageResponse sendAiMessage(String sessionToken, String message) {
     UUID userId = authenticate(sessionToken);
+    return sendAiMessageForUser(userId, message);
+  }
+
+  /**
+   * Executes a developer-console probe against the same runtime used by the personal app.
+   *
+   * <p>The caller has already passed the separate developer authentication boundary. The
+   * resulting prompt uses the first active local profile only as runtime context; it does not
+   * authenticate or impersonate a fitness-app browser session.
+   */
+  public AiMessageResponse sendAiMessageForDeveloper(String message) {
+    UUID userId =
+        store.activeUserIds().stream()
+            .findFirst()
+            .orElseThrow(() -> new InvalidRequestException("没有可用于调试的本地用户数据"));
+    return sendAiMessageForUser(userId, message);
+  }
+
+  private AiMessageResponse sendAiMessageForUser(UUID userId, String message) {
     if (blank(message)) {
       throw new InvalidRequestException("message 不能为空");
     }

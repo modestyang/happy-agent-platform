@@ -26,7 +26,8 @@ class OssPresignedMediaUploadPortTest {
           .withUsername("postgres")
           .withPassword("postgres");
 
-  @Test void canonicalSignedPutSignsTheRequiredObjectMetadataWithoutExposingSecret() {
+  @Test
+  void canonicalSignedPutSignsTheRequiredObjectMetadataWithoutExposingSecret() {
     assertThat(OssPresignedMediaUploadPort.HTTP_TIMEOUT_MILLIS).isEqualTo(10_000);
     String url =
         OssPresignedMediaUploadPort.signedPutUrl(

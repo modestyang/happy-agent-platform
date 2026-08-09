@@ -40,7 +40,8 @@ class MealRecognitionWorkerTest {
 
     new MealRecognitionWorker(store, runtime).runOne();
 
-    ArgumentCaptor<MealRecognitionResult> result = ArgumentCaptor.forClass(MealRecognitionResult.class);
+    ArgumentCaptor<MealRecognitionResult> result =
+        ArgumentCaptor.forClass(MealRecognitionResult.class);
     verify(store).updateRecognitionJob(eq(job), result.capture());
     org.assertj.core.api.Assertions.assertThat(result.getValue().status()).isEqualTo("FAILED");
     org.assertj.core.api.Assertions.assertThat(result.getValue().failureCode())

@@ -104,7 +104,8 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
     }
     String endpoint = provider.path("endpoint").asText();
     if (endpoint.isBlank()) throw new ConfigurationException("Provider 未配置 endpoint");
-    return new RuntimeConfig(providerKey, model.path("model").asText(modelKey), endpoint.replaceAll("/$", ""));
+    return new RuntimeConfig(
+        providerKey, model.path("model").asText(modelKey), endpoint.replaceAll("/$", ""));
   }
 
   private static String requiredText(JsonNode node, String field, String message)
@@ -119,7 +120,8 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
       throws IOException, HttpException {
     Map<String, Object> body = requestBody(config, date, feedback);
     HttpURLConnection connection =
-        (HttpURLConnection) URI.create(config.endpoint() + "/chat/completions").toURL().openConnection();
+        (HttpURLConnection)
+            URI.create(config.endpoint() + "/chat/completions").toURL().openConnection();
     connection.setRequestMethod("POST");
     connection.setConnectTimeout((int) CONNECT_TIMEOUT.toMillis());
     connection.setReadTimeout((int) READ_TIMEOUT.toMillis());
@@ -143,30 +145,42 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
       throws IOException {
     Map<String, Object> item =
         Map.of(
-            "type", "object",
-            "additionalProperties", false,
-            "required", List.of("name", "estimatedKcal"),
+            "type",
+            "object",
+            "additionalProperties",
+            false,
+            "required",
+            List.of("name", "estimatedKcal"),
             "properties",
-                Map.of(
-                    "name", Map.of("type", "string", "minLength", 1, "maxLength", 120),
-                    "estimatedKcal", Map.of("type", "integer", "minimum", 0, "maximum", 20000)));
+            Map.of(
+                "name", Map.of("type", "string", "minLength", 1, "maxLength", 120),
+                "estimatedKcal", Map.of("type", "integer", "minimum", 0, "maximum", 20000)));
     Map<String, Object> recommendation =
         Map.of(
-            "type", "object",
-            "additionalProperties", false,
-            "required", List.of("mealType", "items", "reason"),
+            "type",
+            "object",
+            "additionalProperties",
+            false,
+            "required",
+            List.of("mealType", "items", "reason"),
             "properties",
-                Map.of(
-                    "mealType", Map.of("type", "string", "enum", List.of("BREAKFAST", "LUNCH", "DINNER")),
-                    "items", Map.of("type", "array", "minItems", 1, "maxItems", 30, "items", item),
-                    "reason", Map.of("type", "string", "minLength", 1, "maxLength", 500)));
+            Map.of(
+                "mealType",
+                    Map.of("type", "string", "enum", List.of("BREAKFAST", "LUNCH", "DINNER")),
+                "items", Map.of("type", "array", "minItems", 1, "maxItems", 30, "items", item),
+                "reason", Map.of("type", "string", "minLength", 1, "maxLength", 500)));
     Map<String, Object> schema =
         Map.of(
-            "type", "object",
-            "additionalProperties", false,
-            "required", List.of("recommendations"),
+            "type",
+            "object",
+            "additionalProperties",
+            false,
+            "required",
+            List.of("recommendations"),
             "properties",
-            Map.of("recommendations", Map.of("type", "array", "minItems", 3, "maxItems", 3, "items", recommendation)));
+            Map.of(
+                "recommendations",
+                Map.of("type", "array", "minItems", 3, "maxItems", 3, "items", recommendation)));
     Map<String, Object> contextReference =
         Map.of(
             "toolKey", "fitness.meal.feedback_context",
@@ -181,7 +195,8 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
             Map.of("date", date.toString(), "feedbackContext", contextReference));
     Map<String, Object> body =
         Map.of(
-            "model", config.model(),
+            "model",
+            config.model(),
             "messages",
             List.of(
                 Map.of(
@@ -202,7 +217,8 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
 
   DailyMealPlanGenerationResult result(JsonNode response) {
     try {
-      return new DailyMealPlanGenerationResult("SUCCEEDED", parseRecommendations(response), null, null);
+      return new DailyMealPlanGenerationResult(
+          "SUCCEEDED", parseRecommendations(response), null, null);
     } catch (IllegalArgumentException exception) {
       return failed("INVALID_MODEL_RESPONSE", "三餐生成模型返回不符合约束");
     }
@@ -213,7 +229,8 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
       throw new IllegalArgumentException("response shape");
     }
     JsonNode values = response.get("recommendations");
-    if (!values.isArray() || values.size() != 3) throw new IllegalArgumentException("recommendations");
+    if (!values.isArray() || values.size() != 3)
+      throw new IllegalArgumentException("recommendations");
     java.util.Set<MealType> types = java.util.EnumSet.noneOf(MealType.class);
     List<GeneratedMealRecommendation> parsed = new ArrayList<>();
     for (JsonNode value : values) {
@@ -225,13 +242,15 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
           || !value.get("mealType").isTextual()
           || !value.get("reason").isTextual()) throw new IllegalArgumentException("recommendation");
       MealType type = MealType.valueOf(value.get("mealType").textValue());
-      if (!types.add(type) || type == MealType.SNACK) throw new IllegalArgumentException("meal type");
+      if (!types.add(type) || type == MealType.SNACK)
+        throw new IllegalArgumentException("meal type");
       String reason = value.get("reason").textValue();
       if (reason.isBlank() || reason.codePointCount(0, reason.length()) > 500) {
         throw new IllegalArgumentException("reason");
       }
       JsonNode items = value.get("items");
-      if (!items.isArray() || items.isEmpty() || items.size() > 30) throw new IllegalArgumentException("items");
+      if (!items.isArray() || items.isEmpty() || items.size() > 30)
+        throw new IllegalArgumentException("items");
       List<MealItemDto> foods = new ArrayList<>();
       for (JsonNode food : items) {
         if (!food.isObject()
@@ -242,7 +261,10 @@ public final class MealPlanGenerationRuntime implements DailyMealPlanGenerationP
             || !food.get("estimatedKcal").isInt()) throw new IllegalArgumentException("food");
         String name = food.get("name").textValue();
         int kcal = food.get("estimatedKcal").intValue();
-        if (name.isBlank() || name.codePointCount(0, name.length()) > 120 || kcal < 0 || kcal > 20_000) {
+        if (name.isBlank()
+            || name.codePointCount(0, name.length()) > 120
+            || kcal < 0
+            || kcal > 20_000) {
           throw new IllegalArgumentException("food values");
         }
         foods.add(new MealItemDto(name, kcal));

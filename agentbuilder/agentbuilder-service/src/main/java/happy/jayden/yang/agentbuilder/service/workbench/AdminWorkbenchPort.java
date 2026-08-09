@@ -10,6 +10,8 @@ public interface AdminWorkbenchPort {
 
   Optional<AgentDraftView> findDraft(String agentKey);
 
+  AgentDraftView createDraft(CreateAgentRequest request);
+
   AgentDraftView updateDraft(String agentKey, DraftUpdate update, long expectedRevision);
 
   ComponentView updateComponent(String type, String componentKey, ComponentUpdate update);

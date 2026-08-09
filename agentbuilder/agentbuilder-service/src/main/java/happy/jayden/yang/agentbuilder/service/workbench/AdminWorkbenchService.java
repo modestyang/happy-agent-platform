@@ -10,7 +10,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 public final class AdminWorkbenchService {
-  private static final String MANDATORY_SAFETY_HOOK = "fitness.safety";
+  private static final java.util.regex.Pattern AGENT_KEY =
+      java.util.regex.Pattern.compile("[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*");
 
   private final AdminWorkbenchPort port;
   private final RuntimeCapabilityRegistry runtimeCapabilities;
@@ -28,6 +29,21 @@ public final class AdminWorkbenchService {
   public AgentDraftView updateDraft(String agentKey, DraftUpdate update, long expectedRevision) {
     if (expectedRevision < 1) throw new IllegalArgumentException("expectedRevision");
     return port.updateDraft(agentKey, Objects.requireNonNull(update, "update"), expectedRevision);
+  }
+
+  /**
+   * Starts a real persisted draft using the platform's current default runtime wiring.
+   * Domain tools, skills and hooks remain editable on the following configuration page.
+   */
+  public AgentDraftView createDraft(CreateAgentRequest request) {
+    var normalized = Objects.requireNonNull(request, "request");
+    var agentKey = normalized.agentKey().trim();
+    if (agentKey.length() > 160 || !AGENT_KEY.matcher(agentKey).matches()) {
+      throw new IllegalArgumentException("Agent Key 仅支持小写字母、数字、点和连字符，并且必须以字母开头");
+    }
+    if (port.findDraft(agentKey).isPresent()) throw new AdminWorkbenchPort.Conflict("Agent Key 已存在");
+    return port.createDraft(
+        new CreateAgentRequest(agentKey, normalized.name().trim(), normalized.description().trim()));
   }
 
   public ComponentView updateComponent(String type, String componentKey, ComponentUpdate update) {
@@ -62,13 +78,7 @@ public final class AdminWorkbenchService {
     requireComponent(snapshot, errors, "MEMORY", draft.memoryKey());
     draft.toolKeys().forEach(key -> requireComponent(snapshot, errors, "TOOL", key));
     draft.skillKeys().forEach(key -> requireComponent(snapshot, errors, "SKILL", key));
-    if (!draft.hookKeys().contains(MANDATORY_SAFETY_HOOK)) {
-      errors.add("必需安全 Hook fitness.safety 尚未绑定");
-    }
-    requireComponent(snapshot, errors, "HOOK", MANDATORY_SAFETY_HOOK);
-    draft.hookKeys().stream()
-        .filter(key -> !MANDATORY_SAFETY_HOOK.equals(key))
-        .forEach(key -> requireComponent(snapshot, errors, "HOOK", key));
+    draft.hookKeys().forEach(key -> requireComponent(snapshot, errors, "HOOK", key));
     if (draft.toolKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Tool");
     if (draft.skillKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Skill");
     return new ValidationView(errors.isEmpty(), errors, warnings);

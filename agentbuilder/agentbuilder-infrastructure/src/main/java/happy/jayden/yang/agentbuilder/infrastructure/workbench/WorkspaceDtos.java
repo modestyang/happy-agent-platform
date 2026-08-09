@@ -108,4 +108,48 @@ public final class WorkspaceDtos {
       Objects.requireNonNull(occurredAt, "occurredAt");
     }
   }
+
+  public record ConversationSummary(
+      UUID conversationId,
+      UUID userId,
+      String agentKey,
+      String title,
+      String status,
+      Instant startedAt,
+      Instant lastMessageAt,
+      int messageCount,
+      int runCount) {
+    public ConversationSummary {
+      Objects.requireNonNull(conversationId, "conversationId");
+      Objects.requireNonNull(userId, "userId");
+      Objects.requireNonNull(agentKey, "agentKey");
+      Objects.requireNonNull(status, "status");
+      Objects.requireNonNull(startedAt, "startedAt");
+      Objects.requireNonNull(lastMessageAt, "lastMessageAt");
+    }
+  }
+
+  public record ConversationMessage(
+      UUID messageId,
+      UUID conversationId,
+      UUID runId,
+      String role,
+      String content,
+      Instant createdAt) {
+    public ConversationMessage {
+      Objects.requireNonNull(messageId, "messageId");
+      Objects.requireNonNull(conversationId, "conversationId");
+      Objects.requireNonNull(role, "role");
+      Objects.requireNonNull(content, "content");
+      Objects.requireNonNull(createdAt, "createdAt");
+    }
+  }
+
+  public record ConversationDetail(ConversationSummary conversation, List<ConversationMessage> messages, List<RunSummary> runs) {
+    public ConversationDetail {
+      Objects.requireNonNull(conversation, "conversation");
+      messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
+      runs = List.copyOf(Objects.requireNonNull(runs, "runs"));
+    }
+  }
 }

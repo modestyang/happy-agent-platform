@@ -161,8 +161,10 @@ class FitnessV1IdempotencyConcurrencyIntegrationTest {
         "{\"mediaId\":\"%s\",\"mealType\":\"LUNCH\",\"occurredAt\":\"2026-08-09T08:00:00Z\"}"
             .formatted(mediaId);
 
-    List<MvcResult> jobs = concurrentPost(owner, "/api/v1/app/meal-recognition-jobs", "job-race-0001", jobBody);
-    assertThat(jobs).allSatisfy(result -> assertThat(result.getResponse().getStatus()).isEqualTo(202));
+    List<MvcResult> jobs =
+        concurrentPost(owner, "/api/v1/app/meal-recognition-jobs", "job-race-0001", jobBody);
+    assertThat(jobs)
+        .allSatisfy(result -> assertThat(result.getResponse().getStatus()).isEqualTo(202));
     assertThat(jobs.get(0).getResponse().getContentAsString())
         .isEqualTo(jobs.get(1).getResponse().getContentAsString());
     assertThat(
@@ -170,7 +172,11 @@ class FitnessV1IdempotencyConcurrencyIntegrationTest {
                 "SELECT count(*) FROM meal_recognition_jobs WHERE media_id=?", Long.class, mediaId))
         .isEqualTo(1L);
     assertThat(
-            performPost(owner, "/api/v1/app/meal-recognition-jobs", "job-race-0001", jobBody.replace("08:00", "09:00"))
+            performPost(
+                    owner,
+                    "/api/v1/app/meal-recognition-jobs",
+                    "job-race-0001",
+                    jobBody.replace("08:00", "09:00"))
                 .getResponse()
                 .getStatus())
         .isEqualTo(409);
@@ -179,14 +185,20 @@ class FitnessV1IdempotencyConcurrencyIntegrationTest {
         """
         {"mealType":"DINNER","occurredAt":"2026-08-09T10:00:00Z","source":"MANUAL","note":"race-note","items":[{"name":"rice","estimatedKcal":200}]}
         """;
-    List<MvcResult> meals = concurrentPost(owner, "/api/v1/app/meal-records", "meal-race-0001", mealBody);
-    assertThat(meals).allSatisfy(result -> assertThat(result.getResponse().getStatus()).isEqualTo(201));
+    List<MvcResult> meals =
+        concurrentPost(owner, "/api/v1/app/meal-records", "meal-race-0001", mealBody);
+    assertThat(meals)
+        .allSatisfy(result -> assertThat(result.getResponse().getStatus()).isEqualTo(201));
     assertThat(meals.get(0).getResponse().getContentAsString())
         .isEqualTo(meals.get(1).getResponse().getContentAsString());
     assertThat(jdbc.queryForObject("SELECT count(*) FROM meals WHERE note='race-note'", Long.class))
         .isEqualTo(1L);
     assertThat(
-            performPost(owner, "/api/v1/app/meal-records", "meal-race-0001", mealBody.replace("race-note", "other-note"))
+            performPost(
+                    owner,
+                    "/api/v1/app/meal-records",
+                    "meal-race-0001",
+                    mealBody.replace("race-note", "other-note"))
                 .getResponse()
                 .getStatus())
         .isEqualTo(409);
@@ -215,7 +227,8 @@ class FitnessV1IdempotencyConcurrencyIntegrationTest {
     }
   }
 
-  private MvcResult awaitAndPost(CountDownLatch start, Cookie owner, String path, String key, String request) {
+  private MvcResult awaitAndPost(
+      CountDownLatch start, Cookie owner, String path, String key, String request) {
     try {
       start.await(10, TimeUnit.SECONDS);
       return performPost(owner, path, key, request);

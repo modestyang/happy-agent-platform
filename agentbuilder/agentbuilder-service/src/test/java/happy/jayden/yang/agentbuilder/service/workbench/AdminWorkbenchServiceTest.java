@@ -94,7 +94,7 @@ class AdminWorkbenchServiceTest {
   }
 
   @Test
-  void validationRejectsPublishingWhenMandatorySafetyHookIsRemovedFromTheDraft() {
+  void validationAllowsAGenericAgentToPublishWithoutAFitnessSpecificHook() {
     var withoutSafety =
         new AgentDraftView(
             "fitness.coach",
@@ -119,11 +119,9 @@ class AdminWorkbenchServiceTest {
 
     var validation = service.validate("fitness.coach");
 
-    assertFalse(validation.valid());
-    assertTrue(validation.errors().contains("必需安全 Hook fitness.safety 尚未绑定"));
-    assertThrows(
-        AdminWorkbenchPort.ValidationFailure.class, () -> service.publish("fitness.coach"));
-    assertTrue(port.publishedDrafts.isEmpty());
+    assertTrue(validation.valid());
+    service.publish("fitness.coach");
+    assertEquals(1, port.publishedDrafts.size());
   }
 
   @Test
@@ -242,6 +240,31 @@ class AdminWorkbenchServiceTest {
     @Override
     public Optional<AgentDraftView> findDraft(String agentKey) {
       return draft.agentKey().equals(agentKey) ? Optional.of(draft) : Optional.empty();
+    }
+
+    @Override
+    public AgentDraftView createDraft(CreateAgentRequest request) {
+      if (findDraft(request.agentKey()).isPresent()) throw new Conflict("Agent Key 已存在");
+      draft =
+          new AgentDraftView(
+              request.agentKey(),
+              request.name(),
+              request.description(),
+              "DRAFT",
+              draft.frameworkKey(),
+              draft.providerKey(),
+              draft.modelKey(),
+              draft.promptKey(),
+              draft.toolKeys(),
+              draft.skillKeys(),
+              draft.hookKeys(),
+              draft.memoryKey(),
+              draft.temperature(),
+              draft.maxToolCalls(),
+              0,
+              1,
+              Instant.now());
+      return draft;
     }
 
     @Override

@@ -5,17 +5,22 @@ import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceD
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunSummary;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunTrace;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.TraceEvent;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationMessage;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DuplicateKeyException;
 
 /**
  * Run listing, trace detail, and bulk upsert for trace state.
@@ -72,6 +77,118 @@ public final class JdbcRunTraceRepository {
     return new RunPage(items, total, totalPages, query.page(), query.size());
   }
 
+  /** Resolves the user's active 24-hour conversation, or starts a fresh one. */
+  public ConversationSummary resolveConversation(UUID userId, String agentKey, Instant now) {
+    Instant expiry = now.minus(Duration.ofHours(24));
+    jdbc.update(
+        "UPDATE agent_conversations SET status='CLOSED', closed_at=? WHERE user_id=? AND agent_key=?"
+            + " AND status='ACTIVE' AND last_message_at < ?",
+        Timestamp.from(now),
+        userId,
+        agentKey,
+        Timestamp.from(expiry));
+    var existing =
+        jdbc.query(
+                "SELECT conversation_id, user_id, agent_key, title, status, started_at, last_message_at,"
+                    + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
+                    + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
+                    + " FROM agent_conversations c WHERE user_id=? AND agent_key=? AND status='ACTIVE'"
+                    + " AND last_message_at >= ? ORDER BY last_message_at DESC LIMIT 1",
+                (rs, row) -> mapConversationSummary(rs),
+                userId,
+                agentKey,
+                Timestamp.from(expiry))
+            .stream()
+            .findFirst();
+    if (existing.isPresent()) return existing.get();
+
+    UUID conversationId = UUID.randomUUID();
+    try {
+      jdbc.update(
+          "INSERT INTO agent_conversations (conversation_id, user_id, agent_key, title, status, started_at, last_message_at)"
+              + " VALUES (?, ?, ?, '', 'ACTIVE', ?, ?)",
+          conversationId,
+          userId,
+          agentKey,
+          Timestamp.from(now),
+          Timestamp.from(now));
+    } catch (DuplicateKeyException concurrentRequest) {
+      return resolveConversation(userId, agentKey, now);
+    }
+    return new ConversationSummary(conversationId, userId, agentKey, "", "ACTIVE", now, now, 0, 0);
+  }
+
+  public void appendConversationMessage(
+      UUID conversationId, UUID runId, String role, String content, Instant createdAt) {
+    jdbc.update(
+        "INSERT INTO agent_conversation_messages (message_id, conversation_id, run_id, role, content, created_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?)",
+        UUID.randomUUID(),
+        conversationId,
+        runId,
+        role,
+        content == null ? "" : content,
+        Timestamp.from(createdAt));
+    jdbc.update(
+        "UPDATE agent_conversations SET last_message_at=?, title=CASE WHEN title='' AND ?='USER' THEN ? ELSE title END"
+            + " WHERE conversation_id=?",
+        Timestamp.from(createdAt),
+        role,
+        truncate(content, 48),
+        conversationId);
+  }
+
+  /** Returns history in chronological order, with a bounded tail query. */
+  public List<ConversationMessage> recentConversationMessages(UUID conversationId, int limit) {
+    int bounded = Math.max(1, Math.min(limit, 100));
+    return jdbc.query(
+        "SELECT message_id, conversation_id, run_id, role, content, created_at FROM ("
+            + " SELECT message_id, conversation_id, run_id, role, content, created_at"
+            + " FROM agent_conversation_messages WHERE conversation_id=?"
+            + " ORDER BY created_at DESC, message_id DESC LIMIT ?) recent"
+            + " ORDER BY created_at ASC, message_id ASC",
+        (rs, row) -> mapConversationMessage(rs),
+        conversationId,
+        bounded);
+  }
+
+  public List<ConversationSummary> listConversationSummaries(UUID userId, int page, int size) {
+    int boundedSize = size <= 0 ? 20 : Math.min(size, 100);
+    int offset = Math.max(page, 0) * boundedSize;
+    return jdbc.query(
+        "SELECT c.conversation_id, c.user_id, c.agent_key, c.title, c.status, c.started_at, c.last_message_at,"
+            + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
+            + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
+            + " FROM agent_conversations c WHERE c.user_id=? ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
+        (rs, row) -> mapConversationSummary(rs),
+        userId,
+        boundedSize,
+        offset);
+  }
+
+  public Optional<ConversationDetail> findConversation(UUID conversationId) {
+    return jdbc.query(
+            "SELECT c.conversation_id, c.user_id, c.agent_key, c.title, c.status, c.started_at, c.last_message_at,"
+                + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
+                + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
+                + " FROM agent_conversations c WHERE c.conversation_id=?",
+            (rs, row) -> mapConversationSummary(rs),
+            conversationId)
+        .stream()
+        .findFirst()
+        .map(
+            conversation ->
+                new ConversationDetail(
+                    conversation,
+                    recentConversationMessages(conversationId, 100),
+                    jdbc.query(
+                        "SELECT run_id, agent_key, agent_version, status, started_at, completed_at,"
+                            + " duration_ms, tool_calls, prompt_tokens, completion_tokens, cost_usd, model_key, error_code"
+                            + " FROM agent_runs WHERE conversation_id=? ORDER BY started_at ASC",
+                        (rs, row) -> mapSummary(rs),
+                        conversationId)));
+  }
+
   public Optional<RunTrace> findTrace(UUID runId) {
     return jdbc
         .query(
@@ -116,16 +233,20 @@ public final class JdbcRunTraceRepository {
 
   public void insertRun(
       UUID runId,
+      UUID userId,
+      UUID conversationId,
       String agentKey,
       int agentVersion,
       String frameworkKey,
       String modelKey,
       String inputSummary) {
     jdbc.update(
-        "INSERT INTO agent_runs (run_id, agent_key, agent_version, status, model_key,"
+        "INSERT INTO agent_runs (run_id, user_id, conversation_id, agent_key, agent_version, status, model_key,"
             + " framework_key, input_summary, started_at)"
-            + " VALUES (?, ?, ?, 'RUNNING', ?, ?, ?, ?)",
+            + " VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?)",
         runId,
+        userId,
+        conversationId,
         agentKey,
         agentVersion,
         modelKey,
@@ -244,5 +365,33 @@ public final class JdbcRunTraceRepository {
         rs.getString("title"),
         rs.getString("detail"),
         rs.getTimestamp("occurred_at").toInstant());
+  }
+
+  private static ConversationSummary mapConversationSummary(ResultSet rs) throws SQLException {
+    return new ConversationSummary(
+        (UUID) rs.getObject("conversation_id"),
+        (UUID) rs.getObject("user_id"),
+        rs.getString("agent_key"),
+        rs.getString("title"),
+        rs.getString("status"),
+        rs.getTimestamp("started_at").toInstant(),
+        rs.getTimestamp("last_message_at").toInstant(),
+        rs.getInt("message_count"),
+        rs.getInt("run_count"));
+  }
+
+  private static ConversationMessage mapConversationMessage(ResultSet rs) throws SQLException {
+    return new ConversationMessage(
+        (UUID) rs.getObject("message_id"),
+        (UUID) rs.getObject("conversation_id"),
+        (UUID) rs.getObject("run_id"),
+        rs.getString("role"),
+        rs.getString("content"),
+        rs.getTimestamp("created_at").toInstant());
+  }
+
+  private static String truncate(String value, int max) {
+    if (value == null) return "";
+    return value.length() <= max ? value : value.substring(0, max) + "…";
   }
 }

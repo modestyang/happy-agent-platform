@@ -66,6 +66,8 @@ export type AgentDraftUpdate = Pick<AgentDraft,
   'name' | 'description' | 'frameworkKey' | 'providerKey' | 'modelKey' | 'promptKey' |
   'toolKeys' | 'skillKeys' | 'hookKeys' | 'memoryKey' | 'temperature' | 'maxToolCalls'>;
 
+export type CreateAgentRequest = Pick<AgentDraft, 'agentKey' | 'name' | 'description'>;
+
 export type WorkbenchComponent = {
   type: string;
   componentKey: string;
@@ -150,6 +152,33 @@ export type RunTrace = {
   events: TraceEvent[];
 };
 
+export type ConversationSummary = {
+  conversationId: string;
+  userId: string;
+  agentKey: string;
+  title: string;
+  status: string;
+  startedAt: string;
+  lastMessageAt: string;
+  messageCount: number;
+  runCount: number;
+};
+
+export type ConversationMessage = {
+  messageId: string;
+  conversationId: string;
+  runId: string | null;
+  role: 'USER' | 'ASSISTANT' | 'SYSTEM';
+  content: string;
+  createdAt: string;
+};
+
+export type ConversationDetail = {
+  conversation: ConversationSummary;
+  messages: ConversationMessage[];
+  runs: RunSummary[];
+};
+
 export type WorkbenchSnapshot = {
   overview: WorkbenchOverview;
   agents: AgentDraft[];
@@ -158,10 +187,24 @@ export type WorkbenchSnapshot = {
   runs: RunSummary[];
 };
 
+export type AdminSession = { username: string };
+
 // --- API ---------------------------------------------------------------------
 
 const admin = {
+  session: () => request<AdminSession>('/api/admin/auth/session'),
+  login: (username: string, password: string) =>
+    request<AdminSession>('/api/admin/auth/login', {
+      method: 'POST', body: JSON.stringify({ username, password }),
+    }),
+  logout: () => request<void>('/api/admin/auth/logout', { method: 'POST' }),
+  debugMessage: (agentKey: string, message: string) =>
+    request<{ message: string }>('/api/admin/playground/messages', {
+      method: 'POST', body: JSON.stringify({ agentKey, message }),
+    }),
   snapshot: () => request<WorkbenchSnapshot>('/api/admin/workbench'),
+  createAgent: (createRequest: CreateAgentRequest) =>
+    request<AgentDraft>('/api/admin/agents', { method: 'POST', body: JSON.stringify(createRequest) }),
   updateDraft: (agentKey: string, update: AgentDraftUpdate, revision: number) =>
     request<AgentDraft>(
       `/api/admin/agents/${encodeURIComponent(agentKey)}/draft`,
@@ -199,6 +242,10 @@ const admin = {
     return request<RunPage>(`/api/admin/runs?${search.toString()}`);
   },
   runTrace: (runId: string) => request<RunTrace>(`/api/admin/runs/${runId}`),
+  listConversations: (userId: string) =>
+    request<ConversationSummary[]>(`/api/admin/traces/conversations?userId=${encodeURIComponent(userId)}`),
+  conversationTrace: (conversationId: string) =>
+    request<ConversationDetail>(`/api/admin/traces/conversations/${encodeURIComponent(conversationId)}`),
 };
 
 export { admin };

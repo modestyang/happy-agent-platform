@@ -1,8 +1,8 @@
 package happy.jayden.yang.fitness;
 
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
-import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 

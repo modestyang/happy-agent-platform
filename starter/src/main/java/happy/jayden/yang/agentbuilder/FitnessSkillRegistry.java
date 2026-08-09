@@ -51,11 +51,9 @@ public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry {
         throws Exception {
       var facts = new LinkedHashMap<String, Object>();
       facts.put("bodyMetrics", context.invokeTool("fitness.profile.query", Map.of()));
-      facts.put("recentTraining", context.invokeTool("fitness.workout.query", Map.of("days", 6)));
-      facts.put("mealHistory", context.invokeTool("fitness.meal.query", Map.of("days", 6)));
-      facts.put(
-          "recentFeedback",
-          context.invokeTool("fitness.meal.feedback_context", Map.of("days", 30)));
+      facts.put("recentTraining", context.invokeTool("fitness.workout.query", Map.of()));
+      facts.put("mealHistory", context.invokeTool("fitness.meal.query", Map.of()));
+      facts.put("recentFeedback", context.invokeTool("fitness.meal.feedback_context", Map.of()));
       return new SkillResult(
           key(),
           Map.of(
@@ -85,7 +83,7 @@ public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry {
         throws Exception {
       var facts = new LinkedHashMap<String, Object>();
       facts.put("goalAndSafety", context.invokeTool("fitness.profile.query", Map.of()));
-      facts.put("recentLoad", context.invokeTool("fitness.workout.query", Map.of("days", 6)));
+      facts.put("recentLoad", context.invokeTool("fitness.workout.query", Map.of()));
       facts.put("exerciseLibrary", context.invokeTool("fitness.plan.generate", Map.of()));
       return new SkillResult(
           key(),

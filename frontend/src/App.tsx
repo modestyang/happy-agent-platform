@@ -21,6 +21,7 @@ type Food = { name: string; estimatedKcal: number };
 type Exercise = { id: string; name: string; targetArea: string; sets: number; seconds: number; steps: string[]; errors: string[]; illustrationMode?: string; imageUrls?: string[] };
 type Dashboard = {
   user: { id: string; nickname: string };
+  onboarding?: { state: string };
   goal?: { id: string; name: string; startWeightJin: number; currentWeightJin: number; targetWeightJin: number; status: string; progressPercent: number };
   bodyRecords: { id: string; recordedAt: string; weightJin?: number; waistCm?: number }[];
   meals: { id: string; occurredAt: string; mealType: string; items: Food[] }[];
@@ -98,7 +99,7 @@ function Navigation() {
   const items = [
     { to: '/', label: '今天', icon: Home },
     { to: '/plan', label: '计划', icon: CalendarDays },
-    { to: '/ai', label: '瘦瘦', icon: Bot, ai: true },
+    { to: '/ai', label: '花爷', icon: Bot, ai: true },
     { to: '/library', label: '动作', icon: Dumbbell },
     { to: '/me', label: '我的', icon: UserRound },
   ];
@@ -122,7 +123,7 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
     { title: '训练', eyebrow: '今日主题', headline: data.plan?.title ?? '今天还没安排', meta: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 动作 · ${totalSets} 组` : '去看看本周计划', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
     { title: '饮食', eyebrow: nextMeal ? `${mealTimingLabel(now, nextMeal.mealType)} · ${mealName}` : '今日推荐', headline: nextMeal?.items[0]?.name ?? '今日建议尚未生成', meta: nextMeal ? `约 ${recommendationKcal(nextMeal)} kcal` : '生成后会展示在这里', icon: Salad, tone: 'butter', action: () => navigate('/meal/today') },
     { title: '记录', eyebrow: '留下真实数据', headline: '记录身材或一餐', meta: '体重 · 腰围 · 饮食', icon: Plus, tone: 'mint', action: () => onOpenRecord('body') },
-    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由瘦瘦整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?report=current') },
+    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由花爷整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?report=current') },
   ];
 
   return <section className="page home-page">
@@ -208,7 +209,7 @@ function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<voi
       })}</div>
       {error && <p className="error">{error}</p>}
       {done || plan.status === 'COMPLETED' ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
-    </> : canGenerate ? <section className="ai-plan-empty"><span><WandSparkles /></span><small>这一天还没有安排</small><h2>交给瘦瘦，拼一份刚刚好的训练</h2><p>会结合当前目标和已有记录，不盲目加量。</p><Link to={`/ai?prompt=${encodeURIComponent(prompt)}`} aria-label="AI 生成训练计划">AI 生成训练计划 <ChevronRight /></Link></section> : <Empty icon={CalendarDays} title="无训练计划" text="这一天没有留下训练安排，休息也算计划的一部分。" />}
+    </> : canGenerate ? <section className="ai-plan-empty"><span><WandSparkles /></span><small>这一天还没有安排</small><h2>交给花爷，拼一份刚刚好的训练</h2><p>会结合当前目标和已有记录，不盲目加量。</p><Link to={`/ai?prompt=${encodeURIComponent(prompt)}`} aria-label="AI 生成训练计划">AI 生成训练计划 <ChevronRight /></Link></section> : <Empty icon={CalendarDays} title="无训练计划" text="这一天没有留下训练安排，休息也算计划的一部分。" />}
   </section>;
 }
 
@@ -250,7 +251,7 @@ function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: R
       if (response.message) setMessages((list) => [...list, { role: 'assistant', content: response.message }]);
     } catch (err) {
       if (conversationGeneration.current !== generation) return;
-      setError(err instanceof ApiError && err.status === 503 ? '瘦瘦还没接上大模型，请先在 Agent 工作台配置 Provider。' : errorText(err));
+      setError(err instanceof ApiError && err.status === 503 ? '花爷还没接上大模型，请先在 Agent 工作台配置 Provider。' : errorText(err));
     } finally { if (conversationGeneration.current === generation) setSending(false); }
   }
   useEffect(() => {
@@ -281,13 +282,13 @@ function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: R
   const isWelcome = messages.length === 0;
 
   return <section className="page ai-page">
-    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>瘦瘦</h1></div><button aria-label="新建会话" onClick={() => { conversationGeneration.current += 1; setMessages([]); setError(''); setSending(false); }}><MessageCirclePlus /></button></header>
+    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>花爷</h1></div><button aria-label="新建会话" onClick={() => { conversationGeneration.current += 1; setMessages([]); setError(''); setSending(false); }}><MessageCirclePlus /></button></header>
     <div className="ai-scroll">{report && <CurrentGoalReportCard report={report} onRetry={() => void refreshCurrentGoalReport(report.state === 'FAILED' ? 'RETRY_FAILED' : 'USER_REFRESH')} onGeneratePlan={() => setReportError('训练计划生成能力暂不可用：请先在 Agent 工作台发布计划生成能力。')} onOpenRecord={() => onOpenRecord('body')} />}{reportError && <p className="error">{reportError}</p>}{isWelcome ? <>
       <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
-      <section className="ai-capabilities" role="region" aria-label="瘦瘦快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
+      <section className="ai-capabilities" role="region" aria-label="花爷快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
       {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
-    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={`${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<div className="message-body"><ChatMarkdown text={message.content} /></div></div>)}{sending && <div className="typing" aria-label="瘦瘦正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
-    <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input aria-label="问瘦瘦" value={value} onChange={(event) => setValue(event.target.value)} placeholder="告诉瘦瘦你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
+    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={`${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<div className="message-body"><ChatMarkdown text={message.content} /></div></div>)}{sending && <div className="typing" aria-label="花爷正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
+    <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input aria-label="问花爷" value={value} onChange={(event) => setValue(event.target.value)} placeholder="告诉花爷你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
   </section>;
 }
 
@@ -333,23 +334,35 @@ function MePage({ data, onLoggedOut }: { data: Dashboard; onLoggedOut: () => voi
   function togglePreference(option: string) { setPreferences((current) => current.includes(option) ? current.filter((item) => item !== option) : [...current, option]); }
 
   return <section className="page profile-page">
-    <header className="profile-cover"><div className="profile-avatar">{data.user.nickname.slice(0, 1)}</div><div><small>和瘦瘦一起认真生活</small><h1>{data.user.nickname}</h1><p>{data.goal?.name ?? '还没有进行中的目标'}</p></div><Sparkles /></header>
+    <header className="profile-cover"><div className="profile-avatar">{data.user.nickname.slice(0, 1)}</div><div><small>和花爷一起认真生活</small><h1>{data.user.nickname}</h1><p>{data.goal?.name ?? '还没有进行中的目标'}</p></div><Sparkles /></header>
     <section className="profile-config" aria-label="训练配置"><article><Clock3 /><span>本次时长<strong>{data.plan ? `${data.plan.estimatedMinutes} 分钟` : '未安排'}</strong></span></article><article><Dumbbell /><span>动作数量<strong>{data.plan?.exercises.length ?? 0} 个</strong></span></article><article><Target /><span>训练部位<strong>{areas[0] ?? '待安排'}</strong></span></article></section>
     <div className="section-heading"><div><small>每一次都算数</small><h2>坚持足迹</h2></div><strong>{recordDays}<small>天</small></strong></div>
     <section className="achievements">{achievements.map(({ label, earned, icon: Icon }) => <article className={earned ? 'is-earned' : ''} key={label}><span><Icon /></span><strong>{label}</strong><small>{earned ? '已点亮' : '继续积累'}</small></article>)}</section>
     <section className="profile-panel activation-panel"><div className="panel-title"><span><Activity /></span><div><small>本次计划</small><h2>运动点亮图</h2></div></div><BodyActivation areas={areas} /></section>
     <section className="profile-panel trend-panel"><div className="panel-title"><span><BarChart3 /></span><div><small>客观记录</small><h2>体重 / 体脂趋势</h2></div></div><WeightSparkline records={data.bodyRecords} /><p className="body-fat-empty">体脂暂无数据 · 记录后会和体重一起呈现</p></section>
     <section className="profile-panel"><div className="panel-title"><span><Bot /></span><div><small>陪伴方式</small><h2>AI 教练语气</h2></div></div><div className="choice-row">{tones.map((item) => <button key={item} aria-pressed={tone === item} className={tone === item ? 'is-active' : ''} onClick={() => setTone(item)}>{tone === item && <Check />}{item}</button>)}</div></section>
-    <section className="profile-panel"><div className="panel-title"><span><Sparkles /></span><div><small>瘦瘦记住的你</small><h2>个人偏好</h2></div></div><div className="preference-tags">{preferenceOptions.map((option) => <button key={option} aria-pressed={preferences.includes(option)} className={preferences.includes(option) ? 'is-active' : ''} onClick={() => togglePreference(option)}>{preferences.includes(option) && <Check />}{option}</button>)}</div></section>
+    <section className="profile-panel"><div className="panel-title"><span><Sparkles /></span><div><small>花爷记住的你</small><h2>个人偏好</h2></div></div><div className="preference-tags">{preferenceOptions.map((option) => <button key={option} aria-pressed={preferences.includes(option)} className={preferences.includes(option) ? 'is-active' : ''} onClick={() => togglePreference(option)}>{preferences.includes(option) && <Check />}{option}</button>)}</div></section>
     <section className="profile-panel"><div className="panel-title"><span><Award /></span><div><small>真实数据</small><h2>历史记录</h2></div></div><div className="history-list"><p><span>训练历史</span><strong>{data.completedWorkoutCount ?? 0} 次</strong></p><p><span>指标记录</span><strong>{data.bodyRecords.length} 条</strong></p><p><span>饮食记录</span><strong>{data.meals.length} 餐</strong></p></div></section>
     {logoutError && <p className="error">{logoutError}</p>}<button className="logout-button" onClick={() => void logout()}><LogOut /> 退出登录</button>
   </section>;
 }
 
-function Login({ onLogin }: { onLogin: () => Promise<void> }) {
+function Login({ onLogin, onGoRegister }: { onLogin: () => Promise<void>; onGoRegister: () => void }) {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [pending, setPending] = useState(false);
   async function submit(event: FormEvent) { event.preventDefault(); setPending(true); setError(''); try { await api.login(username, password); await onLogin(); } catch (err) { setError(errorText(err)); } finally { setPending(false); } }
-  return <div className="desktop"><main className="phone login"><Mascot /><small>HAPPY BODY · DAILY LOG</small><h1>把训练和吃饭，<br />过成自己的节奏。</h1><p>欢迎回来，今天也不用太用力。</p><form onSubmit={submit}><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{error && <p className="error">{error}</p>}<button className="primary" disabled={pending}>{pending ? '正在登录…' : '登录'}</button></form></main></div>;
+  return <div className="desktop"><main className="phone login"><Mascot /><small>HAPPY BODY · DAILY LOG</small><h1>把训练和吃饭，<br />过成自己的节奏。</h1><p>欢迎回来，今天也不用太用力。</p><form onSubmit={submit}><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{error && <p className="error">{error}</p>}<button className="primary" disabled={pending}>{pending ? '正在登录…' : '登录'}</button><button type="button" className="soft-button" onClick={onGoRegister}>没有账号？去注册</button></form></main></div>;
+}
+
+function Register({ onRegistered, onBackToLogin }: { onRegistered: () => Promise<void>; onBackToLogin: () => void }) {
+  const [username, setUsername] = useState(''); const [nickname, setNickname] = useState(''); const [password, setPassword] = useState(''); const [confirm, setConfirm] = useState(''); const [error, setError] = useState(''); const [pending, setPending] = useState(false);
+  async function submit(event: FormEvent) { event.preventDefault(); if (!nickname.trim()) { setError('昵称不能为空'); return; } if (password !== confirm) { setError('两次输入的密码不一致'); return; } setPending(true); setError(''); try { await api.register(username.trim(), password, nickname.trim()); await onRegistered(); } catch (err) { setError(errorText(err)); } finally { setPending(false); } }
+  return <div className="desktop"><main className="phone login"><Mascot /><small>HAPPY BODY · DAILY LOG</small><h1>先把自己记录下来。<br />今天从一杯水开始。</h1><p>新手也可以从今天开始，不用一次做完。</p><form onSubmit={submit}><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label>昵称<input value={nickname} onChange={(event) => setNickname(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label>确认密码<input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>{error && <p className="error">{error}</p>}<button className="primary" disabled={pending}>{pending ? '正在注册…' : '注册'}</button><button type="button" className="soft-button" onClick={onBackToLogin}>已有账号？去登录</button></form></main></div>;
+}
+
+function FirstSetup({ onComplete }: { onComplete: () => Promise<void> }) {
+  const [weightJin, setWeightJin] = useState(''); const [waistCm, setWaistCm] = useState(''); const [targetWeightJin, setTargetWeightJin] = useState(''); const [targetDate, setTargetDate] = useState(''); const [error, setError] = useState(''); const [saving, setSaving] = useState(false);
+  async function submit(event: FormEvent) { event.preventDefault(); const current = Number(weightJin); const target = Number(targetWeightJin); const waist = waistCm.trim() === '' ? undefined : Number(waistCm); if (!Number.isFinite(current) || current <= 0 || !Number.isFinite(target) || target <= 0 || !targetDate || (waist !== undefined && (!Number.isFinite(waist) || waist <= 0))) { setError('请填写有效的当前体重、目标体重和目标日期'); return; } setSaving(true); setError(''); try { await api.firstSetup(current, waist, target, targetDate); await onComplete(); } catch (err) { setError(errorText(err)); } finally { setSaving(false); } }
+  return <section className="page onboarding-page"><div className="onboarding-card"><span className="onboarding-card__eyebrow">FIRST STEP</span><h1>开始你的第一个目标</h1><p>记录此刻的身体状态，给自己一个清晰又温和的方向。</p><form onSubmit={submit}><label>当前体重（斤）<input aria-label="当前体重（斤）" inputMode="decimal" value={weightJin} onChange={e => setWeightJin(e.target.value)} placeholder="例如 128.6" /></label><label>腰围（厘米，可选）<input aria-label="腰围（厘米，可选）" inputMode="decimal" value={waistCm} onChange={e => setWaistCm(e.target.value)} placeholder="例如 72.5" /></label><label>目标体重（斤）<input aria-label="目标体重（斤）" inputMode="decimal" value={targetWeightJin} onChange={e => setTargetWeightJin(e.target.value)} placeholder="例如 118" /></label><label>目标日期<input aria-label="目标日期" type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : '保存并开始'}</button></form></div></section>;
 }
 
 function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => Promise<void>; onLoggedOut: () => void }) {
@@ -367,13 +380,14 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
 }
 
 function MobileApp() {
-  const [data, setData] = useState<Dashboard>(); const [auth, setAuth] = useState<'loading' | 'login' | 'ready' | 'error'>('loading'); const [error, setError] = useState('');
-  async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) setAuth('login'); else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); throw err; } } }
+  const [data, setData] = useState<Dashboard>(); const [auth, setAuth] = useState<'loading' | 'login' | 'ready' | 'error'>('loading'); const [error, setError] = useState(''); const [entryMode, setEntryMode] = useState<'login' | 'register'>('login');
+  async function load(background = false) { if (!background) { setAuth('loading'); setError(''); } try { const result = await api.bootstrap(); setData(result as Dashboard); setAuth('ready'); } catch (err) { if (err instanceof ApiError && err.status === 401) { setAuth('login'); setEntryMode('login'); } else if (!background) { setError(errorText(err)); setAuth('error'); } else { setError(errorText(err)); throw err; } } }
   useEffect(() => { void load(false); }, []);
   if (auth === 'loading') return <div className="desktop"><main className="phone status"><Mascot /><div className="spinner" />正在读取你的记录…</main></div>;
-  if (auth === 'login') return <Login onLogin={() => load(false)} />;
+  if (auth === 'login') return entryMode === 'register' ? <Register onRegistered={() => load(false)} onBackToLogin={() => setEntryMode('login')} /> : <Login onLogin={() => load(false)} onGoRegister={() => setEntryMode('register')} />;
   if (auth === 'error' || !data) return <div className="desktop"><main className="phone status"><Mascot /><p>{error || '暂时无法加载数据'}</p><button className="primary" onClick={() => void load(false)}>重新尝试</button></main></div>;
-  return <BrowserRouter><Shell data={data} reload={() => load(true)} onLoggedOut={() => { setData(undefined); setAuth('login'); }} /></BrowserRouter>;
+  if (data.onboarding?.state === 'REQUIRED') return <div className="desktop"><main className="phone"><FirstSetup onComplete={() => load(false)} /></main></div>;
+  return <BrowserRouter><Shell data={data} reload={() => load(true)} onLoggedOut={() => { setData(undefined); setAuth('login'); setEntryMode('login'); }} /></BrowserRouter>;
 }
 
 export function App() {

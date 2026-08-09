@@ -48,7 +48,9 @@ async function upload(path: string, file: File, headers: { name: string; value: 
 export const api = {
   bootstrap: () => request<unknown>('/api/app/bootstrap'),
   login: (username: string, password: string) => request<unknown>('/api/local/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  register: (username: string, password: string, nickname: string) => request<unknown>('/api/local/register', { method: 'POST', body: JSON.stringify({ username, password, nickname }) }),
   logout: () => request<unknown>('/api/local/logout', { method: 'POST' }),
+  firstSetup: (weightJin: number, waistCm: number | undefined, targetWeightJin: number, targetDate: string) => request<unknown>('/api/app/first-setup', { method: 'POST', body: JSON.stringify({ weightJin, waistCm, targetWeightJin, targetDate }) }),
   bodyRecord: (record: { weightJin?: number; waistCm?: number }) => request<unknown>('/api/app/body-records', { method: 'POST', body: JSON.stringify(record) }),
   meal: (mealType: string, items: { name: string; estimatedKcal: number }[]) => request<unknown>('/api/app/meals', { method: 'POST', body: JSON.stringify({ mealType, items }) }),
   createMediaUploadTicket: (contentType: string, contentLength: number, sha256: string, idempotencyKey: string) => request<{ mediaId: string; uploadUrl: string; headers: { name: string; value: string }[] }>('/api/v1/app/media-upload-tickets', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ purpose: 'MEAL_RECOGNITION', contentType, contentLength, sha256 }) }),

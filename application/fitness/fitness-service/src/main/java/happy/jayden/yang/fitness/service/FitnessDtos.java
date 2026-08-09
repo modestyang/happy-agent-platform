@@ -12,6 +12,8 @@ public final class FitnessDtos {
 
   public record UserDto(UUID id, String nickname) {}
 
+  public record RegisterRequest(String username, String nickname, String password) {}
+
   public record LoginRequest(String username, String password) {}
 
   public record LoginResponse(UserDto user) {}
@@ -37,6 +39,9 @@ public final class FitnessDtos {
       Instant startedAt) {}
 
   public record CreateGoalRequest(String name, BigDecimal targetWeightJin, LocalDate targetDate) {}
+
+  public record FirstSetupRequest(
+      BigDecimal weightJin, BigDecimal waistCm, BigDecimal targetWeightJin, LocalDate targetDate) {}
 
   public record BodyRecordDto(
       UUID id, Instant recordedAt, BigDecimal weightJin, BigDecimal waistCm) {}
@@ -388,8 +393,11 @@ public final class FitnessDtos {
       List<ExerciseDto> exercises,
       long completedWorkoutCount) {}
 
+  public record OnboardingDto(String state) {}
+
   public record BootstrapDto(
       UserDto user,
+      OnboardingDto onboarding,
       GoalDto goal,
       List<BodyRecordDto> bodyRecords,
       List<MealDto> meals,

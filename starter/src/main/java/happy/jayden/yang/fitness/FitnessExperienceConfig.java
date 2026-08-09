@@ -51,7 +51,17 @@ public class FitnessExperienceConfig {
   @Bean
   PasswordVerifier passwordVerifier() {
     BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-    return encoder::matches;
+    return new PasswordVerifier() {
+      @Override
+      public boolean matches(String rawPassword, String passwordHash) {
+        return encoder.matches(rawPassword, passwordHash);
+      }
+
+      @Override
+      public String hash(String rawPassword) {
+        return encoder.encode(rawPassword);
+      }
+    };
   }
 
   @Bean

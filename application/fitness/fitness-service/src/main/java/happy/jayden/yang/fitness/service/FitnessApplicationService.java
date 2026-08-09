@@ -12,6 +12,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecognitionJobReq
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMediaUploadTicketRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.FirstSetupRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginRequest;
@@ -19,6 +20,8 @@ import happy.jayden.yang.fitness.service.FitnessDtos.LoginResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.OnboardingDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.RegisterRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.ReportDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.ReportMetric;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
@@ -168,6 +171,27 @@ public final class FitnessApplicationService {
     return new LoginResult(new FitnessDtos.UserDto(account.userId(), account.nickname()), token);
   }
 
+  public LoginResult register(RegisterRequest request) {
+    if (request == null
+        || blank(request.username())
+        || blank(request.nickname())
+        || blank(request.password())) {
+      throw new InvalidRequestException("username、nickname 和 password 都不能为空");
+    }
+    String username = request.username().trim();
+    String nickname = request.nickname().trim();
+    if (store.findLoginAccount(username).isPresent()) {
+      throw new InvalidRequestException("用户名已存在");
+    }
+    UUID userId =
+        store.createLoginAccount(username, nickname, passwordVerifier.hash(request.password()));
+    byte[] tokenBytes = new byte[32];
+    secureRandom.nextBytes(tokenBytes);
+    String token = HexFormat.of().formatHex(tokenBytes);
+    store.createSession(hashToken(token), userId, Instant.now().plus(SESSION_TTL));
+    return new LoginResult(new FitnessDtos.UserDto(userId, nickname), token);
+  }
+
   public void logout(String sessionToken) {
     if (!blank(sessionToken)) {
       store.revokeSession(hashToken(sessionToken));
@@ -176,10 +200,28 @@ public final class FitnessApplicationService {
 
   public BootstrapDto bootstrap(String sessionToken) {
     BootstrapData data = store.loadBootstrap(authenticate(sessionToken), LocalDate.now(USER_ZONE));
+    AiStatusDto ai =
+        new AiStatusDto(
+            providerStatus.configured(), providerStatus.configured() ? null : AI_REASON);
+    if (data.goal() == null) {
+      return new BootstrapDto(
+          data.user(),
+          new OnboardingDto("REQUIRED"),
+          null,
+          List.of(),
+          List.of(),
+          List.of(),
+          null,
+          List.of(),
+          0,
+          null,
+          ai);
+    }
     BigDecimal currentWeight = currentWeight(data);
     GoalDto goal = goal(data.goal(), currentWeight);
     return new BootstrapDto(
         data.user(),
+        new OnboardingDto("COMPLETE"),
         goal,
         data.bodyRecords(),
         data.meals(),
@@ -188,12 +230,24 @@ public final class FitnessApplicationService {
         data.exercises(),
         data.completedWorkoutCount(),
         report(data, goal),
-        new AiStatusDto(
-            providerStatus.configured(), providerStatus.configured() ? null : AI_REASON));
+        ai);
   }
 
   public UUID authenticateSession(String sessionToken) {
     return authenticate(sessionToken);
+  }
+
+  public void completeFirstSetup(String sessionToken, FirstSetupRequest request) {
+    if (request == null
+        || request.weightJin() == null
+        || request.targetWeightJin() == null
+        || request.targetDate() == null) {
+      throw new InvalidRequestException("weightJin、targetWeightJin 和 targetDate 必填");
+    }
+    positive(request.weightJin(), "weightJin");
+    positive(request.waistCm(), "waistCm");
+    positive(request.targetWeightJin(), "targetWeightJin");
+    store.completeFirstSetup(authenticate(sessionToken), request);
   }
 
   public java.util.Optional<FitnessDtos.IdempotencyEntry> idempotency(
@@ -930,9 +984,9 @@ public final class FitnessApplicationService {
   /**
    * Executes a developer-console probe against the same runtime used by the personal app.
    *
-   * <p>The caller has already passed the separate developer authentication boundary. The
-   * resulting prompt uses the first active local profile only as runtime context; it does not
-   * authenticate or impersonate a fitness-app browser session.
+   * <p>The caller has already passed the separate developer authentication boundary. The resulting
+   * prompt uses the first active local profile only as runtime context; it does not authenticate or
+   * impersonate a fitness-app browser session.
    */
   public AiMessageResponse sendAiMessageForDeveloper(String message) {
     UUID userId =

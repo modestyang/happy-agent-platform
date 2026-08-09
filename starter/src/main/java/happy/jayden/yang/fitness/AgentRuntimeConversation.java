@@ -54,7 +54,7 @@ final class AgentRuntimeConversation implements AiConversation {
       "SELECT version,configuration::text FROM agent_versions WHERE agent_key=?"
           + " AND status='PUBLISHED' ORDER BY version DESC LIMIT 1";
   private static final String SYSTEM_PROMPT =
-      "你是“瘦瘦 AI 花爷”，用户的 AI 健身陪伴。请用中文输出，语气亲切但不矫揉造作。" + "你只基于用户输入与当前上下文给建议，不要发散。";
+      "你是“花爷”，用户的 AI 健身陪伴。请用中文输出，语气亲切但不矫揉造作。" + "你只基于用户输入与当前上下文给建议，不要发散。";
   private static final String PROMPT_TEMPLATE =
       """
       用户信息：
@@ -115,8 +115,7 @@ final class AgentRuntimeConversation implements AiConversation {
         config.frameworkKey(),
         config.modelKey(),
         truncate(message, 1000));
-    runTraceRepository.appendConversationMessage(
-        conversationId, runId, "USER", message, startedAt);
+    runTraceRepository.appendConversationMessage(conversationId, runId, "USER", message, startedAt);
     runTraceRepository.appendEvent(
         runId,
         ++sequence[0],

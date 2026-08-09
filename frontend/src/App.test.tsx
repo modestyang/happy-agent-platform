@@ -62,7 +62,7 @@ describe('App', () => {
     expect(screen.queryByText('今天的节奏')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '计划' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '今天' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '瘦瘦' })).toHaveClass('nav-link--ai');
+    expect(screen.getByRole('link', { name: '花爷' })).toHaveClass('nav-link--ai');
     expect(screen.getByRole('link', { name: '动作' })).toBeInTheDocument();
   });
 
@@ -144,6 +144,52 @@ describe('App', () => {
     expect(await screen.findByText('124.8')).toBeInTheDocument();
   });
 
+  it('shows first setup after bootstrap requires onboarding and reloads the dashboard after submission', async () => {
+    const onboarding = {
+      user: { id: 'user-1', nickname: '新用户' },
+      onboarding: { state: 'REQUIRED' },
+      goal: null,
+      bodyRecords: [],
+      meals: [],
+      mealRecommendations: [],
+      plan: null,
+      exercises: [],
+      completedWorkoutCount: 0,
+      report: null,
+      ai: { configured: false, reason: '请在 Agent 工作台配置模型 Provider' },
+    };
+    let bootstrapCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/app/bootstrap') {
+        bootstrapCalls += 1;
+        return new Response(JSON.stringify(bootstrapCalls === 1 ? onboarding : dashboard), { status: 200 });
+      }
+      if (path === '/api/app/first-setup') return new Response('{}', { status: 201 });
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '开始你的第一个目标' })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('当前体重（斤）'), '128.6');
+    await user.type(screen.getByLabelText('目标体重（斤）'), '118');
+    await user.type(screen.getByLabelText('目标日期'), '2026-12-31');
+    await user.click(screen.getByRole('button', { name: '保存并开始' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/app/first-setup',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ weightJin: 128.6, waistCm: undefined, targetWeightJin: 118, targetDate: '2026-12-31' }),
+        }),
+      ),
+    );
+    expect(await screen.findByText('124.8')).toBeInTheDocument();
+  });
+
   it('submits body and meal records from the one-layer record drawer', async () => {
     const fetchMock = mockFetch();
     const user = userEvent.setup();
@@ -222,10 +268,10 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/workouts/plan-1/complete', expect.objectContaining({ method: 'POST', body: JSON.stringify({ completionRatio: 1 }) })));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => path === '/api/app/bootstrap')).toHaveLength(2));
 
-    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
+    await user.click(screen.getByRole('link', { name: '花爷' }));
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '根据我的计划，告诉我今天怎么练' }) })));
-    expect(await screen.findByText(/瘦瘦还没接上大模型/)).toBeInTheDocument();
+    expect(await screen.findByText(/花爷还没接上大模型/)).toBeInTheDocument();
   });
 
   it('opens an immersive workout player and starts synchronized voice guidance', async () => {
@@ -437,20 +483,20 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByText('124.8');
-    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
-    const capabilities = await screen.findByRole('region', { name: '瘦瘦快捷能力' });
+    await user.click(screen.getByRole('link', { name: '花爷' }));
+    const capabilities = await screen.findByRole('region', { name: '花爷快捷能力' });
     expect(within(capabilities).getByRole('button', { name: /今天怎么练/ })).toBeInTheDocument();
     expect(within(capabilities).getByRole('button', { name: /今晚吃什么/ })).toBeInTheDocument();
     expect(within(capabilities).getByRole('button', { name: /帮我记一餐/ })).toBeInTheDocument();
     expect(within(capabilities).getByRole('button', { name: /看看最近状态/ })).toBeInTheDocument();
 
     await user.click(within(capabilities).getByRole('button', { name: /今晚吃什么/ }));
-    expect(screen.queryByRole('region', { name: '瘦瘦快捷能力' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '花爷快捷能力' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: '换一个选择' })).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: '今天' }));
-    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
+    await user.click(screen.getByRole('link', { name: '花爷' }));
     expect(await screen.findByText('结合我今天的记录，推荐今晚吃什么')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: '瘦瘦快捷能力' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '花爷快捷能力' })).not.toBeInTheDocument();
   });
 
   it('does not append an old AI response after starting a new conversation', async () => {
@@ -465,12 +511,12 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByText('124.8');
-    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
+    await user.click(screen.getByRole('link', { name: '花爷' }));
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
     await user.click(screen.getByRole('button', { name: '新建会话' }));
     resolveAi?.(new Response(JSON.stringify({ message: '旧会话迟到的回复' }), { status: 200 }));
 
-    await waitFor(() => expect(screen.getByRole('region', { name: '瘦瘦快捷能力' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('region', { name: '花爷快捷能力' })).toBeInTheDocument());
     expect(screen.queryByText('旧会话迟到的回复')).not.toBeInTheDocument();
   });
 
@@ -484,8 +530,8 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByText('124.8');
-    await user.click(screen.getByRole('link', { name: '瘦瘦' }));
-    expect(await screen.findByRole('region', { name: '瘦瘦快捷能力' })).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '花爷' }));
+    expect(await screen.findByRole('region', { name: '花爷快捷能力' })).toBeInTheDocument();
     expect(screen.queryByText('已经过期的问题')).not.toBeInTheDocument();
   });
 

@@ -16,6 +16,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportSourceData
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.FirstSetupRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
@@ -37,6 +38,8 @@ public final class FitnessPorts {
   public interface FitnessStore {
     Optional<LoginAccount> findLoginAccount(String username);
 
+    UUID createLoginAccount(String username, String nickname, String passwordHash);
+
     void createSession(String sessionTokenHash, UUID userId, Instant expiresAt);
 
     Optional<UUID> findSessionUser(String sessionTokenHash, Instant now);
@@ -53,6 +56,8 @@ public final class FitnessPorts {
         UUID userId, UUID workoutId, CompleteWorkoutRequest request);
 
     GoalState createGoal(UUID userId, CreateGoalRequest request);
+
+    void completeFirstSetup(UUID userId, FirstSetupRequest request);
 
     BootstrapData loadForAi(UUID userId);
 
@@ -187,6 +192,8 @@ public final class FitnessPorts {
 
   public interface PasswordVerifier {
     boolean matches(String rawPassword, String passwordHash);
+
+    String hash(String rawPassword);
   }
 
   public interface AgentProviderStatus {

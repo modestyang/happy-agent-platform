@@ -571,6 +571,17 @@ input, select { width: 100%; border: 1px solid #ded5c8; border-radius: 14px; pad
 .login > small { color: #b06b49; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
 .login > h1 { margin: 8px 0 10px; font-size: 30px; line-height: 1.25; }
 .login > p { color: var(--muted); font-size: 12px; }
+.onboarding-page { display: grid; place-items: center; min-height: 100%; padding: 24px 19px; background: radial-gradient(circle at 84% 8%, rgba(255,213,119,.82) 0 5%, transparent 27%), linear-gradient(160deg, #fffaf0, #f7eee0); }
+.onboarding-card { width: 100%; border: 1px solid #e2d1bb; border-radius: 28px; padding: 24px 20px 20px; background: rgba(255,255,255,.76); box-shadow: 0 20px 55px rgba(86,61,37,.12); }
+.onboarding-card__eyebrow { color: #b06b49; font-size: 9px; font-weight: 900; letter-spacing: .16em; }
+.onboarding-card h1 { margin: 8px 0 9px; font-size: 27px; line-height: 1.18; }
+.onboarding-card > p { margin: 0 0 19px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.onboarding-card form { display: grid; gap: 12px; }
+.onboarding-card label { display: grid; gap: 6px; color: #665b52; font-size: 11px; font-weight: 800; }
+.onboarding-card input { width: 100%; border: 1px solid #dfd1c2; border-radius: 13px; padding: 11px 12px; color: var(--ink); background: #fffdfa; font: inherit; outline: 0; }
+.onboarding-card input:focus { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(255,150,119,.18); }
+.onboarding-card .primary { margin-top: 5px; }
+.form-error { margin: 0; color: #a14d3b; font-size: 11px; line-height: 1.4; }
 .status { display: grid; place-items: center; align-content: center; gap: 11px; height: 100%; color: var(--muted); text-align: center; }
 .status .mascot { margin-bottom: 5px; }
 .spinner { width: 24px; height: 24px; border: 3px solid #eadfd2; border-top-color: var(--coral); border-radius: 50%; animation: spin .8s linear infinite; }

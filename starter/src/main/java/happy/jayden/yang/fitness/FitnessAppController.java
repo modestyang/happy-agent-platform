@@ -11,6 +11,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.FirstSetupRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
@@ -71,6 +72,14 @@ public class FitnessAppController {
       @RequestBody CreateGoalRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(application.createGoal(sessionToken, request));
+  }
+
+  @PostMapping("/first-setup")
+  ResponseEntity<Void> completeFirstSetup(
+      @CookieValue(name = SESSION_COOKIE, required = false) String sessionToken,
+      @RequestBody FirstSetupRequest request) {
+    application.completeFirstSetup(sessionToken, request);
+    return ResponseEntity.status(HttpStatus.CREATED).build();
   }
 
   @PostMapping("/ai/messages")

@@ -146,6 +146,70 @@ class FitnessExperienceIntegrationTest {
 
   @Test
   @Order(1)
+  void registerCreatesAnAuthenticatedAccount() throws Exception {
+    MvcResult registration =
+        mvc.perform(
+                post("/api/local/register")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        "{\"username\":\"new-user\",\"nickname\":\"新用户\",\"password\":\"strong-password\"}"))
+            .andExpect(status().isOk())
+            .andExpect(cookie().httpOnly("FITNESS_SESSION", true))
+            .andExpect(jsonPath("$.user.nickname").value("新用户"))
+            .andReturn();
+
+    Cookie session = registration.getResponse().getCookie("FITNESS_SESSION");
+    assertThat(session).isNotNull();
+
+    mvc.perform(get("/api/app/bootstrap").cookie(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.user.nickname").value("新用户"))
+        .andExpect(jsonPath("$.onboarding.state").value("REQUIRED"))
+        .andExpect(jsonPath("$.goal").doesNotExist());
+  }
+
+  @Test
+  @Order(2)
+  void firstSetupCreatesTheInitialBodyRecordAndGoal() throws Exception {
+    MvcResult registration =
+        mvc.perform(
+                post("/api/local/register")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        "{\"username\":\"first-setup-user\",\"nickname\":\"首次设置用户\",\"password\":\"strong-password\"}"))
+            .andExpect(status().isOk())
+            .andReturn();
+    Cookie session = registration.getResponse().getCookie("FITNESS_SESSION");
+    assertThat(session).isNotNull();
+
+    mvc.perform(
+            post("/api/app/first-setup")
+                .cookie(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"weightJin\":128.6,\"waistCm\":72.5,\"targetWeightJin\":118.0,\"targetDate\":\"2026-12-31\"}"))
+        .andExpect(status().isCreated());
+
+    mvc.perform(get("/api/app/bootstrap").cookie(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.onboarding.state").value("COMPLETE"))
+        .andExpect(jsonPath("$.bodyRecords.length()").value(1))
+        .andExpect(jsonPath("$.bodyRecords[0].weightJin").value(128.6))
+        .andExpect(jsonPath("$.bodyRecords[0].waistCm").value(72.5))
+        .andExpect(jsonPath("$.goal.startWeightJin").value(128.6))
+        .andExpect(jsonPath("$.goal.targetWeightJin").value(118.0));
+
+    mvc.perform(
+            post("/api/app/first-setup")
+                .cookie(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"weightJin\":128.6,\"targetWeightJin\":118.0,\"targetDate\":\"2026-12-31\"}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  @Order(3)
   @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
   void loginBootstrapAndMutationsUseRealPostgres() throws Exception {
     Cookie session = login();
@@ -220,7 +284,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  @Order(2)
+  @Order(4)
   void dataAndDatabaseSessionSurviveANewSpringContext() throws Exception {
     Cookie session = login();
 
@@ -234,7 +298,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  @Order(3)
+  @Order(5)
   void bodyRecordRequiresAtLeastOneMeasurement() throws Exception {
     Cookie session = login();
 
@@ -248,7 +312,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  @Order(4)
+  @Order(6)
   void unconfiguredAiReturnsRfc9457DependencyErrorInsteadOfAFakeReply() throws Exception {
     Cookie session = login();
 
@@ -263,7 +327,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  @Order(5)
+  @Order(7)
   void logoutRevokesTheDatabaseSession() throws Exception {
     Cookie session = login();
 
@@ -1822,7 +1886,7 @@ class FitnessExperienceIntegrationTest {
 
   private static void resetChatAgentDraft(JdbcTemplate jdbc) {
     jdbc.update(
-        "UPDATE agent_drafts SET name='瘦瘦健身教练',description='结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。',status='DRAFT',framework_key='agentscope',provider_key='bailian',model_key='qwen-plus',prompt_key='fitness.coach.prompt',tool_keys='[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,skill_keys='[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,hook_keys='[\"fitness.safety\"]'::jsonb,memory_key='fitness.daily-memory',temperature=0.5,max_tool_calls=8,updated_at=CURRENT_TIMESTAMP WHERE agent_key='fitness.coach'");
+        "UPDATE agent_drafts SET name='花爷健身教练',description='结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。',status='DRAFT',framework_key='agentscope',provider_key='bailian',model_key='qwen-plus',prompt_key='fitness.coach.prompt',tool_keys='[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,skill_keys='[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,hook_keys='[\"fitness.safety\"]'::jsonb,memory_key='fitness.daily-memory',temperature=0.5,max_tool_calls=8,updated_at=CURRENT_TIMESTAMP WHERE agent_key='fitness.coach'");
     jdbc.update(
         "UPDATE agent_component_projection SET status='AVAILABLE' WHERE (component_type,component_key) IN (('FRAMEWORK','agentscope'),('PROMPT','fitness.coach.prompt'),('MEMORY','fitness.daily-memory'),('TOOL','fitness.profile.query'),('TOOL','fitness.workout.query'),('TOOL','fitness.meal.query'),('TOOL','fitness.meal.feedback_context'),('TOOL','fitness.plan.generate'),('SKILL','fitness.meal.skill'),('SKILL','fitness.plan.skill'),('HOOK','fitness.safety'))");
   }

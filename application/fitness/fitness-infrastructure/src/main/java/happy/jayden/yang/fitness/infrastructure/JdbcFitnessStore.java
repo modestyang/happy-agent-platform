@@ -22,6 +22,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportSourceData
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWorkoutRecord;
 import happy.jayden.yang.fitness.service.FitnessDtos.ExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.FeedbackReason;
+import happy.jayden.yang.fitness.service.FitnessDtos.FirstSetupRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.IdempotencyEntry;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
@@ -39,6 +40,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import java.math.BigDecimal;
@@ -57,6 +59,8 @@ import javax.sql.DataSource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 public final class JdbcFitnessStore implements FitnessStore {
 
@@ -69,10 +73,13 @@ public final class JdbcFitnessStore implements FitnessStore {
   private static final int MAX_CONTEXT_NOTE_LENGTH = 160;
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
+  private final TransactionTemplate transactions;
 
   public JdbcFitnessStore(DataSource fitnessDataSource, ObjectMapper objectMapper) {
     this.jdbc = new JdbcTemplate(fitnessDataSource);
     this.objectMapper = objectMapper;
+    this.transactions =
+        new TransactionTemplate(new DataSourceTransactionManager(fitnessDataSource));
   }
 
   @Override
@@ -91,6 +98,20 @@ public final class JdbcFitnessStore implements FitnessStore {
     } catch (EmptyResultDataAccessException exception) {
       return Optional.empty();
     }
+  }
+
+  @Override
+  public UUID createLoginAccount(String username, String nickname, String passwordHash) {
+    UUID userId = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname) "
+            + "VALUES (?,?, 'ACTIVE', ?, ?, ?)",
+        userId,
+        "local:" + username,
+        username,
+        passwordHash,
+        nickname);
+    return userId;
   }
 
   @Override
@@ -837,6 +858,36 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   @Override
+  public void completeFirstSetup(UUID userId, FirstSetupRequest request) {
+    transactions.executeWithoutResult(
+        ignored -> {
+          jdbc.queryForObject(
+              "SELECT user_id FROM users WHERE user_id=? FOR UPDATE", UUID.class, userId);
+          Long goalCount =
+              jdbc.queryForObject("SELECT COUNT(*) FROM goals WHERE user_id=?", Long.class, userId);
+          if (goalCount != null && goalCount > 0) {
+            throw new InvalidRequestException("首次设置已完成");
+          }
+          Instant recordedAt = Instant.now();
+          jdbc.update(
+              "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES (?,?,?,?,?)",
+              UUID.randomUUID(),
+              userId,
+              Timestamp.from(recordedAt),
+              request.weightJin(),
+              request.waistCm());
+          jdbc.update(
+              "INSERT INTO goals(goal_id,user_id,name,start_weight_jin,target_weight_jin,target_date,status) VALUES (?,?,?,?,?,?,'ACTIVE')",
+              UUID.randomUUID(),
+              userId,
+              "体重目标",
+              request.weightJin(),
+              request.targetWeightJin(),
+              request.targetDate());
+        });
+  }
+
+  @Override
   public BootstrapData loadForAi(UUID userId) {
     return loadBootstrap(userId, LocalDate.now(USER_ZONE));
   }
@@ -1032,19 +1083,23 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   private GoalState latestGoal(UUID userId) {
-    return required(
-        "SELECT goal_id,name,start_weight_jin,target_weight_jin,status,version,created_at FROM goals WHERE user_id=?"
-            + " ORDER BY created_at DESC LIMIT 1",
-        (rs, row) ->
-            new GoalState(
-                rs.getObject("goal_id", UUID.class),
-                rs.getString("name"),
-                rs.getBigDecimal("start_weight_jin"),
-                rs.getBigDecimal("target_weight_jin"),
-                rs.getString("status"),
-                rs.getInt("version"),
-                rs.getTimestamp("created_at").toInstant()),
-        userId);
+    return jdbc
+        .query(
+            "SELECT goal_id,name,start_weight_jin,target_weight_jin,status,version,created_at FROM goals WHERE user_id=?"
+                + " ORDER BY created_at DESC LIMIT 1",
+            (rs, row) ->
+                new GoalState(
+                    rs.getObject("goal_id", UUID.class),
+                    rs.getString("name"),
+                    rs.getBigDecimal("start_weight_jin"),
+                    rs.getBigDecimal("target_weight_jin"),
+                    rs.getString("status"),
+                    rs.getInt("version"),
+                    rs.getTimestamp("created_at").toInstant()),
+            userId)
+        .stream()
+        .findFirst()
+        .orElse(null);
   }
 
   private GoalState currentGoal(UUID userId, UUID requestedGoalId) {

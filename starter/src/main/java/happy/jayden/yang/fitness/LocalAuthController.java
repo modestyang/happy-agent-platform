@@ -3,6 +3,8 @@ package happy.jayden.yang.fitness;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginResponse;
+import happy.jayden.yang.fitness.service.FitnessDtos.LoginResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.RegisterRequest;
 import java.time.Duration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -26,18 +28,12 @@ public class LocalAuthController {
 
   @PostMapping("/login")
   ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
-    var login = application.login(request);
-    ResponseCookie cookie =
-        ResponseCookie.from(SESSION_COOKIE, login.sessionToken())
-            .httpOnly(true)
-            .secure(false)
-            .sameSite("Lax")
-            .path("/")
-            .maxAge(Duration.ofDays(14))
-            .build();
-    return ResponseEntity.ok()
-        .header(HttpHeaders.SET_COOKIE, cookie.toString())
-        .body(new LoginResponse(login.user()));
+    return loginResponse(application.login(request));
+  }
+
+  @PostMapping("/register")
+  ResponseEntity<LoginResponse> register(@RequestBody RegisterRequest request) {
+    return loginResponse(application.register(request));
   }
 
   @PostMapping("/logout")
@@ -52,5 +48,19 @@ public class LocalAuthController {
             .maxAge(Duration.ZERO)
             .build();
     return ResponseEntity.noContent().header(HttpHeaders.SET_COOKIE, expired.toString()).build();
+  }
+
+  private ResponseEntity<LoginResponse> loginResponse(LoginResult login) {
+    ResponseCookie cookie =
+        ResponseCookie.from(SESSION_COOKIE, login.sessionToken())
+            .httpOnly(true)
+            .secure(false)
+            .sameSite("Lax")
+            .path("/")
+            .maxAge(Duration.ofDays(14))
+            .build();
+    return ResponseEntity.ok()
+        .header(HttpHeaders.SET_COOKIE, cookie.toString())
+        .body(new LoginResponse(login.user()));
   }
 }

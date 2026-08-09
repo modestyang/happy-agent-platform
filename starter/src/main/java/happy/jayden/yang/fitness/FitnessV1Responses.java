@@ -1,6 +1,8 @@
 package happy.jayden.yang.fitness;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportFacts;
+import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportMetric;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportRunDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
@@ -106,7 +108,7 @@ final class FitnessV1Responses {
         value.windowStart(),
         value.windowEnd(),
         value.narrative().conclusion(),
-        facts.metrics(),
+        facts.metrics().stream().map(FitnessV1Responses::reportMetric).toList(),
         facts.weightTrend(),
         facts.trainingVolume(),
         facts.trainingStructure(),
@@ -117,6 +119,11 @@ final class FitnessV1Responses {
         value.narrative().nextActions(),
         value.computedThrough(),
         value.updatedAt());
+  }
+
+  private static ReportMetric reportMetric(CurrentGoalReportMetric value) {
+    return new ReportMetric(
+        value.key(), value.label(), value.value(), value.unit(), value.comparison(), value.trend());
   }
 
   record Failure(String code, String message, boolean retryable) {}
@@ -175,6 +182,15 @@ final class FitnessV1Responses {
       Failure failure,
       Instant updatedAt) {}
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record ReportMetric(
+      String key,
+      String label,
+      java.math.BigDecimal value,
+      String unit,
+      java.math.BigDecimal comparison,
+      String trend) {}
+
   record CompleteCurrentGoalReport(
       UUID reportId,
       UUID goalId,
@@ -183,7 +199,7 @@ final class FitnessV1Responses {
       java.time.LocalDate windowStart,
       java.time.LocalDate windowEnd,
       happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportConclusion conclusion,
-      List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportMetric> metrics,
+      List<ReportMetric> metrics,
       List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWeightTrendPoint> weightTrend,
       List<happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalTrainingVolumePoint>
           trainingVolume,

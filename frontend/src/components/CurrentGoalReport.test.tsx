@@ -73,6 +73,8 @@ describe('CurrentGoalReportCard', () => {
     expect(screen.getByRole('img', { name: '四周体重趋势' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '四周训练量趋势' })).toBeInTheDocument();
     expect(screen.getByText(/数据积累中/)).toBeInTheDocument();
+    expect(screen.getByText('训练部位覆盖次数占比')).toBeInTheDocument();
+    expect(screen.getByText('力量 / 有氧按计划时长估算')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '当前目标累计报告' })).toHaveTextContent('连续三周训练量上升');
 
     await user.click(screen.getByRole('button', { name: '生成下周计划' }));

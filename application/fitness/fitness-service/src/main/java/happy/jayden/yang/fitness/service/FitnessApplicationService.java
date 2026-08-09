@@ -275,6 +275,7 @@ public final class FitnessApplicationService {
     }
     positive(request.weightJin(), "weightJin");
     positive(request.waistCm(), "waistCm");
+    rejectFuture(request.recordedAt(), "recordedAt");
     return store.createBodyRecord(authenticate(sessionToken), request);
   }
 
@@ -288,6 +289,7 @@ public final class FitnessApplicationService {
     if (request.items().stream().anyMatch(item -> blank(item.name()) || item.estimatedKcal() < 0)) {
       throw new InvalidRequestException("餐食名称不能为空且 estimatedKcal 不能为负数");
     }
+    rejectFuture(request.occurredAt(), "occurredAt");
     return store.createMeal(authenticate(sessionToken), request);
   }
 
@@ -328,6 +330,7 @@ public final class FitnessApplicationService {
     if (request == null || request.mediaId() == null || request.mealType() == null) {
       throw new InvalidRequestException("mediaId 和 mealType 必填");
     }
+    rejectFuture(request.occurredAt(), "occurredAt");
     UUID userId = authenticate(sessionToken);
     return store.createRecognitionJob(
         userId, request.mediaId(), request.mealType(), request.occurredAt());
@@ -364,6 +367,7 @@ public final class FitnessApplicationService {
     }
     if (request.items().stream().anyMatch(item -> blank(item.name()) || item.estimatedKcal() < 0))
       throw new InvalidRequestException("餐食名称不能为空且 estimatedKcal 不能为负数");
+    rejectFuture(request.occurredAt(), "occurredAt");
     return store.createMealRecord(userId, request);
   }
 
@@ -746,7 +750,7 @@ public final class FitnessApplicationService {
   }
 
   /** Computes report facts from timestamp-windowed objective data; no record has a goal_id. */
-  static FitnessDtos.CurrentGoalReportFacts currentGoalReportFacts(
+  public static FitnessDtos.CurrentGoalReportFacts currentGoalReportFacts(
       FitnessDtos.CurrentGoalReportSourceData source) {
     FitnessDtos.GoalState goal = source.goal();
     LocalDate end = source.observedThrough().atZone(USER_ZONE).toLocalDate();
@@ -988,6 +992,12 @@ public final class FitnessApplicationService {
   private static void positive(BigDecimal value, String name) {
     if (value != null && value.compareTo(BigDecimal.ZERO) <= 0) {
       throw new InvalidRequestException(name + " 必须大于 0");
+    }
+  }
+
+  private static void rejectFuture(Instant occurredAt, String field) {
+    if (occurredAt != null && occurredAt.isAfter(Instant.now())) {
+      throw new InvalidRequestException(field + " 不能晚于当前时刻");
     }
   }
 

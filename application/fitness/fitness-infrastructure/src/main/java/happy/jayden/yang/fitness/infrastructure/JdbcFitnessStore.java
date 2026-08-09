@@ -558,11 +558,12 @@ public final class JdbcFitnessStore implements FitnessStore {
     return jdbc
         .query(
             "SELECT r.report_id,r.user_id,r.goal_id,r.goal_version,"
-                + " CASE WHEN r.state='READY' AND EXISTS (SELECT 1 FROM ("
-                + " SELECT recorded_at AS observed_at FROM body_records WHERE user_id=r.user_id"
-                + " UNION ALL SELECT occurred_at FROM meals WHERE user_id=r.user_id"
-                + " UNION ALL SELECT completed_at FROM workout_plans WHERE user_id=r.user_id AND completed_at IS NOT NULL"
-                + " ) objective WHERE objective.observed_at > r.computed_through) THEN 'STALE' ELSE r.state END AS state,"
+                + " CASE WHEN r.state='READY' AND r.computed_through IS NOT NULL AND EXISTS (SELECT 1 FROM ("
+                + " SELECT recorded_at AS event_at,created_at AS written_at FROM body_records WHERE user_id=r.user_id"
+                + " UNION ALL SELECT occurred_at,created_at FROM meals WHERE user_id=r.user_id"
+                + " UNION ALL SELECT completed_at,updated_at FROM workout_plans WHERE user_id=r.user_id AND completed_at IS NOT NULL"
+                + " ) objective WHERE objective.event_at>=g.created_at AND objective.event_at<=CURRENT_TIMESTAMP"
+                + " AND objective.written_at>r.computed_through) THEN 'STALE' ELSE r.state END AS state,"
                 + " r.window_start,r.window_end,r.deterministic_snapshot::text,r.narrative::text,r.computed_through,"
                 + " r.failure_code,r.failure_message,r.version,r.lease_token,r.lease_until,r.updated_at"
                 + " FROM current_goal_reports r JOIN goals g ON g.goal_id=r.goal_id"
@@ -577,7 +578,7 @@ public final class JdbcFitnessStore implements FitnessStore {
   public CurrentGoalReportSourceData loadCurrentGoalReportSource(UUID userId, UUID goalId) {
     GoalState goal = currentGoal(userId, goalId);
     Instant start = goal.startedAt();
-    Instant end = Instant.now();
+    Instant end = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP", Timestamp.class).toInstant();
     List<BodyRecordDto> bodyRecords =
         jdbc.query(
             "SELECT body_record_id,recorded_at,weight_jin,waist_cm FROM body_records WHERE user_id=?"
@@ -777,7 +778,7 @@ public final class JdbcFitnessStore implements FitnessStore {
     int changed =
         jdbc.update(
             "UPDATE workout_plans SET"
-                + " status='COMPLETED',completion_ratio=?,completed_at=CURRENT_TIMESTAMP WHERE"
+                + " status='COMPLETED',completion_ratio=?,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE"
                 + " workout_plan_id=? AND user_id=? AND status<>'COMPLETED'",
             request.completionRatio(),
             workoutId,

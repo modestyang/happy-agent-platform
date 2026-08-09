@@ -8,6 +8,7 @@ import {
 import { ApiError, api } from './api';
 import { ChatMarkdown } from './components/ChatMarkdown';
 import { CurrentGoalReportCard } from './components/CurrentGoalReport';
+import { useCurrentGoalReportPolling } from './components/CurrentGoalReportPolling';
 import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { MealRecordForm } from './components/MealRecordForm';
@@ -265,24 +266,18 @@ function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: R
       setReportError(errorText(err));
     }
   }
-  async function readCurrentGoalReport() {
-    try {
-      setReport(await api.currentGoalReport());
-      setReportError('');
-    } catch (err) {
-      setReportError(errorText(err));
-    }
-  }
+  const readCurrentGoalReport = useCallback(() => api.currentGoalReport(), []);
+  const acceptPolledReport = useCallback((nextReport: import('./api/generated/public').CurrentGoalReport) => {
+    setReport(nextReport);
+    setReportError('');
+  }, []);
+  const reportPollingError = useCallback((err: unknown) => setReportError(errorText(err)), []);
+  useCurrentGoalReportPolling(report, readCurrentGoalReport, acceptPolledReport, 1000, reportPollingError);
   useEffect(() => {
     if (!reportRequested || preparedReport.current) return;
     preparedReport.current = true;
     void refreshCurrentGoalReport('USER_REFRESH');
   }, [reportRequested]);
-  useEffect(() => {
-    if (report?.state !== 'QUEUED' && report?.state !== 'GENERATING') return;
-    const timer = window.setTimeout(() => void readCurrentGoalReport(), 1000);
-    return () => window.clearTimeout(timer);
-  }, [report?.state, report?.updatedAt]);
   const isWelcome = messages.length === 0;
 
   return <section className="page ai-page">

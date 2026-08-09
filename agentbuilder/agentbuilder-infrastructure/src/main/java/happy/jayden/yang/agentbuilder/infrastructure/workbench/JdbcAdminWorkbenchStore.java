@@ -18,6 +18,9 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -32,6 +35,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() {};
   private static final Map<String, Object> CORRUPTED_MARKER =
       Map.of("reason", "stored workbench payload is invalid");
+  private static final String CURRENT_GOAL_RUNTIME = "currentGoalReportRuntime";
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
@@ -162,7 +166,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
               UUID.randomUUID(),
               draft.agentKey(),
               nextVersion,
-              write(draft),
+              write(publishedConfiguration(draft)),
               java.sql.Timestamp.from(publishedAt));
           var changed =
               jdbc.update(
@@ -174,6 +178,55 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
           if (changed == 0) throw new Conflict("Agent 草稿在发布前已发生变化");
           return new PublicationView(draft.agentKey(), nextVersion, publishedAt);
         });
+  }
+
+  /** Captures the exact non-conversational report dependencies with the Agent release. */
+  private Map<String, Object> publishedConfiguration(AgentDraftView draft) {
+    var configuration = new LinkedHashMap<String, Object>(read(write(draft), OBJECT_MAP));
+    var provider = publishedComponent("PROVIDER", draft.providerKey());
+    var model = publishedComponent("MODEL", draft.modelKey());
+    var runtime = new LinkedHashMap<String, Object>();
+    runtime.put("provider", provider.asSnapshot());
+    runtime.put("model", model.asSnapshot());
+    var credential = publishedCredential(draft.providerKey());
+    if (credential != null) runtime.put("credential", credential.asSnapshot());
+    configuration.put(CURRENT_GOAL_RUNTIME, runtime);
+    return configuration;
+  }
+
+  private PublishedComponent publishedComponent(String type, String key) {
+    var values =
+        jdbc.query(
+            "SELECT version,status,config::text FROM agent_component_projection WHERE component_type=?"
+                + " AND component_key=? ORDER BY version DESC LIMIT 1",
+            (rs, row) ->
+                new PublishedComponent(
+                    key,
+                    rs.getInt("version"),
+                    rs.getString("status"),
+                    read(rs.getString("config"), OBJECT_MAP)),
+            type,
+            key);
+    if (values.isEmpty()) throw new NotFound("发布依赖组件不存在");
+    if (!"AVAILABLE".equals(values.get(0).status())) {
+      throw new IllegalStateException("发布依赖组件不可用");
+    }
+    return values.get(0);
+  }
+
+  private PublishedCredential publishedCredential(String providerKey) {
+    var values =
+        jdbc.query(
+            "SELECT credential_ciphertext,credential_iv,credential_aad,credential_key_version"
+                + " FROM agent_provider_credentials WHERE provider_key=?",
+            (rs, row) ->
+                new PublishedCredential(
+                    rs.getInt("credential_key_version"),
+                    rs.getBytes("credential_ciphertext"),
+                    rs.getBytes("credential_iv"),
+                    rs.getBytes("credential_aad")),
+            providerKey);
+    return values.isEmpty() ? null : values.get(0);
   }
 
   @Override
@@ -308,6 +361,29 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         status,
         write(config),
         "0".repeat(64));
+  }
+
+  private record PublishedComponent(
+      String key, int version, String status, Map<String, Object> config) {
+    Map<String, Object> asSnapshot() {
+      return Map.of("key", key, "version", version, "status", status, "config", config);
+    }
+  }
+
+  private record PublishedCredential(int keyVersion, byte[] ciphertext, byte[] iv, byte[] aad) {
+    Map<String, Object> asSnapshot() {
+      try {
+        return Map.of(
+            "keyVersion", keyVersion,
+            "ciphertext", Base64.getEncoder().encodeToString(ciphertext),
+            "iv", Base64.getEncoder().encodeToString(iv),
+            "aad", Base64.getEncoder().encodeToString(aad));
+      } finally {
+        Arrays.fill(ciphertext, (byte) 0);
+        Arrays.fill(iv, (byte) 0);
+        Arrays.fill(aad, (byte) 0);
+      }
+    }
   }
 
   private List<ProviderView> providers() {

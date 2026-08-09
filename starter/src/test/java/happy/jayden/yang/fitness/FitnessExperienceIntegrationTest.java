@@ -13,11 +13,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import happy.jayden.yang.StarterApplication;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.AdminWorkbenchLocalSeed;
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminWorkbenchStore;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
+import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportConclusion;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportGenerationResult;
@@ -33,13 +37,16 @@ import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import jakarta.servlet.http.Cookie;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HexFormat;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -47,6 +54,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -1040,7 +1048,7 @@ class FitnessExperienceIntegrationTest {
         "published-model",
         "{\"providerKey\":\"published-provider\",\"model\":\"published-model\"}");
     publishMealRuntimeSnapshot(
-        agentJdbc, 91, "{\"providerKey\":\"published-provider\",\"modelKey\":\"published-model\"}");
+        agentJdbc, 91, publishedCurrentGoalRuntimeSnapshot("published-provider", "published-model"));
     CurrentGoalReportRuntime runtime =
         new CurrentGoalReportRuntime(agentDataSource, objectMapper, "build/missing-agent-master-key");
 
@@ -1078,7 +1086,71 @@ class FitnessExperienceIntegrationTest {
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
     publishMealRuntimeSnapshot(agentJdbc, 92, "{\"modelKey\":\"published-model\"}");
     assertThat(runtime.generate(currentGoalReportFacts()).failureMessage())
-        .isEqualTo("已发布 Agent 未绑定 Provider");
+        .isEqualTo("已发布报告运行时快照缺失");
+  }
+
+  @Test
+  void currentGoalReportRuntimeKeepsPublishedComponentAndCredentialSnapshotsUntilRepublished()
+      throws Exception {
+    AtomicReference<String> authorization = new AtomicReference<>();
+    AtomicReference<String> model = new AtomicReference<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+          model.set(objectMapper.readTree(exchange.getRequestBody()).path("model").asText());
+          byte[] response =
+              "{\"choices\":[{\"message\":{\"content\":\"{\\\"conclusion\\\":{\\\"summary\\\":\\\"稳定执行\\\",\\\"score\\\":80,\\\"grade\\\":\\\"B\\\"},\\\"highlights\\\":[\\\"一\\\",\\\"二\\\"],\\\"weaknesses\\\":[\\\"三\\\"],\\\"nextActions\\\":[{\\\"title\\\":\\\"记录\\\",\\\"rationale\\\":\\\"保持更新\\\",\\\"action\\\":\\\"OPEN_RECORD\\\"}]}\"}}]}"
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().add("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, response.length);
+          exchange.getResponseBody().write(response);
+          exchange.close();
+        });
+    server.start();
+    try {
+      JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
+      agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+      Path masterKey = testSecret("published-report-runtime", Base64.getEncoder().encodeToString(new byte[32]));
+      JdbcAdminWorkbenchStore workbench =
+          new JdbcAdminWorkbenchStore(agentDataSource, objectMapper, masterKey);
+      new AdminWorkbenchLocalSeed(workbench).seed();
+      String publishedEndpoint = "http://localhost:" + server.getAddress().getPort() + "/v1";
+      agentJdbc.update(
+          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='PROVIDER' AND component_key='bailian'",
+          "{\"endpoint\":\"%s\"}".formatted(publishedEndpoint));
+      agentJdbc.update(
+          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='MODEL' AND component_key='qwen-plus'",
+          "{\"providerKey\":\"bailian\",\"model\":\"published-model\"}");
+      workbench.saveCredential("bailian", "published-key".toCharArray());
+      workbench.publish(workbench.findDraft("fitness.coach").orElseThrow());
+
+      CurrentGoalReportRuntime runtime =
+          new CurrentGoalReportRuntime(agentDataSource, objectMapper, masterKey.toString());
+      assertThat(runtime.generate(currentGoalReportFacts()).status()).isEqualTo("SUCCEEDED");
+      assertThat(model.get()).isEqualTo("published-model");
+      assertThat(authorization.get()).isEqualTo("Bearer published-key");
+
+      agentJdbc.update(
+          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='PROVIDER' AND component_key='bailian'",
+          "{\"endpoint\":\"%s/changed\"}".formatted(publishedEndpoint));
+      agentJdbc.update(
+          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='MODEL' AND component_key='qwen-plus'",
+          "{\"providerKey\":\"bailian\",\"model\":\"mutable-model\"}");
+      workbench.saveCredential("bailian", "mutable-key".toCharArray());
+
+      assertThat(runtime.generate(currentGoalReportFacts()).status()).isEqualTo("SUCCEEDED");
+      assertThat(model.get()).isEqualTo("published-model");
+      assertThat(authorization.get()).isEqualTo("Bearer published-key");
+
+      workbench.publish(workbench.findDraft("fitness.coach").orElseThrow());
+      assertThat(runtime.generate(currentGoalReportFacts()).status()).isEqualTo("SUCCEEDED");
+      assertThat(model.get()).isEqualTo("mutable-model");
+      assertThat(authorization.get()).isEqualTo("Bearer mutable-key");
+    } finally {
+      server.stop(0);
+    }
   }
 
   @Test
@@ -1668,7 +1740,15 @@ class FitnessExperienceIntegrationTest {
         "INSERT INTO agent_versions(agent_version_id,agent_key,version,status,configuration,published_at) VALUES (?, 'fitness.coach', ?, 'PUBLISHED', ?::jsonb, CURRENT_TIMESTAMP)",
         UUID.randomUUID(),
         version,
-        configuration);
+            configuration);
+  }
+
+  private static String publishedCurrentGoalRuntimeSnapshot(
+      String providerKey, String modelKey) {
+    return """
+        {"currentGoalReportRuntime":{"provider":{"key":"%s","version":1,"status":"AVAILABLE","config":{"endpoint":"https://example.test/v1/"}},"model":{"key":"%s","version":1,"status":"AVAILABLE","config":{"providerKey":"%s","model":"%s"}},"credential":{"keyVersion":1,"ciphertext":"AA==","iv":"AAAAAAAAAAAAAAAA","aad":""}}}
+        """
+        .formatted(providerKey, modelKey, providerKey, modelKey);
   }
 
   private static void upsertMealRuntimeComponents(
@@ -1742,6 +1822,7 @@ class FitnessExperienceIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.state").value("READY"))
         .andExpect(jsonPath("$.metrics[0].key").value("GOAL_PROGRESS"))
+        .andExpect(jsonPath("$.metrics[0].comparison").doesNotExist())
         .andExpect(
             jsonPath(
                 "$.weightTrend.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(4)))
@@ -1762,6 +1843,138 @@ class FitnessExperienceIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.state").value("STALE"))
         .andExpect(jsonPath("$.conclusion.summary").value("当前目标处于稳定执行阶段"));
+  }
+
+  @Test
+  void currentGoalReportUsesWriteWatermarksForLateInWindowDataOnly() throws Exception {
+    currentGoalReportPort.succeed();
+    drainCurrentGoalReportQueue();
+    Cookie owner = login();
+    UUID ownerId = UUID.fromString(bootstrap(owner).path("user").path("id").asText());
+    JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
+
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(owner)
+                .header("Idempotency-Key", "current-goal-watermark-ready")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REFRESH\"}"))
+        .andExpect(status().isAccepted());
+    currentGoalReportWorker.runOne();
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("READY"));
+
+    Instant goalStartedAt =
+        jdbc.queryForObject(
+                "SELECT created_at FROM goals WHERE user_id=? AND status='ACTIVE' ORDER BY created_at DESC LIMIT 1",
+                java.sql.Timestamp.class,
+                ownerId)
+            .toInstant();
+    fitnessStore.createBodyRecord(
+        ownerId,
+        new happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest(
+            new java.math.BigDecimal("139.7"), null, goalStartedAt.plusMillis(1)));
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("STALE"));
+
+    mvc.perform(
+            post("/api/v1/app/reports/current-goal")
+                .cookie(owner)
+                .header("Idempotency-Key", "current-goal-watermark-refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REFRESH\"}"))
+        .andExpect(status().isAccepted());
+    currentGoalReportWorker.runOne();
+    fitnessStore.createBodyRecord(
+        ownerId,
+        new happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest(
+            new java.math.BigDecimal("140.2"),
+            null,
+            goalStartedAt.minus(Duration.ofDays(1))));
+
+    mvc.perform(get("/api/v1/app/reports/current-goal").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.state").value("READY"));
+  }
+
+  @Test
+  void objectiveRecordEndpointsRejectFutureBusinessTimes() throws Exception {
+    Cookie owner = login();
+    String future = Instant.now().plus(Duration.ofDays(1)).toString();
+
+    mvc.perform(
+            post("/api/app/body-records")
+                .cookie(owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"weightJin\":140,\"recordedAt\":\"%s\"}".formatted(future)))
+        .andExpect(status().isBadRequest());
+    mvc.perform(
+            post("/api/app/meals")
+                .cookie(owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"mealType\":\"LUNCH\",\"occurredAt\":\"%s\",\"items\":[{\"name\":\"午饭\",\"estimatedKcal\":400}]}"
+                        .formatted(future)))
+        .andExpect(status().isBadRequest());
+    mvc.perform(
+            post("/api/v1/app/meal-records")
+                .cookie(owner)
+                .header("Idempotency-Key", "future-meal-record-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"mealType\":\"LUNCH\",\"occurredAt\":\"%s\",\"source\":\"MANUAL\",\"items\":[{\"name\":\"午饭\",\"estimatedKcal\":400}]}"
+                        .formatted(future)))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void currentGoalFactsKeepEmptyWeeksAndUseCountBasedAreaCoverage() {
+    Instant observedThrough = Instant.parse("2026-08-09T12:00:00Z");
+    var source =
+        new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportSourceData(
+            new happy.jayden.yang.fitness.service.FitnessDtos.GoalState(
+                UUID.randomUUID(),
+                "八月减脂",
+                new java.math.BigDecimal("140"),
+                new java.math.BigDecimal("120"),
+                "ACTIVE",
+                1,
+                Instant.parse("2026-07-20T00:00:00Z")),
+            observedThrough,
+            List.of(
+                new happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto(
+                    UUID.randomUUID(),
+                    Instant.parse("2026-07-21T00:00:00Z"),
+                    new java.math.BigDecimal("138"),
+                    null),
+                new happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto(
+                    UUID.randomUUID(),
+                    Instant.parse("2026-08-08T00:00:00Z"),
+                    new java.math.BigDecimal("136"),
+                    null)),
+            List.of(),
+            List.of(
+                new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWorkoutRecord(
+                    Instant.parse("2026-08-03T00:00:00Z"), 60, List.of("下肢", "核心"), "下肢力量"),
+                new happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalWorkoutRecord(
+                    Instant.parse("2026-08-08T00:00:00Z"), 30, List.of("心肺"), "室内骑行")));
+
+    var facts = FitnessApplicationService.currentGoalReportFacts(source);
+
+    assertThat(facts.weightTrend()).hasSizeGreaterThanOrEqualTo(4);
+    assertThat(facts.weightTrend()).anySatisfy(point -> assertThat(point.valueJin()).isNull());
+    assertThat(facts.metrics())
+        .filteredOn(metric -> metric.key().equals("WEIGHT"))
+        .singleElement()
+        .extracting(metric -> metric.comparison())
+        .isEqualTo(new java.math.BigDecimal("-2"));
+    assertThat(facts.trainingStructure())
+        .extracting(item -> item.area() + ":" + item.percent())
+        .containsExactlyInAnyOrder("下肢:33", "核心:33", "心肺:33");
+    assertThat(facts.strengthPercent()).isEqualByComparingTo("67");
+    assertThat(facts.cardioPercent()).isEqualByComparingTo("33");
   }
 
   @Test

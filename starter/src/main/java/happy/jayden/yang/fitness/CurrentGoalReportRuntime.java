@@ -44,12 +44,18 @@ public final class CurrentGoalReportRuntime implements CurrentGoalReportGenerati
     char[] apiKey = null;
     try {
       RuntimeConfig config = config();
-      apiKey = credentials.readApiKey(config.providerKey()).orElse(null);
-      if (apiKey == null) return failed("DEPENDENCY_NOT_CONFIGURED", "报告 Provider 凭据未配置");
+      apiKey =
+          credentials.decryptPublishedSnapshot(
+              config.providerKey(),
+              config.credentialKeyVersion(),
+              config.credentialCiphertext(),
+              config.credentialIv());
       JsonNode response = post(config, apiKey, facts);
       return new CurrentGoalReportGenerationResult("SUCCEEDED", narrative(response), null, null);
     } catch (ConfigurationException exception) {
       return failed("DEPENDENCY_NOT_CONFIGURED", exception.getMessage());
+    } catch (SecurityException exception) {
+      return failed("DEPENDENCY_NOT_CONFIGURED", "已发布报告凭据快照无法解密");
     } catch (java.net.SocketTimeoutException exception) {
       return failed("TASK_FAILED", "当前目标报告模型调用超时");
     } catch (HttpException exception) {
@@ -61,7 +67,7 @@ public final class CurrentGoalReportRuntime implements CurrentGoalReportGenerati
     }
   }
 
-  /** Reads only the latest immutable published Agent configuration, never an editable draft. */
+  /** Reads only the latest immutable published Agent configuration, never mutable projections. */
   RuntimeConfig config() throws IOException, ConfigurationException {
     var published =
         agentJdbc.query(
@@ -70,34 +76,35 @@ public final class CurrentGoalReportRuntime implements CurrentGoalReportGenerati
             (rs, row) -> rs.getString("configuration"));
     if (published.isEmpty()) throw new ConfigurationException("未发布可用的当前目标报告 Agent");
     JsonNode agentSnapshot = mapper.readTree(published.get(0));
-    String providerKey = configText(agentSnapshot, "providerKey", "已发布 Agent 未绑定 Provider");
-    String modelKey = configText(agentSnapshot, "modelKey", "已发布 Agent 未绑定模型");
-    var models =
-        agentJdbc.query(
-            "SELECT config::text,status FROM agent_component_projection WHERE component_type='MODEL'"
-                + " AND component_key=? ORDER BY version DESC LIMIT 1",
-            (rs, row) -> new String[] {rs.getString("config"), rs.getString("status")},
-            modelKey);
-    var providers =
-        agentJdbc.query(
-            "SELECT config::text,status FROM agent_component_projection WHERE component_type='PROVIDER'"
-                + " AND component_key=? ORDER BY version DESC LIMIT 1",
-            (rs, row) -> new String[] {rs.getString("config"), rs.getString("status")},
-            providerKey);
-    if (models.isEmpty()
-        || providers.isEmpty()
-        || !"AVAILABLE".equals(models.get(0)[1])
-        || !"AVAILABLE".equals(providers.get(0)[1])) {
+    JsonNode runtime = object(agentSnapshot, "currentGoalReportRuntime", "已发布报告运行时快照缺失");
+    JsonNode provider = object(runtime, "provider", "已发布报告 Provider 快照缺失");
+    JsonNode model = object(runtime, "model", "已发布报告模型快照缺失");
+    JsonNode credential = object(runtime, "credential", "已发布报告凭据快照缺失");
+    String providerKey = configText(provider, "key", "已发布 Agent 未绑定 Provider");
+    String modelKey = configText(model, "key", "已发布 Agent 未绑定模型");
+    if (!"AVAILABLE".equals(configText(provider, "status", "报告 Provider 快照不可用"))
+        || !"AVAILABLE".equals(configText(model, "status", "报告模型快照不可用"))) {
       throw new ConfigurationException("报告模型或 Provider 未启用");
     }
-    JsonNode model = mapper.readTree(models.get(0)[0]);
-    JsonNode provider = mapper.readTree(providers.get(0)[0]);
-    if (!providerKey.equals(configText(model, "providerKey", "模型未显式绑定 Provider"))) {
+    JsonNode providerConfig = object(provider, "config", "Provider 快照缺少配置");
+    JsonNode modelConfig = object(model, "config", "模型快照缺少配置");
+    if (!providerKey.equals(configText(modelConfig, "providerKey", "模型未显式绑定 Provider"))) {
       throw new ConfigurationException("模型未绑定当前 Provider");
     }
-    String endpoint = configText(provider, "endpoint", "Provider 未配置 endpoint");
+    String endpoint = configText(providerConfig, "endpoint", "Provider 未配置 endpoint");
     return new RuntimeConfig(
-        providerKey, model.path("model").asText(modelKey), endpoint.replaceAll("/$", ""));
+        providerKey,
+        optionalConfigText(modelConfig, "model", modelKey),
+        endpoint.replaceAll("/$", ""),
+        configText(credential, "ciphertext", "报告凭据快照缺少密文"),
+        configText(credential, "iv", "报告凭据快照缺少初始化向量"),
+        credential.path("keyVersion").isInt() && credential.path("keyVersion").intValue() > 0
+            ? credential.path("keyVersion").intValue()
+            : invalidCredentialVersion());
+  }
+
+  private static int invalidCredentialVersion() throws ConfigurationException {
+    throw new ConfigurationException("报告凭据快照版本不合法");
   }
 
   Map<String, Object> requestBody(RuntimeConfig config, CurrentGoalReportFacts facts)
@@ -312,11 +319,34 @@ public final class CurrentGoalReportRuntime implements CurrentGoalReportGenerati
     }
   }
 
+  private static JsonNode object(JsonNode node, String field, String message)
+      throws ConfigurationException {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isObject()) throw new ConfigurationException(message);
+    return value;
+  }
+
+  private static String optionalConfigText(JsonNode node, String field, String fallback)
+      throws ConfigurationException {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) return fallback;
+    if (!value.isTextual() || value.asText().isBlank()) {
+      throw new ConfigurationException("模型快照 model 不合法");
+    }
+    return value.asText();
+  }
+
   private static CurrentGoalReportGenerationResult failed(String code, String message) {
     return new CurrentGoalReportGenerationResult("FAILED", null, code, message);
   }
 
-  record RuntimeConfig(String providerKey, String model, String endpoint) {}
+  record RuntimeConfig(
+      String providerKey,
+      String model,
+      String endpoint,
+      String credentialCiphertext,
+      String credentialIv,
+      int credentialKeyVersion) {}
 
   static final class ConfigurationException extends Exception {
     ConfigurationException(String message) {

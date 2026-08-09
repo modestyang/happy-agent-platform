@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort;
 import java.nio.charset.StandardCharsets;
@@ -124,6 +125,31 @@ class JdbcAdminWorkbenchStoreTest {
         1,
         new JdbcTemplate(dataSource)
             .queryForObject("SELECT count(*) FROM agent_versions", Integer.class));
+  }
+
+  @Test
+  void publishingEmbedsAnEncryptedCurrentGoalRuntimeSnapshotWithoutLeakingPlaintext()
+      throws Exception {
+    String secret = "published-report-key";
+    store.saveCredential("bailian", secret.toCharArray());
+
+    store.publish(store.findDraft("fitness.coach").orElseThrow());
+
+    String configuration =
+        new JdbcTemplate(dataSource)
+            .queryForObject(
+                "SELECT configuration::text FROM agent_versions WHERE agent_key='fitness.coach' AND version=1",
+                String.class);
+    JsonNode snapshot = mapper.readTree(configuration).path("currentGoalReportRuntime");
+    assertEquals("bailian", snapshot.path("provider").path("key").asText());
+    assertEquals(
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        snapshot.path("provider").path("config").path("endpoint").asText());
+    assertEquals("qwen-plus", snapshot.path("model").path("key").asText());
+    assertFalse(snapshot.path("credential").path("ciphertext").asText().isBlank());
+    assertFalse(snapshot.path("credential").path("iv").asText().isBlank());
+    assertFalse(configuration.contains(secret));
+    assertFalse(mapper.writeValueAsString(store.snapshot()).contains(secret));
   }
 
   @Test

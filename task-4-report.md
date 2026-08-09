@@ -28,17 +28,41 @@
   training-plan generation is not available. The pre-existing mutable chat
   runtime was not changed.
 
+## Acceptance-remediation round 1
+
+- Replaced the report card's one-shot poll with a cleanup-safe recursive poll:
+  it keeps reading while the durable state is `QUEUED` or `GENERATING`, stops
+  immediately at terminal states, and cancels pending work on unmount.
+- Added V13 write watermarks. `body_records.created_at` and
+  `workout_plans.updated_at` are maintained alongside the existing meal write
+  time; the report uses the database observation watermark, the active-goal
+  event window, and `event_at <= CURRENT_TIMESTAMP` to determine staleness.
+  Future body and meal business timestamps now return HTTP 400.
+- Made report metric responses use a dedicated `NON_NULL` wire type, so an
+  unavailable comparison is absent rather than serialized as `null`.
+- Publishing now persists the current-goal runtime's exact Provider and Model
+  component snapshots plus encrypted credential key version/ciphertext/IV/AAD.
+  Report generation reads only this immutable version payload and fails closed
+  when it is incomplete; it never consults mutable component projections or
+  the current provider credential.
+- Clarified the report card's count-based body-area coverage and the
+  planned-duration basis for strength/cardio ratios.
+
 ## Verification
 
 - `node scripts/contracts/lint.mjs && node scripts/contracts/generate-types.mjs`
   — passed (103 fixture operations, 122 public schemas).
 - `npm --prefix frontend test && npm --prefix frontend run typecheck && npm --prefix frontend run build`
-  — passed (47 frontend tests, typecheck, production build).
-- `./mvnw -pl starter -am test -DskipITs=false -Dspotless.check.skip=true`
-  — completed with no Surefire failures.
+  — passed (50 frontend tests, typecheck, production build).
+- `./mvnw -pl starter -am test -Dspotless.check.skip=true`
+  — passed (60 tests, no Surefire failures).
 - `./mvnw -pl starter -am test -Dtest=DualSchemaIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false -Dspotless.check.skip=true`
-  — passed (3 tests, fitness migration history at V12).
-- Targeted Spotless checks passed for all Task 4 production Java sources. The full
+  — passed (3 tests, fitness migration history at V13).
+- Focused report integration coverage passed for late in-window write
+  watermarks, irrelevant pre-goal history, future-timestamp HTTP 400,
+  absent metric comparisons, empty weeks/count-based structures, and immutable
+  published runtime snapshots before and after re-publish.
+- Targeted Spotless formatting was applied to all Task 4 Java sources and tests. The full
   reactor Spotless check remains blocked by pre-existing formatting violations in
   shared Task 3 test code and `FitnessTools`.
 - Current-goal integration coverage verifies POST enqueue/no request-thread model call,

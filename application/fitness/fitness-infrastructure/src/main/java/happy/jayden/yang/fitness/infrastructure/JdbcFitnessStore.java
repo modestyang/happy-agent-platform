@@ -14,6 +14,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.ExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
+import happy.jayden.yang.fitness.service.FitnessDtos.IdempotencyEntry;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
@@ -228,6 +229,13 @@ public final class JdbcFitnessStore implements FitnessStore {
     Instant occurredAt = request.occurredAt() == null ? Instant.now() : request.occurredAt();
     jdbc.update("INSERT INTO meals(meal_id,user_id,occurred_at,meal_type,items,source,recognition_job_id,note) VALUES (?,?,?,?,?::jsonb,?,?,?)", id, userId, Timestamp.from(occurredAt), request.mealType().name(), json(request.items()), request.source(), request.recognitionJobId(), request.note());
     return new MealDto(id, occurredAt, request.mealType(), List.copyOf(request.items()), request.source(), request.recognitionJobId(), request.note());
+  }
+
+  @Override public Optional<IdempotencyEntry> findIdempotency(UUID userId, String operation, String key) {
+    return jdbc.query("SELECT resource_id,request_hash,response_json::text FROM fitness_idempotency_keys WHERE user_id=? AND operation=? AND idempotency_key=?", (rs,row) -> new IdempotencyEntry(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3)), userId,operation,key).stream().findFirst();
+  }
+  @Override public void saveIdempotency(UUID userId,String operation,String key,String requestHash,UUID resourceId,String responseJson) {
+    jdbc.update("INSERT INTO fitness_idempotency_keys(user_id,operation,idempotency_key,request_hash,resource_id,response_json) VALUES (?,?,?,?,?,?::jsonb)",userId,operation,key,requestHash,resourceId,responseJson);
   }
 
   @Override

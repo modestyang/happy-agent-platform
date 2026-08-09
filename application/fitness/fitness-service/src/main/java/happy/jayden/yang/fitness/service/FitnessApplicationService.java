@@ -113,6 +113,8 @@ public final class FitnessApplicationService {
   public UUID authenticateSession(String sessionToken) {
     return authenticate(sessionToken);
   }
+  public java.util.Optional<FitnessDtos.IdempotencyEntry> idempotency(UUID userId, String operation, String key) { return store.findIdempotency(userId, operation, key); }
+  public void saveIdempotency(UUID userId, String operation, String key, String hash, UUID resourceId, String responseJson) { store.saveIdempotency(userId, operation, key, hash, resourceId, responseJson); }
 
   /** Loads data for a trusted in-process Agent Tool context. */
   public BootstrapData loadForTool(UUID userId) {

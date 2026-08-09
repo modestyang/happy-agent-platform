@@ -28,6 +28,8 @@ public class FitnessProblemHandler {
   ProblemDetail notFound(NotFoundException exception) {
     return problem(HttpStatus.NOT_FOUND, "NOT_FOUND", exception.getMessage());
   }
+  @ExceptionHandler(happy.jayden.yang.fitness.service.FitnessExceptions.ConflictException.class)
+  ProblemDetail conflict(RuntimeException exception) { return problem(HttpStatus.CONFLICT, "CONFLICT", exception.getMessage()); }
 
   @ExceptionHandler(DependencyNotConfiguredException.class)
   ProblemDetail dependencyNotConfigured(DependencyNotConfiguredException exception) {

@@ -87,6 +87,8 @@ public final class FitnessDtos {
   public record ClaimedMealRecognitionJob(
       UUID jobId, UUID userId, UUID mediaId, MealType mealType, Instant occurredAt) {}
 
+  public record IdempotencyEntry(UUID resourceId, String requestHash, String responseJson) {}
+
   public record CreateMealRecordRequest(
       MealType mealType,
       Instant occurredAt,

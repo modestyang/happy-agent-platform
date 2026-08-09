@@ -58,6 +58,8 @@ public final class FitnessPorts {
     Optional<MealRecognitionJobDto> findRecognitionJob(UUID userId, UUID jobId);
 
     MealDto createMealRecord(UUID userId, FitnessDtos.CreateMealRecordRequest request);
+    Optional<FitnessDtos.IdempotencyEntry> findIdempotency(UUID userId, String operation, String key);
+    void saveIdempotency(UUID userId, String operation, String key, String requestHash, UUID resourceId, String responseJson);
   }
 
   public interface MediaUploadPort {

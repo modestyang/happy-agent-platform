@@ -13,9 +13,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.StarterApplication;
+import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
+import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.GeneratedMealRecommendation;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
+import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import jakarta.servlet.http.Cookie;
@@ -27,6 +34,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
@@ -88,6 +96,8 @@ class FitnessExperienceIntegrationTest {
   @Autowired private MealRecognitionWorker recognitionWorker;
   @Autowired private ControlledRecognitionPort recognitionPort;
   @Autowired private FitnessStore fitnessStore;
+  @Autowired private FitnessTools fitnessTools;
+  @Autowired private ControlledDailyMealPlanPort dailyMealPlanPort;
 
   @Autowired
   @Qualifier("fitnessDataSource")
@@ -233,6 +243,222 @@ class FitnessExperienceIntegrationTest {
             header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
 
     mvc.perform(get("/api/app/bootstrap").cookie(session)).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void feedbackIsOwnerScopedUpsertedAndReturnedByBootstrap() throws Exception {
+    Cookie owner = login();
+    String recommendationId =
+        objectMapper
+            .readTree(
+                mvc.perform(get("/api/app/bootstrap").cookie(owner))
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString())
+            .path("mealRecommendations")
+            .get(0)
+            .path("id")
+            .asText();
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sentiment\":\"LIKE\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.sentiment").value("LIKE"));
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-key-0002")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\"不喜欢香菜\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.reason").value("OTHER"));
+
+    mvc.perform(get("/api/app/bootstrap").cookie(owner))
+        .andExpect(jsonPath("$.mealRecommendations[0].feedback.sentiment").value("DISLIKE"))
+        .andExpect(jsonPath("$.mealRecommendations[0].feedback.note").value("不喜欢香菜"));
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(createOtherUser())
+                .header("Idempotency-Key", "feedback-key-other")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sentiment\":\"LIKE\"}"))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void feedbackRejectsEveryNoteLongerThanTheContractLimitBeforePersistence() throws Exception {
+    Cookie owner = login();
+    String recommendationId =
+        objectMapper
+            .readTree(
+                mvc.perform(get("/api/app/bootstrap").cookie(owner))
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString())
+            .path("mealRecommendations")
+            .get(0)
+            .path("id")
+            .asText();
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-note-too-long")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"sentiment\":\"DISLIKE\",\"reason\":\"TASTE\",\"note\":\""
+                        + "x".repeat(301)
+                        + "\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+  }
+
+  @Test
+  void feedbackContextTreatsFreeTextAsBoundedReferenceData() throws Exception {
+    Cookie owner = login();
+    JsonNode bootstrap =
+        objectMapper.readTree(
+            mvc.perform(get("/api/app/bootstrap").cookie(owner))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    String recommendationId = bootstrap.path("mealRecommendations").get(0).path("id").asText();
+    UUID userId = UUID.fromString(bootstrap.path("user").path("id").asText());
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-context-bounded")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"sentiment\":\"DISLIKE\",\"reason\":\"OTHER\",\"note\":\""
+                        + "x".repeat(300)
+                        + "\"}"))
+        .andExpect(status().isOk());
+
+    var context =
+        fitnessTools.mealFeedbackContext(
+            new ToolExecutionContext(
+                userId.toString(),
+                "meal-feedback-context-run",
+                Set.of("fitness.read"),
+                "daily-or-manual-meal-generation"));
+    assertThat(context.dislikedFoods()).isNotEmpty();
+    assertThat(context.noteReferences())
+        .allSatisfy(
+            note ->
+                assertThat(note.codePointCount(0, note.length())).isLessThanOrEqualTo(160));
+  }
+
+  @Test
+  void dailyMealPlanReadEndpointReturnsThePersistedThreeMealPlan() throws Exception {
+    Cookie owner = login();
+
+    mvc.perform(get("/api/v1/app/meal-plans/daily").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("READY"))
+        .andExpect(jsonPath("$.breakfast.mealType").value("BREAKFAST"))
+        .andExpect(jsonPath("$.lunch.mealType").value("LUNCH"))
+        .andExpect(jsonPath("$.dinner.mealType").value("DINNER"))
+        .andExpect(jsonPath("$.version").value(1));
+  }
+
+  @Test
+  void manualDailyMealGenerationPersistsRuntimeOutputAndPassesOnlyBoundedFeedbackContext()
+      throws Exception {
+    dailyMealPlanPort.succeed();
+    Cookie owner = login();
+    JsonNode bootstrap =
+        objectMapper.readTree(
+            mvc.perform(get("/api/app/bootstrap").cookie(owner))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    String recommendationId = bootstrap.path("mealRecommendations").get(0).path("id").asText();
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "daily-plan-like-context")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sentiment\":\"LIKE\"}"))
+        .andExpect(status().isOk());
+
+    MvcResult generated =
+        mvc.perform(
+                post("/api/v1/app/meal-plans/daily/generate")
+                    .cookie(owner)
+                    .header("Idempotency-Key", "daily-plan-generate-0001")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"date\":\"2026-08-10\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("READY"))
+            .andExpect(jsonPath("$.breakfast.items[0].name").value("反馈早餐"))
+            .andReturn();
+    String planId = objectMapper.readTree(generated.getResponse().getContentAsString()).path("mealPlanId").asText();
+    assertThat(dailyMealPlanPort.calls()).isEqualTo(1);
+    assertThat(dailyMealPlanPort.lastFeedback().likedFoods()).isNotEmpty();
+
+    mvc.perform(get("/api/v1/app/meal-plans/daily?date=2026-08-10").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.mealPlanId").value(planId))
+        .andExpect(jsonPath("$.breakfast.items[0].name").value("反馈早餐"));
+
+    mvc.perform(
+            post("/api/v1/app/meal-plans/daily/generate")
+                .cookie(owner)
+                .header("Idempotency-Key", "daily-plan-generate-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"date\":\"2026-08-10\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.mealPlanId").value(planId));
+    assertThat(dailyMealPlanPort.calls()).isEqualTo(1);
+  }
+
+  @Test
+  void dailyMealGenerationPersistsAClosedFailureInsteadOfInventingMeals() throws Exception {
+    Cookie owner = login();
+    dailyMealPlanPort.failWith("DEPENDENCY_UNAVAILABLE", "三餐模型暂时不可达");
+
+    mvc.perform(
+            post("/api/v1/app/meal-plans/daily/generate")
+                .cookie(owner)
+                .header("Idempotency-Key", "daily-plan-generate-failed")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"date\":\"2026-08-11\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("FAILED"))
+        .andExpect(jsonPath("$.failure.code").value("TASK_FAILED"))
+        .andExpect(jsonPath("$.failure.message").value("三餐模型暂时不可达"))
+        .andExpect(jsonPath("$.breakfast").doesNotExist());
+
+    mvc.perform(get("/api/v1/app/meal-plans/daily?date=2026-08-11").cookie(owner))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("FAILED"))
+        .andExpect(jsonPath("$.breakfast").doesNotExist());
+  }
+
+  @Test
+  void mealRecordCreatedAtComesFromTheDatabaseInsteadOfOccurredAt() throws Exception {
+    Cookie owner = login();
+    mvc.perform(
+            post("/api/v1/app/meal-records")
+                .cookie(owner)
+                .header("Idempotency-Key", "record-created-at-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"mealType\":\"LUNCH\",\"occurredAt\":\"2020-01-01T00:00:00Z\",\"source\":\"MANUAL\",\"items\":[{\"name\":\"午饭\",\"estimatedKcal\":400}]}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.createdAt").isNotEmpty())
+        .andExpect(jsonPath("$.createdAt").value(org.hamcrest.Matchers.not("2020-01-01T00:00:00Z")));
   }
 
   @Test
@@ -703,6 +929,12 @@ class FitnessExperienceIntegrationTest {
     ControlledRecognitionPort controlledRecognitionPort() {
       return new ControlledRecognitionPort();
     }
+
+    @Bean
+    @Primary
+    ControlledDailyMealPlanPort controlledDailyMealPlanPort() {
+      return new ControlledDailyMealPlanPort();
+    }
   }
 
   static final class ControlledRecognitionPort implements MealRecognitionPort {
@@ -733,6 +965,53 @@ class FitnessExperienceIntegrationTest {
 
     int calls() {
       return calls.get();
+    }
+  }
+
+  static final class ControlledDailyMealPlanPort implements DailyMealPlanGenerationPort {
+    private final AtomicInteger calls = new AtomicInteger();
+    private MealRecommendationFeedbackContext lastFeedback;
+    private DailyMealPlanGenerationResult result = success();
+
+    @Override
+    public DailyMealPlanGenerationResult generate(
+        UUID userId, java.time.LocalDate date, MealRecommendationFeedbackContext feedback) {
+      calls.incrementAndGet();
+      lastFeedback = feedback;
+      return result;
+    }
+
+    void failWith(String code, String message) {
+      calls.set(0);
+      result = new DailyMealPlanGenerationResult("FAILED", List.of(), code, message);
+    }
+
+    void succeed() {
+      calls.set(0);
+      result = success();
+      lastFeedback = null;
+    }
+
+    private static DailyMealPlanGenerationResult success() {
+      return new DailyMealPlanGenerationResult(
+          "SUCCEEDED",
+          List.of(
+              new GeneratedMealRecommendation(
+                  MealType.BREAKFAST, List.of(new MealItemDto("反馈早餐", 320)), "由安全偏好摘要调整"),
+              new GeneratedMealRecommendation(
+                  MealType.LUNCH, List.of(new MealItemDto("反馈午餐", 520)), "均衡午餐"),
+              new GeneratedMealRecommendation(
+                  MealType.DINNER, List.of(new MealItemDto("反馈晚餐", 420)), "清淡晚餐")),
+          null,
+          null);
+    }
+
+    int calls() {
+      return calls.get();
+    }
+
+    MealRecommendationFeedbackContext lastFeedback() {
+      return lastFeedback;
     }
   }
 }

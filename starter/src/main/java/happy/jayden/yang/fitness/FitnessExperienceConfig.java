@@ -11,6 +11,7 @@ import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.TransactionRunner;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
@@ -86,12 +87,22 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
+  DailyMealPlanGenerationPort dailyMealPlanGenerationPort(
+      @Qualifier("agentDataSource") DataSource agentDataSource,
+      ObjectMapper mapper,
+      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
+          String masterKeyFile) {
+    return new MealPlanGenerationRuntime(agentDataSource, mapper, masterKeyFile);
+  }
+
+  @Bean
   FitnessApplicationService fitnessApplicationService(
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
       AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
+      DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
       @Qualifier("fitnessTransactionManager") PlatformTransactionManager fitnessTransactionManager) {
     TransactionTemplate transaction = new TransactionTemplate(fitnessTransactionManager);
     TransactionRunner runner =
@@ -103,12 +114,23 @@ public class FitnessExperienceConfig {
           }
         };
     return new FitnessApplicationService(
-        store, passwordVerifier, providerStatus, aiConversation, mediaUploadPort, runner);
+        store,
+        passwordVerifier,
+        providerStatus,
+        aiConversation,
+        mediaUploadPort,
+        dailyMealPlanGenerationPort,
+        runner);
   }
 
   @Bean
   MealRecognitionWorker mealRecognitionWorker(FitnessStore store, MealRecognitionPort runtime) {
     return new MealRecognitionWorker(store, runtime);
+  }
+
+  @Bean
+  DailyMealPlanScheduler dailyMealPlanScheduler(FitnessApplicationService application) {
+    return new DailyMealPlanScheduler(application);
   }
 
   @Bean

@@ -111,7 +111,14 @@ public final class FitnessDtos {
       List<MealItemDto> items,
       String source,
       UUID recognitionJobId,
-      String note) {}
+      String note,
+      Instant createdAt) {}
+
+  public enum Sentiment { LIKE, DISLIKE }
+  public enum FeedbackReason { TASTE, PORTION, INGREDIENT, CALORIES, COOKING, OTHER }
+  public record CreateMealRecommendationFeedbackRequest(UUID recommendationId, Sentiment sentiment, FeedbackReason reason, String note) {}
+  public record MealRecommendationFeedbackDto(UUID recommendationId, Sentiment sentiment, FeedbackReason reason, String note, Instant createdAt, Instant updatedAt) {}
+  public record MealRecommendationFeedbackContext(List<String> likedFoods, List<String> dislikedFoods, List<String> dislikeReasons, List<String> notes) {}
 
   public record MealRecommendationDto(
       UUID id,
@@ -120,7 +127,62 @@ public final class FitnessDtos {
       List<MealItemDto> items,
       String reason,
       String status,
-      Instant generatedAt) {}
+      Instant generatedAt,
+      MealRecommendationFeedbackDto feedback) {}
+
+  /** Durable state of one user's date-scoped three-meal generation. */
+  public record DailyMealPlanRunDto(
+      UUID mealPlanId,
+      UUID userId,
+      LocalDate date,
+      String status,
+      Instant generatedAt,
+      String failureCode,
+      String failureMessage,
+      int version) {}
+
+  public record DailyMealPlanStateDto(
+      DailyMealPlanRunDto run, List<MealRecommendationDto> recommendations) {}
+
+  /** The bounded result returned by the dedicated meal-generation runtime. */
+  public record DailyMealPlanGenerationResult(
+      String status,
+      List<GeneratedMealRecommendation> recommendations,
+      String failureCode,
+      String failureMessage) {}
+
+  public record GeneratedMealRecommendation(
+      MealType mealType, List<MealItemDto> items, String reason) {}
+
+  public record DailyMealPlanFoodItem(
+      String name, BigDecimal quantity, String unit, NutritionDto nutrition) {}
+
+  public record NutritionDto(
+      BigDecimal caloriesKcal, BigDecimal proteinG, BigDecimal carbohydrateG, BigDecimal fatG) {}
+
+  public record DailyMealPlanSectionDto(
+      MealType mealType,
+      String title,
+      List<DailyMealPlanFoodItem> items,
+      NutritionDto nutrition) {}
+
+  /** Public shape of the generated/failed plan; nullable members are status-specific. */
+  public record DailyMealPlanDto(
+      UUID mealPlanId,
+      LocalDate date,
+      String timezone,
+      String generatedAtLocalTime,
+      String status,
+      DailyMealPlanSectionDto breakfast,
+      DailyMealPlanSectionDto lunch,
+      DailyMealPlanSectionDto dinner,
+      NutritionDto dailyNutrition,
+      DailyMealPlanFailureDto failure,
+      int version) {}
+
+  public record DailyMealPlanFailureDto(String code, String message, boolean retryable) {}
+
+  public record GenerateDailyMealPlanRequest(LocalDate date) {}
 
   public record CreateMealRequest(MealType mealType, List<MealItemDto> items, Instant occurredAt) {}
 

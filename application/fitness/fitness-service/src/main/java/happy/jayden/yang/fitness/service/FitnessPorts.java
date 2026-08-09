@@ -4,6 +4,9 @@ import happy.jayden.yang.fitness.service.FitnessDtos.AiMessageResponse;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
 import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
@@ -64,6 +67,23 @@ public final class FitnessPorts {
 
     java.util.List<MealDto> listMealRecords(UUID userId);
 
+    FitnessDtos.MealRecommendationFeedbackDto upsertMealRecommendationFeedback(UUID userId, FitnessDtos.CreateMealRecommendationFeedbackRequest request);
+    FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(UUID userId, Instant since);
+
+    /** Reads the durable state and the persisted recommendation rows for one local date. */
+    Optional<DailyMealPlanStateDto> findDailyMealPlan(UUID userId, LocalDate date);
+
+    /** Transitions one user/date plan into GENERATING and returns its durable identity/version. */
+    DailyMealPlanRunDto beginDailyMealPlanGeneration(UUID userId, LocalDate date);
+
+    void completeDailyMealPlanGeneration(
+        DailyMealPlanRunDto run, DailyMealPlanGenerationResult result);
+
+    void failDailyMealPlanGeneration(
+        DailyMealPlanRunDto run, String failureCode, String failureMessage);
+
+    java.util.List<UUID> activeUserIds();
+
     Optional<FitnessDtos.IdempotencyEntry> findIdempotency(
         UUID userId, String operation, String key);
 
@@ -104,6 +124,17 @@ public final class FitnessPorts {
   public interface MealRecognitionPort {
     MealRecognitionResult recognize(
         UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
+  }
+
+  /**
+   * Isolated adapter boundary for daily meal generation. The feedback context is passed as bounded
+   * reference data; it is never treated as an executable user instruction.
+   */
+  public interface DailyMealPlanGenerationPort {
+    DailyMealPlanGenerationResult generate(
+        UUID userId,
+        LocalDate date,
+        FitnessDtos.MealRecommendationFeedbackContext feedbackContext);
   }
 
   public interface PasswordVerifier {

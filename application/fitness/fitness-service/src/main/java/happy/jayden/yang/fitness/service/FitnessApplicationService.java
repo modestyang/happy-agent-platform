@@ -29,6 +29,7 @@ import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestExcepti
 import happy.jayden.yang.fitness.service.FitnessExceptions.UnauthorizedException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
+import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
@@ -45,6 +46,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -60,6 +62,7 @@ public final class FitnessApplicationService {
   private final AiConversation aiConversation;
   private final MediaUploadPort mediaUploadPort;
   private final TransactionRunner transactionRunner;
+  private final DailyMealPlanGenerationPort dailyMealPlanGenerationPort;
   private final SecureRandom secureRandom = new SecureRandom();
 
   public FitnessApplicationService(
@@ -74,6 +77,9 @@ public final class FitnessApplicationService {
         providerStatus,
         aiConversation,
         mediaUploadPort,
+        (userId, date, feedback) ->
+            new FitnessDtos.DailyMealPlanGenerationResult(
+                "FAILED", List.of(), "DEPENDENCY_NOT_CONFIGURED", "三餐生成运行时未配置"),
         new TransactionRunner() {
           @Override
           public <T> T inTransaction(FitnessPorts.TransactionWork<T> work) {
@@ -89,11 +95,32 @@ public final class FitnessApplicationService {
       AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
       TransactionRunner transactionRunner) {
+    this(
+        store,
+        passwordVerifier,
+        providerStatus,
+        aiConversation,
+        mediaUploadPort,
+        (userId, date, feedback) ->
+            new FitnessDtos.DailyMealPlanGenerationResult(
+                "FAILED", List.of(), "DEPENDENCY_NOT_CONFIGURED", "三餐生成运行时未配置"),
+        transactionRunner);
+  }
+
+  public FitnessApplicationService(
+      FitnessStore store,
+      PasswordVerifier passwordVerifier,
+      AgentProviderStatus providerStatus,
+      AiConversation aiConversation,
+      MediaUploadPort mediaUploadPort,
+      DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
+      TransactionRunner transactionRunner) {
     this.store = store;
     this.passwordVerifier = passwordVerifier;
     this.providerStatus = providerStatus;
     this.aiConversation = aiConversation;
     this.mediaUploadPort = mediaUploadPort;
+    this.dailyMealPlanGenerationPort = dailyMealPlanGenerationPort;
     this.transactionRunner = transactionRunner;
   }
 
@@ -314,6 +341,210 @@ public final class FitnessApplicationService {
 
   public List<MealDto> mealRecords(String sessionToken) {
     return store.listMealRecords(authenticate(sessionToken));
+  }
+
+  public FitnessDtos.MealRecommendationFeedbackDto upsertMealRecommendationFeedback(
+      String sessionToken, FitnessDtos.CreateMealRecommendationFeedbackRequest request) {
+    if (request == null || request.recommendationId() == null || request.sentiment() == null) {
+      throw new InvalidRequestException("recommendationId 和 sentiment 必填");
+    }
+    if (request.sentiment() == FitnessDtos.Sentiment.DISLIKE && request.reason() == null) {
+      throw new InvalidRequestException("点踩必须选择原因");
+    }
+    if (request.note() != null
+        && request.note().codePointCount(0, request.note().length()) > 300) {
+      throw new InvalidRequestException("说明不能超过 300 个字符");
+    }
+    if (request.reason() == FitnessDtos.FeedbackReason.OTHER
+        && (request.note() == null || request.note().trim().isEmpty())) {
+      throw new InvalidRequestException("OTHER 说明必须为 1 到 300 个字符");
+    }
+    return store.upsertMealRecommendationFeedback(authenticate(sessionToken), request);
+  }
+
+  public FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(UUID userId) {
+    return store.mealRecommendationFeedbackContext(userId, Instant.now().minus(Duration.ofDays(30)));
+  }
+
+  /** Reads only a durable plan state; it never fabricates an answer when no run exists. */
+  public FitnessDtos.DailyMealPlanDto dailyMealPlan(String sessionToken, LocalDate requestedDate) {
+    UUID userId = authenticate(sessionToken);
+    LocalDate date = requestedDate == null ? LocalDate.now(USER_ZONE) : requestedDate;
+    return dailyMealPlan(
+        store
+            .findDailyMealPlan(userId, date)
+            .orElseThrow(
+                () ->
+                    new happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException(
+                        "当日三餐计划尚未生成")));
+  }
+
+  /**
+   * Generates one date-scoped plan through the dedicated runtime adapter. Feedback is loaded from
+   * the safe 30-day aggregation immediately before the runtime call and is never an HTTP input.
+   */
+  public FitnessDtos.DailyMealPlanDto generateDailyMealPlan(
+      String sessionToken, LocalDate requestedDate) {
+    UUID userId = authenticate(sessionToken);
+    LocalDate date = requestedDate == null ? LocalDate.now(USER_ZONE) : requestedDate;
+    return generateDailyMealPlan(userId, date);
+  }
+
+  /** Invoked by the 05:30 local scheduler; the current product has one default user timezone. */
+  public void generateScheduledDailyMealPlans() {
+    LocalDate today = LocalDate.now(USER_ZONE);
+    for (UUID userId : store.activeUserIds()) {
+      generateDailyMealPlan(userId, today);
+    }
+  }
+
+  private FitnessDtos.DailyMealPlanDto generateDailyMealPlan(UUID userId, LocalDate date) {
+    FitnessDtos.DailyMealPlanRunDto run = store.beginDailyMealPlanGeneration(userId, date);
+    FitnessDtos.DailyMealPlanGenerationResult result;
+    try {
+      result = dailyMealPlanGenerationPort.generate(userId, date, mealRecommendationFeedbackContext(userId));
+    } catch (RuntimeException exception) {
+      result =
+          new FitnessDtos.DailyMealPlanGenerationResult(
+              "FAILED", List.of(), "RUNTIME_ERROR", "三餐生成运行时发生未处理错误");
+    }
+    String invalid = invalidGeneration(result);
+    if (invalid != null) {
+      store.failDailyMealPlanGeneration(run, "INVALID_MODEL_RESPONSE", invalid);
+    } else if ("SUCCEEDED".equals(result.status())) {
+      store.completeDailyMealPlanGeneration(run, result);
+    } else {
+      store.failDailyMealPlanGeneration(
+          run,
+          blank(result.failureCode()) ? "RUNTIME_ERROR" : result.failureCode(),
+          blank(result.failureMessage()) ? "三餐生成未完成" : result.failureMessage());
+    }
+    return dailyMealPlan(
+        store
+            .findDailyMealPlan(userId, date)
+            .orElseThrow(() -> new IllegalStateException("三餐生成状态未持久化")));
+  }
+
+  private static String invalidGeneration(FitnessDtos.DailyMealPlanGenerationResult result) {
+    if (result == null) return "三餐运行时未返回结果";
+    if (!"SUCCEEDED".equals(result.status())) return null;
+    if (result.recommendations() == null || result.recommendations().size() != 3) {
+      return "三餐生成结果必须包含早餐、午餐和晚餐";
+    }
+    java.util.Set<FitnessDtos.MealType> types = java.util.EnumSet.noneOf(FitnessDtos.MealType.class);
+    for (FitnessDtos.GeneratedMealRecommendation recommendation : result.recommendations()) {
+      if (recommendation == null
+          || recommendation.mealType() == null
+          || !types.add(recommendation.mealType())
+          || !List.of(
+                  FitnessDtos.MealType.BREAKFAST,
+                  FitnessDtos.MealType.LUNCH,
+                  FitnessDtos.MealType.DINNER)
+              .contains(recommendation.mealType())
+          || recommendation.items() == null
+          || recommendation.items().isEmpty()
+          || blank(recommendation.reason())
+          || recommendation.items().stream()
+              .anyMatch(
+                  item ->
+                      item == null
+                          || blank(item.name())
+                          || item.name().codePointCount(0, item.name().length()) > 120
+                          || item.estimatedKcal() < 0
+                          || item.estimatedKcal() > 20_000)) {
+        return "三餐生成结果不符合餐食约束";
+      }
+    }
+    return null;
+  }
+
+  private static FitnessDtos.DailyMealPlanDto dailyMealPlan(
+      FitnessDtos.DailyMealPlanStateDto state) {
+    FitnessDtos.DailyMealPlanRunDto run = state.run();
+    if ("GENERATING".equals(run.status())) {
+      return new FitnessDtos.DailyMealPlanDto(
+          run.mealPlanId(), run.date(), USER_ZONE.getId(), "05:30:00", "GENERATING", null, null,
+          null, null, null, run.version());
+    }
+    if ("FAILED".equals(run.status())) {
+      String rawCode = blank(run.failureCode()) ? "RUNTIME_ERROR" : run.failureCode();
+      String code = "DEPENDENCY_NOT_CONFIGURED".equals(rawCode) ? rawCode : "TASK_FAILED";
+      return new FitnessDtos.DailyMealPlanDto(
+          run.mealPlanId(),
+          run.date(),
+          USER_ZONE.getId(),
+          "05:30:00",
+          "FAILED",
+          null,
+          null,
+          null,
+          null,
+          new FitnessDtos.DailyMealPlanFailureDto(
+              code,
+              blank(run.failureMessage()) ? "三餐生成失败" : run.failureMessage(),
+              !"INVALID_MODEL_RESPONSE".equals(rawCode)),
+          run.version());
+    }
+    Map<FitnessDtos.MealType, FitnessDtos.MealRecommendationDto> byType =
+        state.recommendations().stream()
+            .collect(java.util.stream.Collectors.toMap(FitnessDtos.MealRecommendationDto::mealType, item -> item));
+    FitnessDtos.DailyMealPlanSectionDto breakfast = section(byType.get(FitnessDtos.MealType.BREAKFAST));
+    FitnessDtos.DailyMealPlanSectionDto lunch = section(byType.get(FitnessDtos.MealType.LUNCH));
+    FitnessDtos.DailyMealPlanSectionDto dinner = section(byType.get(FitnessDtos.MealType.DINNER));
+    if (breakfast == null || lunch == null || dinner == null) {
+      throw new IllegalStateException("READY 三餐计划缺少持久化餐次");
+    }
+    FitnessDtos.NutritionDto nutrition =
+        nutrition(
+            breakfast.nutrition().caloriesKcal()
+                .add(lunch.nutrition().caloriesKcal())
+                .add(dinner.nutrition().caloriesKcal()));
+    return new FitnessDtos.DailyMealPlanDto(
+        run.mealPlanId(),
+        run.date(),
+        USER_ZONE.getId(),
+        "05:30:00",
+        "READY",
+        breakfast,
+        lunch,
+        dinner,
+        nutrition,
+        null,
+        run.version());
+  }
+
+  private static FitnessDtos.DailyMealPlanSectionDto section(
+      FitnessDtos.MealRecommendationDto recommendation) {
+    if (recommendation == null) return null;
+    BigDecimal calories =
+        recommendation.items().stream()
+            .map(FitnessDtos.MealItemDto::estimatedKcal)
+            .map(BigDecimal::valueOf)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    FitnessDtos.NutritionDto nutrition = nutrition(calories);
+    return new FitnessDtos.DailyMealPlanSectionDto(
+        recommendation.mealType(),
+        mealTitle(recommendation.mealType()),
+        recommendation.items().stream()
+            .map(
+                item ->
+                    new FitnessDtos.DailyMealPlanFoodItem(
+                        item.name(), BigDecimal.ONE, "份", nutrition(BigDecimal.valueOf(item.estimatedKcal()))))
+            .toList(),
+        nutrition);
+  }
+
+  private static String mealTitle(FitnessDtos.MealType mealType) {
+    return switch (mealType) {
+      case BREAKFAST -> "早餐建议";
+      case LUNCH -> "午餐建议";
+      case DINNER -> "晚餐建议";
+      case SNACK -> throw new IllegalArgumentException("日计划不包含加餐");
+    };
+  }
+
+  private static FitnessDtos.NutritionDto nutrition(BigDecimal calories) {
+    return new FitnessDtos.NutritionDto(calories, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
   }
 
   public WorkoutCompletionDto completeWorkout(

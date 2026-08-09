@@ -44,7 +44,7 @@ final class FitnessV1Responses {
         value.note(),
         value.items(),
         new Nutrition(calories, 0, 0, 0),
-        value.occurredAt());
+        value.createdAt());
   }
 
   static MealRecordPage mealPage(List<MealDto> values) {

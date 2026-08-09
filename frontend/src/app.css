@@ -379,6 +379,21 @@ input, select { width: 100%; border: 1px solid #ded5c8; border-radius: 14px; pad
 .meal-foods { display: grid; gap: 6px; margin: 14px 0 11px; padding: 11px 12px; border-radius: 16px; background: rgba(255,255,255,.7); }
 .meal-foods p { display: flex; justify-content: space-between; gap: 12px; margin: 0; font-size: 12px; }
 .meal-foods small { color: var(--muted); }
+.meal-feedback-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.meal-feedback-actions button { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: #fffaf3; }
+.meal-feedback-actions button[aria-pressed="true"] { border-color: #dd8150; color: #b8502f; background: #ffe1c7; }
+.meal-feedback-actions button:disabled { opacity: .55; }
+.meal-feedback-actions svg { width: 16px; }
+.meal-feedback-actions small { color: var(--muted); font-size: 10px; }
+.meal-feedback-error { margin: 7px 0 0; color: #b8502f; font-size: 11px; }
+.meal-feedback-sheet { position: sticky; bottom: 8px; z-index: 3; display: grid; gap: 11px; margin-top: 14px; padding: 16px; border: 1px solid #eed3aa; border-radius: 20px; background: #fffaf0; box-shadow: 0 14px 32px rgba(89,57,22,.16); }
+.meal-feedback-sheet > div:first-child { display: flex; justify-content: space-between; align-items: center; }
+.meal-feedback-sheet > div:first-child button { border: 0; background: transparent; color: var(--muted); font-size: 22px; }
+.meal-feedback-reasons { display: flex; flex-wrap: wrap; gap: 7px; }
+.meal-feedback-reasons button { border: 1px solid var(--line); border-radius: 999px; padding: 7px 10px; background: #fff; font-size: 11px; }
+.meal-feedback-reasons button[aria-pressed="true"] { border-color: #dd8150; background: #ffe1c7; color: #9c4429; }
+.meal-feedback-sheet label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.meal-feedback-sheet textarea { min-height: 62px; resize: vertical; }
 .meal-reason { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .meal-empty { margin-top: 55px; }
 .pose-floor { fill: none; stroke: rgba(86,71,57,.24); stroke-width: 4; stroke-linecap: round; }

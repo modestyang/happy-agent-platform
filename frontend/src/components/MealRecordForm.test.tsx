@@ -33,6 +33,8 @@ describe('MealRecordForm', () => {
     await user.upload(screen.getByLabelText('拍照识别'), image);
 
     expect(await screen.findByDisplayValue('番茄牛肉饭')).toBeInTheDocument();
+    await user.upload(screen.getByLabelText('拍照识别'), new File(['another-image'], 'second.jpg', { type: 'image/jpeg' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => path === '/api/v1/app/media-upload-tickets')).toHaveLength(2));
     await user.clear(screen.getByLabelText('食物名称 1'));
     await user.type(screen.getByLabelText('食物名称 1'), '番茄鸡胸饭');
     await user.click(screen.getByRole('button', { name: '保存饮食记录' }));
@@ -54,6 +56,10 @@ describe('MealRecordForm', () => {
     expect(jobKey['Idempotency-Key']).toEqual(expect.any(String));
     expect(recordKey['Idempotency-Key']).toEqual(expect.any(String));
     expect(jobKey['Idempotency-Key']).not.toBe(ticketKey['Idempotency-Key']);
+    const ticketCalls = fetchMock.mock.calls.filter(([path]) => path === '/api/v1/app/media-upload-tickets');
+    const firstTicketKey = ((ticketCalls[0][1] as RequestInit).headers as Record<string, string>)['Idempotency-Key'];
+    const secondTicketKey = ((ticketCalls[1][1] as RequestInit).headers as Record<string, string>)['Idempotency-Key'];
+    expect(secondTicketKey).not.toBe(firstTicketKey);
     expect(recordKey['Idempotency-Key']).not.toBe(jobKey['Idempotency-Key']);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/app/meal-records', expect.objectContaining({
       method: 'POST',

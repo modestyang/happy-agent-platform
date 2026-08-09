@@ -8,6 +8,10 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecognitionJobReq
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMediaUploadTicketRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecommendationFeedbackRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
+import happy.jayden.yang.fitness.service.FitnessDtos.FeedbackReason;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
@@ -27,6 +31,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Public v1 resource root — deliberately separate from legacy local experience endpoints. */
@@ -122,6 +127,46 @@ public class FitnessV1Controller {
     return FitnessV1Responses.mealPage(application.mealRecords(token));
   }
 
+  @GetMapping("/meal-plans/daily")
+  happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto dailyMealPlan(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @RequestParam(name = "date", required = false) java.time.LocalDate date) {
+    return application.dailyMealPlan(token, date);
+  }
+
+  @PostMapping("/meal-plans/daily/generate")
+  happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto generateDailyMealPlan(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody happy.jayden.yang.fitness.service.FitnessDtos.GenerateDailyMealPlanRequest request) {
+    return application.idempotently(
+        token,
+        "daily-meal-plan-generate",
+        key,
+        hash(request),
+        () -> application.generateDailyMealPlan(token, request == null ? null : request.date()),
+        happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto::mealPlanId,
+        this::write,
+        json -> read(json, happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto.class));
+  }
+
+  @PutMapping("/meal-recommendations/{recommendationId}/feedback")
+  MealRecommendationFeedbackDto feedback(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @PathVariable("recommendationId") UUID recommendationId,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody MealRecommendationFeedbackBody body) {
+    return application.idempotently(
+        token,
+        "meal-feedback",
+        key,
+        hash(body),
+        () -> application.upsertMealRecommendationFeedback(token, new CreateMealRecommendationFeedbackRequest(recommendationId, body.sentiment(), body.reason(), body.note())),
+        MealRecommendationFeedbackDto::recommendationId,
+        this::write,
+        json -> read(json, MealRecommendationFeedbackDto.class));
+  }
+
   @PostMapping("/meal-records")
   ResponseEntity<FitnessV1Responses.MealRecord> record(
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
@@ -187,6 +232,9 @@ public class FitnessV1Controller {
     if (response instanceof FitnessV1Responses.MealRecord meal) {
       return meal.mealRecordId();
     }
+    if (response instanceof happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanDto plan) {
+      return plan.mealPlanId();
+    }
     throw new IllegalArgumentException("不支持的幂等响应类型");
   }
 
@@ -198,4 +246,6 @@ public class FitnessV1Controller {
       throw new IllegalStateException("无法计算请求摘要", exception);
     }
   }
+
+  record MealRecommendationFeedbackBody(Sentiment sentiment, FeedbackReason reason, String note) {}
 }

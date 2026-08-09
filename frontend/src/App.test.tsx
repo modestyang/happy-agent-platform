@@ -158,10 +158,18 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: '记录' }));
     await user.click(screen.getByRole('button', { name: '饮食记录' }));
-    await user.type(screen.getByLabelText('吃了什么'), '牛肉面');
-    await user.type(screen.getByLabelText('热量 (kcal)'), '520');
+    await user.type(screen.getByLabelText('食物名称 1'), '牛肉面');
+    await user.type(screen.getByLabelText('热量 1'), '520');
     await user.click(screen.getByRole('button', { name: '保存饮食记录' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/meals', expect.objectContaining({ method: 'POST', body: JSON.stringify({ mealType: 'BREAKFAST', items: [{ name: '牛肉面', estimatedKcal: 520 }] }) })));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/app/meal-records',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"source":"MANUAL"'),
+        }),
+      ),
+    );
   });
 
   it('keeps the record drawer inside the app focus flow and closes it with Escape', async () => {

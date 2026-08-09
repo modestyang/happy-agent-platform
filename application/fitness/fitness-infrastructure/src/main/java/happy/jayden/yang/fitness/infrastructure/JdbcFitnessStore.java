@@ -22,6 +22,10 @@ import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecommendationFeedbackRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
+import happy.jayden.yang.fitness.service.FitnessDtos.FeedbackReason;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
@@ -53,6 +57,8 @@ public final class JdbcFitnessStore implements FitnessStore {
       new TypeReference<>() {};
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
   private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
+  private static final int MAX_CONTEXT_FOOD_LENGTH = 120;
+  private static final int MAX_CONTEXT_NOTE_LENGTH = 160;
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
 
@@ -126,15 +132,16 @@ public final class JdbcFitnessStore implements FitnessStore {
             userId);
     List<MealDto> meals =
         jdbc.query(
-            "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note FROM meals"
+            "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note,created_at FROM meals"
                 + " WHERE user_id=? ORDER BY occurred_at DESC",
             (rs, row) -> meal(rs),
             userId);
     List<MealRecommendationDto> mealRecommendations =
         jdbc.query(
             "SELECT"
-                + " recommendation_id,recommendation_date,meal_type,items,reason,status,generated_at"
-                + " FROM daily_meal_recommendations WHERE user_id=? AND recommendation_date=? ORDER"
+                + " d.recommendation_id,d.recommendation_date,d.meal_type,d.items,d.reason,d.status,d.generated_at,"
+                + " f.sentiment AS feedback_sentiment,f.reason AS feedback_reason,f.note AS feedback_note,f.created_at AS feedback_created_at,f.updated_at AS feedback_updated_at"
+                + " FROM daily_meal_recommendations d LEFT JOIN meal_recommendation_feedback f ON f.recommendation_id=d.recommendation_id AND f.user_id=d.user_id WHERE d.user_id=? AND d.recommendation_date=? ORDER"
                 + " BY CASE meal_type WHEN 'BREAKFAST' THEN 1 WHEN 'LUNCH' THEN 2 ELSE 3 END",
             (rs, row) -> mealRecommendation(rs),
             userId,
@@ -183,6 +190,7 @@ public final class JdbcFitnessStore implements FitnessStore {
         Timestamp.from(occurredAt),
         request.mealType().name(),
         json(request.items()));
+    Instant createdAt = jdbc.queryForObject("SELECT created_at FROM meals WHERE meal_id=?", Timestamp.class, id).toInstant();
     return new MealDto(
         id,
         occurredAt,
@@ -190,7 +198,8 @@ public final class JdbcFitnessStore implements FitnessStore {
         List.copyOf(request.items()),
         "MANUAL",
         null,
-        null);
+        null,
+        createdAt);
   }
 
   @Override
@@ -316,6 +325,7 @@ public final class JdbcFitnessStore implements FitnessStore {
         request.source(),
         request.recognitionJobId(),
         request.note());
+    Instant createdAt = jdbc.queryForObject("SELECT created_at FROM meals WHERE meal_id=?", Timestamp.class, id).toInstant();
     return new MealDto(
         id,
         occurredAt,
@@ -323,16 +333,185 @@ public final class JdbcFitnessStore implements FitnessStore {
         List.copyOf(request.items()),
         request.source(),
         request.recognitionJobId(),
-        request.note());
+        request.note(),
+        createdAt);
   }
 
   @Override
   public List<MealDto> listMealRecords(UUID userId) {
     return jdbc.query(
-        "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note FROM meals WHERE"
+        "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note,created_at FROM meals WHERE"
             + " user_id=? ORDER BY occurred_at DESC",
         (rs, row) -> meal(rs),
         userId);
+  }
+
+  @Override
+  public MealRecommendationFeedbackDto upsertMealRecommendationFeedback(
+      UUID userId, CreateMealRecommendationFeedbackRequest request) {
+    Long owned = jdbc.queryForObject(
+        "SELECT count(*) FROM daily_meal_recommendations WHERE recommendation_id=? AND user_id=?",
+        Long.class, request.recommendationId(), userId);
+    if (owned == null || owned == 0) throw new NotFoundException("饮食推荐不存在");
+    return jdbc.queryForObject(
+        "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?,?,?,?) ON CONFLICT (user_id,recommendation_id) DO UPDATE SET sentiment=EXCLUDED.sentiment,reason=EXCLUDED.reason,note=EXCLUDED.note,updated_at=CURRENT_TIMESTAMP RETURNING recommendation_id,sentiment AS feedback_sentiment,reason AS feedback_reason,note AS feedback_note,created_at AS feedback_created_at,updated_at AS feedback_updated_at",
+        (rs, row) -> feedback(rs), userId, request.recommendationId(), request.sentiment().name(), request.reason() == null ? null : request.reason().name(), request.note() == null ? null : request.note().trim());
+  }
+
+  @Override
+  public happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext
+      mealRecommendationFeedbackContext(UUID userId, Instant since) {
+    List<String> liked = new ArrayList<>();
+    List<String> disliked = new ArrayList<>();
+    List<String> reasons = new ArrayList<>();
+    List<String> notes = new ArrayList<>();
+    jdbc.query(
+        "SELECT f.sentiment,f.reason,f.note,d.items FROM meal_recommendation_feedback f JOIN"
+            + " daily_meal_recommendations d ON d.recommendation_id=f.recommendation_id WHERE"
+            + " f.user_id=? AND f.updated_at>=? ORDER BY f.updated_at DESC",
+        rs -> {
+          List<MealItemDto> items;
+          try {
+            items = objectMapper.readValue(rs.getString("items"), MEAL_ITEMS);
+          } catch (JsonProcessingException exception) {
+            throw new SQLException("Invalid recommendation items JSON", exception);
+          }
+          List<String> target = "LIKE".equals(rs.getString("sentiment")) ? liked : disliked;
+          items.stream()
+              .map(MealItemDto::name)
+              .map(name -> truncateCodePoints(name, MAX_CONTEXT_FOOD_LENGTH))
+              .limit(8)
+              .forEach(target::add);
+          if (rs.getString("reason") != null) reasons.add(rs.getString("reason"));
+          if (rs.getString("note") != null) {
+            notes.add(truncateCodePoints(rs.getString("note").trim(), MAX_CONTEXT_NOTE_LENGTH));
+          }
+        },
+        userId,
+        Timestamp.from(since));
+    return new happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext(
+        liked.stream().distinct().limit(30).toList(),
+        disliked.stream().distinct().limit(30).toList(),
+        reasons.stream().distinct().limit(12).toList(),
+        notes.stream().distinct().limit(12).toList());
+  }
+
+  @Override
+  public Optional<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto>
+      findDailyMealPlan(UUID userId, LocalDate date) {
+    List<MealRecommendationDto> recommendations = dailyRecommendations(userId, date);
+    List<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto> runs =
+        jdbc.query(
+            "SELECT meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version"
+                + " FROM daily_meal_plan_runs WHERE user_id=? AND plan_date=?",
+            (rs, row) -> dailyMealPlanRun(rs),
+            userId,
+            date);
+    if (!runs.isEmpty()) {
+      return Optional.of(
+          new happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto(
+              runs.get(0), recommendations));
+    }
+    // V7 is deployed after V3: existing recommendation rows are already durable READY output.
+    // Reading them must not invent a write-only run, but keeps old local/prod plans addressable.
+    if (recommendations.size() == 3
+        && recommendations.stream().allMatch(item -> "READY".equals(item.status()))) {
+      Instant generatedAt =
+          recommendations.stream()
+              .map(MealRecommendationDto::generatedAt)
+              .max(Instant::compareTo)
+              .orElse(Instant.now());
+      UUID legacyPlanId =
+          UUID.nameUUIDFromBytes(
+              ("daily-meal-plan:" + userId + ":" + date).getBytes(StandardCharsets.UTF_8));
+      return Optional.of(
+          new happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto(
+              new happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto(
+                  legacyPlanId, userId, date, "READY", generatedAt, null, null, 1),
+              recommendations));
+    }
+    return Optional.empty();
+  }
+
+  @Override
+  public happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto
+      beginDailyMealPlanGeneration(UUID userId, LocalDate date) {
+    return jdbc.queryForObject(
+        "INSERT INTO daily_meal_plan_runs(meal_plan_id,user_id,plan_date,status) VALUES (?,?,?,'GENERATING')"
+            + " ON CONFLICT (user_id,plan_date) DO UPDATE SET status='GENERATING',generated_at=NULL,"
+            + " failure_code=NULL,failure_message=NULL,version=daily_meal_plan_runs.version+1,"
+            + " updated_at=CURRENT_TIMESTAMP RETURNING"
+            + " meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version",
+        (rs, row) -> dailyMealPlanRun(rs),
+        UUID.randomUUID(),
+        userId,
+        date);
+  }
+
+  @Override
+  public void completeDailyMealPlanGeneration(
+      happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto run,
+      happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanGenerationResult result) {
+    if (!"SUCCEEDED".equals(result.status()) || result.recommendations() == null) {
+      throw new IllegalArgumentException("只可持久化成功的三餐生成结果");
+    }
+    for (var recommendation : result.recommendations()) {
+      jdbc.update(
+          "INSERT INTO daily_meal_recommendations(recommendation_id,user_id,recommendation_date,meal_type,items,reason,status,generated_at)"
+              + " VALUES (?,?,?,?,?::jsonb,?,'READY',CURRENT_TIMESTAMP) ON CONFLICT"
+              + " (user_id,recommendation_date,meal_type) DO UPDATE SET items=EXCLUDED.items,"
+              + " reason=EXCLUDED.reason,status='READY',generated_at=CURRENT_TIMESTAMP",
+          UUID.randomUUID(),
+          run.userId(),
+          run.date(),
+          recommendation.mealType().name(),
+          json(recommendation.items()),
+          recommendation.reason());
+    }
+    jdbc.update(
+        "UPDATE daily_meal_plan_runs SET status='READY',generated_at=CURRENT_TIMESTAMP,"
+            + " failure_code=NULL,failure_message=NULL,updated_at=CURRENT_TIMESTAMP"
+            + " WHERE meal_plan_id=?",
+        run.mealPlanId());
+  }
+
+  @Override
+  public void failDailyMealPlanGeneration(
+      happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto run,
+      String failureCode,
+      String failureMessage) {
+    jdbc.update(
+        "UPDATE daily_meal_plan_runs SET status='FAILED',failure_code=?,failure_message=?,"
+            + " updated_at=CURRENT_TIMESTAMP WHERE meal_plan_id=?",
+        failureCode,
+        failureMessage,
+        run.mealPlanId());
+  }
+
+  @Override
+  public List<UUID> activeUserIds() {
+    return jdbc.query(
+        "SELECT user_id FROM users WHERE status='ACTIVE' ORDER BY user_id",
+        (rs, row) -> rs.getObject("user_id", UUID.class));
+  }
+
+  private static String truncateCodePoints(String value, int maximum) {
+    if (value.codePointCount(0, value.length()) <= maximum) return value;
+    return value.substring(0, value.offsetByCodePoints(0, maximum));
+  }
+
+  private List<MealRecommendationDto> dailyRecommendations(UUID userId, LocalDate date) {
+    return jdbc.query(
+        "SELECT d.recommendation_id,d.recommendation_date,d.meal_type,d.items,d.reason,d.status,d.generated_at,"
+            + " f.sentiment AS feedback_sentiment,f.reason AS feedback_reason,f.note AS feedback_note,"
+            + " f.created_at AS feedback_created_at,f.updated_at AS feedback_updated_at"
+            + " FROM daily_meal_recommendations d LEFT JOIN meal_recommendation_feedback f"
+            + " ON f.recommendation_id=d.recommendation_id AND f.user_id=d.user_id"
+            + " WHERE d.user_id=? AND d.recommendation_date=? ORDER BY CASE d.meal_type"
+            + " WHEN 'BREAKFAST' THEN 1 WHEN 'LUNCH' THEN 2 ELSE 3 END",
+        (rs, row) -> mealRecommendation(rs),
+        userId,
+        date);
   }
 
   @Override
@@ -705,10 +884,25 @@ public final class JdbcFitnessStore implements FitnessStore {
           objectMapper.readValue(rs.getString("items"), MEAL_ITEMS),
           rs.getString("source"),
           rs.getObject("recognition_job_id", UUID.class),
-          rs.getString("note"));
+          rs.getString("note"),
+          rs.getTimestamp("created_at").toInstant());
     } catch (JsonProcessingException exception) {
       throw new SQLException("Invalid meal items JSON", exception);
     }
+  }
+
+  private happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto dailyMealPlanRun(
+      ResultSet rs) throws SQLException {
+    Timestamp generatedAt = rs.getTimestamp("generated_at");
+    return new happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanRunDto(
+        rs.getObject("meal_plan_id", UUID.class),
+        rs.getObject("user_id", UUID.class),
+        rs.getObject("plan_date", LocalDate.class),
+        rs.getString("status"),
+        generatedAt == null ? null : generatedAt.toInstant(),
+        rs.getString("failure_code"),
+        rs.getString("failure_message"),
+        rs.getInt("version"));
   }
 
   private MealRecognitionJobDto recognitionJob(ResultSet rs) throws SQLException {
@@ -738,10 +932,21 @@ public final class JdbcFitnessStore implements FitnessStore {
           objectMapper.readValue(rs.getString("items"), MEAL_ITEMS),
           rs.getString("reason"),
           rs.getString("status"),
-          rs.getTimestamp("generated_at").toInstant());
+          rs.getTimestamp("generated_at").toInstant(),
+          rs.getString("feedback_sentiment") == null ? null : feedback(rs));
     } catch (JsonProcessingException exception) {
       throw new SQLException("Invalid recommendation items JSON", exception);
     }
+  }
+
+  private MealRecommendationFeedbackDto feedback(ResultSet rs) throws SQLException {
+    return new MealRecommendationFeedbackDto(
+        rs.getObject("recommendation_id", UUID.class),
+        Sentiment.valueOf(rs.getString("feedback_sentiment")),
+        rs.getString("feedback_reason") == null ? null : FeedbackReason.valueOf(rs.getString("feedback_reason")),
+        rs.getString("feedback_note"),
+        rs.getTimestamp("feedback_created_at").toInstant(),
+        rs.getTimestamp("feedback_updated_at").toInstant());
   }
 
   private List<String> strings(String json) throws SQLException {

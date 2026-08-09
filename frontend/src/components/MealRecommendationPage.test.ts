@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { mealTimingLabel, nextMealRecommendation, nextMealType, type MealRecommendation } from './MealRecommendationPage';
+import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, nextMealType, type MealRecommendation } from './MealRecommendationPage';
 
 const recommendation = (mealType: MealRecommendation['mealType'], status = 'READY'): MealRecommendation => ({
   id: mealType,
@@ -25,5 +29,134 @@ describe('meal timing', () => {
     expect(nextMealRecommendation([recommendation('LUNCH', 'GENERATING')], new Date('2026-08-06T10:00:00+08:00'))).toBeUndefined();
     expect(nextMealRecommendation([{ ...recommendation('LUNCH'), items: [] }], new Date('2026-08-06T10:00:00+08:00'))).toBeUndefined();
     expect(nextMealRecommendation([recommendation('LUNCH')], new Date('2026-08-06T10:00:00+08:00'))?.mealType).toBe('LUNCH');
+  });
+
+  it('restores the unselected like state and makes a failed submission retryable', async () => {
+    let attempt = 0;
+    const fetchMock = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return new Response(JSON.stringify({ detail: '服务暂时不可用' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/problem+json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          recommendationId: '11111111-1111-1111-1111-111111111111',
+          sentiment: 'LIKE',
+          createdAt: '2026-08-09T00:00:00Z',
+          updatedAt: '2026-08-09T00:00:00Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(
+      createElement(
+        MemoryRouter,
+        undefined,
+        createElement(MealRecommendationPage, {
+          recommendations: [{ ...recommendation('LUNCH'), id: '11111111-1111-1111-1111-111111111111' }],
+          now: new Date('2026-08-06T10:00:00+08:00'),
+        }),
+      ),
+    );
+
+    const like = screen.getByRole('button', { name: '赞' });
+    await user.click(like);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('服务暂时不可用');
+    expect(like).toHaveAttribute('aria-pressed', 'false');
+    await user.click(like);
+    await waitFor(() => expect(like).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+describe('meal recommendation feedback', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('persists a like and retains the selected state on the ready meal card', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          recommendationId: '11111111-1111-1111-1111-111111111111',
+          sentiment: 'LIKE',
+          createdAt: '2026-08-09T00:00:00Z',
+          updatedAt: '2026-08-09T00:00:00Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(
+      createElement(
+        MemoryRouter,
+        undefined,
+        createElement(MealRecommendationPage, {
+          recommendations: [
+            {
+              ...recommendation('LUNCH'),
+              id: '11111111-1111-1111-1111-111111111111',
+            },
+          ],
+          now: new Date('2026-08-06T10:00:00+08:00'),
+        }),
+      ),
+    );
+
+    await user.click(screen.getByRole('button', { name: '赞' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/app/meal-recommendations/11111111-1111-1111-1111-111111111111/feedback',
+        expect.objectContaining({ method: 'PUT' }),
+      ),
+    );
+    expect(screen.getByRole('button', { name: '赞' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('requires an explanation for OTHER dislike before persisting and retaining it', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          recommendationId: '11111111-1111-1111-1111-111111111111',
+          sentiment: 'DISLIKE',
+          reason: 'OTHER',
+          note: '不喜欢香菜',
+          createdAt: '2026-08-09T00:00:00Z',
+          updatedAt: '2026-08-09T00:00:00Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(
+      createElement(
+        MemoryRouter,
+        undefined,
+        createElement(MealRecommendationPage, {
+          recommendations: [{ ...recommendation('LUNCH'), id: '11111111-1111-1111-1111-111111111111' }],
+          now: new Date('2026-08-06T10:00:00+08:00'),
+        }),
+      ),
+    );
+
+    await user.click(screen.getByRole('button', { name: '踩' }));
+    await user.click(screen.getByRole('button', { name: '其他' }));
+    expect(screen.getByRole('button', { name: '提交反馈' })).toBeDisabled();
+    await user.type(screen.getByLabelText('其他原因说明'), '不喜欢香菜');
+    await user.click(screen.getByRole('button', { name: '提交反馈' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('不喜欢的原因')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '踩' })).toHaveAttribute('aria-pressed', 'true');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/app/meal-recommendations/11111111-1111-1111-1111-111111111111/feedback',
+      expect.objectContaining({ body: expect.stringContaining('"OTHER"') }),
+    );
   });
 });

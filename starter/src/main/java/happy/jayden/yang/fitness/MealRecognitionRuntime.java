@@ -100,7 +100,7 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
     return new Image(rows.get(0)[1], Files.readAllBytes(image));
   }
 
-  private JsonNode post(RuntimeConfig config, char[] key, Image image) throws IOException, HttpException {
+  JsonNode post(RuntimeConfig config, char[] key, Image image) throws IOException, HttpException {
     Map<String, Object> schema = Map.of("type", "object", "additionalProperties", false, "required", List.of("items"), "properties", Map.of("items", Map.of("type", "array", "minItems", 1, "items", Map.of("type", "object", "additionalProperties", false, "required", List.of("name", "estimatedKcal", "confidence"), "properties", Map.of("name", Map.of("type", "string"), "estimatedKcal", Map.of("type", "integer", "minimum", 0), "confidence", Map.of("type", "number", "minimum", 0, "maximum", 1))))));
     Map<String, Object> body = Map.of("model", config.model(), "messages", List.of(Map.of("role", "user", "content", List.of(Map.of("type", "text", "text", "识别图片中的食物，仅按 schema 输出 JSON"), Map.of("type", "image_url", "image_url", Map.of("url", "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes())))))), "response_format", Map.of("type", "json_schema", "json_schema", Map.of("name", "meal_recognition", "strict", true, "schema", schema)));
     HttpURLConnection connection = (HttpURLConnection) URI.create(config.endpoint() + "/chat/completions").toURL().openConnection();
@@ -128,8 +128,8 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
   }
 
   private static MealRecognitionResult failed(String code, String message) { return new MealRecognitionResult("FAILED", List.of(), code, message); }
-  private record RuntimeConfig(String providerKey, String model, String endpoint) {}
-  private record Image(String contentType, byte[] bytes) {}
+  record RuntimeConfig(String providerKey, String model, String endpoint) {}
+  record Image(String contentType, byte[] bytes) {}
   private static final class ConfigurationException extends Exception { ConfigurationException(String message) { super(message); } }
   private static final class HttpException extends Exception { private final int status; HttpException(int status) { this.status = status; } int status() { return status; } }
 

@@ -401,6 +401,105 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
+  void feedbackHttpRejectsEveryConfiguredWhitespaceOnlyOtherNote() throws Exception {
+    Cookie owner = login();
+    String recommendationId = firstRecommendationId(owner);
+
+    for (String whitespaceOnlyNote :
+        List.of(
+            " ",
+            "\t",
+            "\r",
+            "\n",
+            "\u0085",
+            "\u00a0",
+            "\u1680",
+            "\u2000",
+            "\u200a",
+            "\u2028",
+            "\u2029",
+            "\u202f",
+            "\u205f",
+            "\u3000",
+            "\ufeff")) {
+      mvc.perform(
+              put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                  .cookie(owner)
+                  .header(
+                      "Idempotency-Key",
+                      "feedback-unicode-http-"
+                          + Integer.toHexString(whitespaceOnlyNote.codePointAt(0)))
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      objectMapper.writeValueAsString(
+                          java.util.Map.of(
+                              "sentiment",
+                              "DISLIKE",
+                              "reason",
+                              "OTHER",
+                              "note",
+                              whitespaceOnlyNote))))
+          .andExpect(status().isBadRequest());
+    }
+  }
+
+  @Test
+  void feedbackHttpAcceptsMixedConfiguredWhitespaceAndVisibleOtherNote() throws Exception {
+    Cookie owner = login();
+    String recommendationId = firstRecommendationId(owner);
+    String note = "\u00a0\u2003\ufeff 不喜欢香菜！\t\n";
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-unicode-visible-http")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        java.util.Map.of("sentiment", "DISLIKE", "reason", "OTHER", "note", note))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.reason").value("OTHER"));
+  }
+
+  @Test
+  void feedbackHttpUsesRawCodePointLimitsForOtherNotes() throws Exception {
+    Cookie owner = login();
+    String recommendationId = firstRecommendationId(owner);
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-max-codepoints-http")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        java.util.Map.of(
+                            "sentiment",
+                            "DISLIKE",
+                            "reason",
+                            "OTHER",
+                            "note",
+                            "🚀".repeat(300)))))
+        .andExpect(status().isOk());
+
+    mvc.perform(
+            put("/api/v1/app/meal-recommendations/{recommendationId}/feedback", recommendationId)
+                .cookie(owner)
+                .header("Idempotency-Key", "feedback-over-codepoints-http")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        java.util.Map.of(
+                            "sentiment",
+                            "DISLIKE",
+                            "reason",
+                            "OTHER",
+                            "note",
+                            "🚀".repeat(301)))))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
   void feedbackDatabaseConstraintsRejectInvalidRows() throws Exception {
     Cookie owner = login();
     JsonNode ownerBootstrap = bootstrap(owner);
@@ -463,6 +562,45 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
+  void feedbackDatabaseConstraintsRejectEveryConfiguredWhitespaceOnlyOtherNote()
+      throws Exception {
+    Cookie owner = login();
+    UUID ownerId = UUID.fromString(bootstrap(owner).path("user").path("id").asText());
+    JdbcTemplate jdbc = new JdbcTemplate(fitnessDataSource);
+    LocalDate date = LocalDate.of(2026, 10, 1);
+
+    for (String whitespaceOnlyNote :
+        List.of(
+            " ",
+            "\t",
+            "\r",
+            "\n",
+            "\u0085",
+            "\u00a0",
+            "\u1680",
+            "\u2000",
+            "\u200a",
+            "\u2028",
+            "\u2029",
+            "\u202f",
+            "\u205f",
+            "\u3000",
+            "\ufeff")) {
+      assertThatThrownBy(
+              () ->
+                  jdbc.update(
+                      "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
+                      ownerId,
+                      ownedRecommendation(
+                          jdbc,
+                          ownerId,
+                          date.plusDays(whitespaceOnlyNote.codePointAt(0))),
+                      whitespaceOnlyNote))
+          .isInstanceOf(DataIntegrityViolationException.class);
+    }
+  }
+
+  @Test
   void feedbackDatabaseConstraintsAcceptDocumentedBranches() throws Exception {
     Cookie owner = login();
     JsonNode ownerBootstrap = bootstrap(owner);
@@ -477,18 +615,26 @@ class FitnessExperienceIntegrationTest {
         .isEqualTo(1);
     assertThat(
             jdbc.update(
-                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','TASTE',?)",
+                "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
                 ownerId,
                 ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 9)),
-                "x".repeat(300)))
+                "🚀".repeat(300)))
         .isEqualTo(1);
     assertThat(
             jdbc.update(
                 "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
                 ownerId,
                 ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 10)),
-                "\t 不喜欢香菜\n"))
+                "\u00a0\u2003\ufeff 不喜欢香菜！\t\n"))
         .isEqualTo(1);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO meal_recommendation_feedback(user_id,recommendation_id,sentiment,reason,note) VALUES (?,?, 'DISLIKE','OTHER',?)",
+                    ownerId,
+                    ownedRecommendation(jdbc, ownerId, LocalDate.of(2026, 9, 11)),
+                    "🚀".repeat(301)))
+        .isInstanceOf(DataIntegrityViolationException.class);
   }
 
   @Test

@@ -360,7 +360,7 @@ public final class FitnessApplicationService {
       throw new InvalidRequestException("说明不能超过 300 个字符");
     }
     if (request.reason() == FitnessDtos.FeedbackReason.OTHER
-        && (request.note() == null || request.note().isBlank())) {
+        && !FeedbackNotePolicy.hasNonWhitespaceCodePoint(request.note())) {
       throw new InvalidRequestException("OTHER 说明必须为 1 到 300 个字符");
     }
     return store.upsertMealRecommendationFeedback(authenticate(sessionToken), request);

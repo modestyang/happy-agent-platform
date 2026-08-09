@@ -112,9 +112,25 @@ class DualSchemaIntegrationTest {
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(3L);
+        .isEqualTo(4L);
     assertThat(
             agentJdbc.queryForObject("select count(*) from agent.agent_schema_history", Long.class))
         .isEqualTo(4L);
   }
+
+  @Test
+  void recognitionDataStaysInFitnessWithoutGoalOrAgentSchemaForeignKeys() {
+    JdbcTemplate fitnessJdbc = new JdbcTemplate(fitnessDataSource);
+    JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
+
+    assertThat(
+            fitnessJdbc.queryForObject(
+                "select count(*) from information_schema.columns where table_schema='fitness' and table_name in ('meals','meal_recognition_jobs') and column_name='goal_id'",
+                Long.class))
+        .isZero();
+    assertThat(
+            agentJdbc.queryForObject(
+                "select count(*) from information_schema.table_constraints where table_schema='agent' and constraint_type='FOREIGN KEY' and constraint_name ilike '%fitness%'",
+                Long.class))
+        .isZero();
 }

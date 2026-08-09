@@ -9,6 +9,10 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
+import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import java.time.Instant;
@@ -41,6 +45,25 @@ public final class FitnessPorts {
     GoalState createGoal(UUID userId, CreateGoalRequest request);
 
     BootstrapData loadForAi(UUID userId);
+
+    void markMediaUploaded(UUID userId, UUID mediaId);
+
+    MealRecognitionJobDto createRecognitionJob(
+        UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
+
+    MealRecognitionJobDto updateRecognitionJob(UUID jobId, MealRecognitionResult result);
+
+    Optional<MealRecognitionJobDto> findRecognitionJob(UUID userId, UUID jobId);
+
+    MealDto createMealRecord(UUID userId, FitnessDtos.CreateMealRecordRequest request);
+  }
+
+  public interface MediaUploadPort {
+    MediaUploadTicket createTicket(UUID userId, String contentType, long contentLength, String sha256);
+  }
+
+  public interface MealRecognitionPort {
+    MealRecognitionResult recognize(UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
   }
 
   public interface PasswordVerifier {

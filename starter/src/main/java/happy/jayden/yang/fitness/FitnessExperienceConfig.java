@@ -9,6 +9,8 @@ import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
+import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
+import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -55,12 +57,24 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
+  MediaUploadPort mediaUploadPort(@Qualifier("fitnessDataSource") DataSource dataSource) {
+    return new MealRecognitionRuntime.LocalMediaUploadPort(dataSource);
+  }
+
+  @Bean
+  MealRecognitionPort mealRecognitionPort(@Qualifier("agentDataSource") DataSource dataSource) {
+    return new MealRecognitionRuntime(dataSource);
+  }
+
+  @Bean
   FitnessApplicationService fitnessApplicationService(
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
-      AiConversation aiConversation) {
-    return new FitnessApplicationService(store, passwordVerifier, providerStatus, aiConversation);
+      AiConversation aiConversation,
+      MediaUploadPort mediaUploadPort,
+      MealRecognitionPort mealRecognitionPort) {
+    return new FitnessApplicationService(store, passwordVerifier, providerStatus, aiConversation, mediaUploadPort, mealRecognitionPort);
   }
 
   @Bean

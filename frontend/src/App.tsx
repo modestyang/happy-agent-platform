@@ -9,6 +9,7 @@ import { ApiError, api } from './api';
 import { ChatMarkdown } from './components/ChatMarkdown';
 import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
+import { MealRecordForm } from './components/MealRecordForm';
 import { BodyActivation, WeightSparkline } from './components/MiniVisuals';
 import { WorkoutPlayer } from './components/WorkoutPlayer';
 import { AdminWorkbench } from './admin/AdminWorkbench';
@@ -139,13 +140,11 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
 }
 
 function RecordDrawer({ initialTab, initialRecord, onClose, onSaved }: { initialTab: RecordTab; initialRecord?: Dashboard['bodyRecords'][number]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const drawerRef = useRef<HTMLFormElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<RecordTab>(initialTab);
   const [weightJin, setWeightJin] = useState(initialRecord?.weightJin?.toString() ?? '');
   const [waistCm, setWaistCm] = useState(initialRecord?.waistCm?.toString() ?? '');
-  const [mealType, setMealType] = useState('BREAKFAST');
-  const [items, setItems] = useState<Food[]>([{ name: '', estimatedKcal: 0 }]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -162,24 +161,20 @@ function RecordDrawer({ initialTab, initialRecord, onClose, onSaved }: { initial
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
-  const updateItem = (index: number, key: keyof Food, value: string) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: key === 'estimatedKcal' ? Number(value) : value } : item));
   async function save(event: FormEvent) {
     event.preventDefault(); setError('');
     if (tab === 'body' && !weightJin && !waistCm) { setError('请至少填写体重或腰围。'); return; }
-    if (tab === 'meal' && items.some((item) => !item.name.trim())) { setError('请填写至少一项食物名称。'); return; }
     setSaving(true);
     try {
       if (tab === 'body') await api.bodyRecord({ ...(weightJin ? { weightJin: Number(weightJin) } : {}), ...(waistCm ? { waistCm: Number(waistCm) } : {}) });
-      else await api.meal(mealType, items);
       await onSaved(); onClose();
     } catch (err) { setError(errorText(err)); } finally { setSaving(false); }
   }
-  return <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="记录抽屉"><form ref={drawerRef} className="drawer" onSubmit={save}>
+  return <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="记录抽屉"><div ref={drawerRef} className="drawer">
     <div className="drawer-head"><div><small>留下真实的一笔</small><h2>记录这一刻</h2></div><button ref={closeRef} type="button" className="icon-button" aria-label="关闭记录" onClick={onClose}><X /></button></div>
     <div className="tabs"><button type="button" aria-pressed={tab === 'body'} className={tab === 'body' ? 'active' : ''} onClick={() => setTab('body')}>身材记录</button><button type="button" aria-pressed={tab === 'meal'} className={tab === 'meal' ? 'active' : ''} onClick={() => setTab('meal')}>饮食记录</button></div>
-    {tab === 'body' ? <div className="record-form-grid"><label>体重 (斤)<input type="number" step="0.1" value={weightJin} onChange={(event) => setWeightJin(event.target.value)} /></label><label>腰围 (cm)<input type="number" step="0.1" value={waistCm} onChange={(event) => setWaistCm(event.target.value)} /></label></div> : <><label>餐次<select aria-label="餐次" value={mealType} onChange={(event) => setMealType(event.target.value)}><option value="BREAKFAST">早餐</option><option value="LUNCH">午餐</option><option value="DINNER">晚餐</option><option value="SNACK">加餐</option></select></label>{items.map((item, index) => <div className="food-row" key={index}><label>吃了什么<input value={item.name} onChange={(event) => updateItem(index, 'name', event.target.value)} required /></label><label>热量 (kcal)<input type="number" min="0" value={item.estimatedKcal || ''} onChange={(event) => updateItem(index, 'estimatedKcal', event.target.value)} required /></label></div>)}<button type="button" className="soft-button" onClick={() => setItems((current) => [...current, { name: '', estimatedKcal: 0 }])}><Plus /> 新增食物</button></>}
-    {error && <p className="error">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : tab === 'body' ? '保存身材记录' : '保存饮食记录'}</button>
-  </form></div>;
+    {tab === 'body' ? <form onSubmit={save}><div className="record-form-grid"><label>体重 (斤)<input type="number" step="0.1" value={weightJin} onChange={(event) => setWeightJin(event.target.value)} /></label><label>腰围 (cm)<input type="number" step="0.1" value={waistCm} onChange={(event) => setWaistCm(event.target.value)} /></label></div>{error && <p className="error">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : '保存身材记录'}</button></form> : <MealRecordForm onSaved={async () => { await onSaved(); onClose(); }} />}
+  </div></div>;
 }
 
 function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<void> }) {

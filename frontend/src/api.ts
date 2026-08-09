@@ -29,12 +29,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function upload(path: string, file: File, headers: { name: string; value: string }[]) {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: Object.fromEntries(headers.map(({ name, value }) => [name, value])),
+      body: file,
+    });
+  } catch {
+    throw new ApiError('图片上传失败，请检查网络后重试。', 0);
+  }
+  if (!response.ok) throw new ApiError('图片上传失败，请重试。', response.status);
+}
+
 export const api = {
   bootstrap: () => request<unknown>('/api/app/bootstrap'),
   login: (username: string, password: string) => request<unknown>('/api/local/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request<unknown>('/api/local/logout', { method: 'POST' }),
   bodyRecord: (record: { weightJin?: number; waistCm?: number }) => request<unknown>('/api/app/body-records', { method: 'POST', body: JSON.stringify(record) }),
   meal: (mealType: string, items: { name: string; estimatedKcal: number }[]) => request<unknown>('/api/app/meals', { method: 'POST', body: JSON.stringify({ mealType, items }) }),
+  createMediaUploadTicket: (contentType: string, contentLength: number, sha256: string) => request<{ mediaId: string; uploadUrl: string; headers: { name: string; value: string }[] }>('/api/v1/app/media-upload-tickets', { method: 'POST', body: JSON.stringify({ purpose: 'MEAL_RECOGNITION', contentType, contentLength, sha256 }) }),
+  uploadMedia: (uploadUrl: string, file: File, headers: { name: string; value: string }[]) => upload(uploadUrl, file, headers),
+  createMealRecognitionJob: (mediaId: string, mealType: string, occurredAt: string) => request<{ jobId: string; status: string; candidates: { name: string; estimatedKcal: number; confidence: number }[]; failure?: { message: string } }>('/api/v1/app/meal-recognition-jobs', { method: 'POST', body: JSON.stringify({ mediaId, mealType, occurredAt }) }),
+  createMealRecord: (body: unknown) => request<unknown>('/api/v1/app/meal-records', { method: 'POST', body: JSON.stringify(body) }),
   completeWorkout: (id: string, completionRatio: number) => request<unknown>(`/api/app/workouts/${id}/complete`, { method: 'POST', body: JSON.stringify({ completionRatio }) }),
   goal: (body: unknown) => request<unknown>('/api/app/goals', { method: 'POST', body: JSON.stringify(body) }),
   aiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),

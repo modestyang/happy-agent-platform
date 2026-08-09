@@ -47,7 +47,58 @@ public final class FitnessDtos {
 
   public record MealItemDto(String name, int estimatedKcal) {}
 
-  public record MealDto(UUID id, Instant occurredAt, MealType mealType, List<MealItemDto> items) {}
+  public record UploadHeader(String name, String value) {}
+
+  public record MediaUploadTicket(
+      UUID mediaId,
+      String method,
+      String uploadUrl,
+      List<UploadHeader> headers,
+      Instant expiresAt,
+      long maxBytes) {}
+
+  public record CreateMediaUploadTicketRequest(
+      String contentType, long contentLength, String sha256) {}
+
+  public record CreateMealRecognitionJobRequest(
+      UUID mediaId, MealType mealType, Instant occurredAt) {}
+
+  public record MealRecognitionCandidate(String name, int estimatedKcal, double confidence) {}
+
+  public record MealRecognitionResult(
+      String status,
+      List<MealRecognitionCandidate> candidates,
+      String failureCode,
+      String failureMessage) {}
+
+  public record MealRecognitionJobDto(
+      UUID jobId,
+      String status,
+      UUID mediaId,
+      MealType mealType,
+      Instant occurredAt,
+      List<MealRecognitionCandidate> candidates,
+      String failureCode,
+      String failureMessage,
+      Instant createdAt,
+      Instant updatedAt) {}
+
+  public record CreateMealRecordRequest(
+      MealType mealType,
+      Instant occurredAt,
+      String source,
+      UUID recognitionJobId,
+      List<MealItemDto> items,
+      String note) {}
+
+  public record MealDto(
+      UUID id,
+      Instant occurredAt,
+      MealType mealType,
+      List<MealItemDto> items,
+      String source,
+      UUID recognitionJobId,
+      String note) {}
 
   public record MealRecommendationDto(
       UUID id,

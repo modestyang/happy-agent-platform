@@ -9,11 +9,16 @@ import happy.jayden.yang.fitness.service.FitnessDtos.CompleteWorkoutRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateBodyRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateGoalRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.CreateMealRecordRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.ExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.GoalState;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginAccount;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealItemDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
+import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
@@ -40,6 +45,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class JdbcFitnessStore implements FitnessStore {
 
   private static final TypeReference<List<MealItemDto>> MEAL_ITEMS = new TypeReference<>() {};
+  private static final TypeReference<List<MealRecognitionCandidate>> CANDIDATES = new TypeReference<>() {};
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
   private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
   private final JdbcTemplate jdbc;
@@ -113,7 +119,7 @@ public final class JdbcFitnessStore implements FitnessStore {
             userId);
     List<MealDto> meals =
         jdbc.query(
-            "SELECT meal_id,occurred_at,meal_type,items FROM meals WHERE user_id=? ORDER BY occurred_at DESC",
+            "SELECT meal_id,occurred_at,meal_type,items,source,recognition_job_id,note FROM meals WHERE user_id=? ORDER BY occurred_at DESC",
             (rs, row) -> meal(rs),
             userId);
     List<MealRecommendationDto> mealRecommendations =
@@ -167,7 +173,42 @@ public final class JdbcFitnessStore implements FitnessStore {
         Timestamp.from(occurredAt),
         request.mealType().name(),
         json(request.items()));
-    return new MealDto(id, occurredAt, request.mealType(), List.copyOf(request.items()));
+    return new MealDto(id, occurredAt, request.mealType(), List.copyOf(request.items()), "MANUAL", null, null);
+  }
+
+  @Override
+  public void markMediaUploaded(UUID userId, UUID mediaId) {
+    int changed = jdbc.update("UPDATE media_objects SET status='UPLOADED' WHERE media_id=? AND user_id=? AND status='PENDING'", mediaId, userId);
+    if (changed == 0) throw new NotFoundException("上传票据不存在或已失效");
+  }
+
+  @Override
+  public MealRecognitionJobDto createRecognitionJob(UUID userId, UUID mediaId, MealType mealType, Instant occurredAt) {
+    Long uploaded = jdbc.queryForObject("SELECT COUNT(*) FROM media_objects WHERE media_id=? AND user_id=? AND status='UPLOADED'", Long.class, mediaId, userId);
+    if (uploaded == null || uploaded == 0) throw new NotFoundException("图片尚未上传完成");
+    UUID id = UUID.randomUUID();
+    Instant at = occurredAt == null ? Instant.now() : occurredAt;
+    jdbc.update("INSERT INTO meal_recognition_jobs(job_id,user_id,media_id,meal_type,occurred_at,status,candidates) VALUES (?,?,?,?,?,'QUEUED','[]'::jsonb)", id, userId, mediaId, mealType.name(), Timestamp.from(at));
+    return findRecognitionJob(userId, id).orElseThrow();
+  }
+
+  @Override
+  public MealRecognitionJobDto updateRecognitionJob(UUID jobId, MealRecognitionResult result) {
+    jdbc.update("UPDATE meal_recognition_jobs SET status=?,candidates=?::jsonb,failure_code=?,failure_message=?,updated_at=CURRENT_TIMESTAMP WHERE job_id=?", result.status(), json(result.candidates()), result.failureCode(), result.failureMessage(), jobId);
+    return jdbc.query("SELECT job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at FROM meal_recognition_jobs WHERE job_id=?", (rs, row) -> recognitionJob(rs), jobId).stream().findFirst().orElseThrow(() -> new NotFoundException("识别任务不存在"));
+  }
+
+  @Override
+  public Optional<MealRecognitionJobDto> findRecognitionJob(UUID userId, UUID jobId) {
+    return jdbc.query("SELECT job_id,user_id,media_id,meal_type,occurred_at,status,candidates,failure_code,failure_message,created_at,updated_at FROM meal_recognition_jobs WHERE user_id=? AND job_id=?", (rs, row) -> recognitionJob(rs), userId, jobId).stream().findFirst();
+  }
+
+  @Override
+  public MealDto createMealRecord(UUID userId, CreateMealRecordRequest request) {
+    UUID id = UUID.randomUUID();
+    Instant occurredAt = request.occurredAt() == null ? Instant.now() : request.occurredAt();
+    jdbc.update("INSERT INTO meals(meal_id,user_id,occurred_at,meal_type,items,source,recognition_job_id,note) VALUES (?,?,?,?,?::jsonb,?,?,?)", id, userId, Timestamp.from(occurredAt), request.mealType().name(), json(request.items()), request.source(), request.recognitionJobId(), request.note());
+    return new MealDto(id, occurredAt, request.mealType(), List.copyOf(request.items()), request.source(), request.recognitionJobId(), request.note());
   }
 
   @Override
@@ -472,10 +513,19 @@ public final class JdbcFitnessStore implements FitnessStore {
           rs.getObject("meal_id", UUID.class),
           rs.getTimestamp("occurred_at").toInstant(),
           happy.jayden.yang.fitness.service.FitnessDtos.MealType.valueOf(rs.getString("meal_type")),
-          objectMapper.readValue(rs.getString("items"), MEAL_ITEMS));
+          objectMapper.readValue(rs.getString("items"), MEAL_ITEMS),
+          rs.getString("source"),
+          rs.getObject("recognition_job_id", UUID.class),
+          rs.getString("note"));
     } catch (JsonProcessingException exception) {
       throw new SQLException("Invalid meal items JSON", exception);
     }
+  }
+
+  private MealRecognitionJobDto recognitionJob(ResultSet rs) throws SQLException {
+    try {
+      return new MealRecognitionJobDto(rs.getObject("job_id", UUID.class), rs.getString("status"), rs.getObject("media_id", UUID.class), MealType.valueOf(rs.getString("meal_type")), rs.getTimestamp("occurred_at").toInstant(), objectMapper.readValue(rs.getString("candidates"), CANDIDATES), rs.getString("failure_code"), rs.getString("failure_message"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+    } catch (JsonProcessingException exception) { throw new SQLException("Invalid recognition candidates JSON", exception); }
   }
 
   private MealRecommendationDto mealRecommendation(ResultSet rs) throws SQLException {

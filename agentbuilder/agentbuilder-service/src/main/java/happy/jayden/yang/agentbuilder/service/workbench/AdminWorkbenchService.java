@@ -3,9 +3,11 @@ package happy.jayden.yang.agentbuilder.service.workbench;
 import static happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.*;
 
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
+import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -15,15 +17,31 @@ public final class AdminWorkbenchService {
 
   private final AdminWorkbenchPort port;
   private final RuntimeCapabilityRegistry runtimeCapabilities;
+  private final AdminResourcePort resources;
+  private final ToolRegistry tools;
 
   public AdminWorkbenchService(
       AdminWorkbenchPort port, RuntimeCapabilityRegistry runtimeCapabilities) {
+    this(port, runtimeCapabilities, null, null);
+  }
+
+  public AdminWorkbenchService(
+      AdminWorkbenchPort port,
+      RuntimeCapabilityRegistry runtimeCapabilities,
+      AdminResourcePort resources,
+      ToolRegistry tools) {
     this.port = Objects.requireNonNull(port, "port");
     this.runtimeCapabilities = Objects.requireNonNull(runtimeCapabilities, "runtimeCapabilities");
+    this.resources = resources;
+    this.tools = tools;
   }
 
   public WorkbenchSnapshot snapshot() {
     return port.snapshot();
+  }
+
+  public List<AgentDraftView> agents() {
+    return port.agents();
   }
 
   public AgentDraftView updateDraft(String agentKey, DraftUpdate update, long expectedRevision) {
@@ -32,8 +50,8 @@ public final class AdminWorkbenchService {
   }
 
   /**
-   * Starts a real persisted draft using the platform's current default runtime wiring.
-   * Domain tools, skills and hooks remain editable on the following configuration page.
+   * Starts a real persisted draft using the platform's current default runtime wiring. Domain
+   * tools, skills and hooks remain editable on the following configuration page.
    */
   public AgentDraftView createDraft(CreateAgentRequest request) {
     var normalized = Objects.requireNonNull(request, "request");
@@ -41,9 +59,11 @@ public final class AdminWorkbenchService {
     if (agentKey.length() > 160 || !AGENT_KEY.matcher(agentKey).matches()) {
       throw new IllegalArgumentException("Agent Key 仅支持小写字母、数字、点和连字符，并且必须以字母开头");
     }
-    if (port.findDraft(agentKey).isPresent()) throw new AdminWorkbenchPort.Conflict("Agent Key 已存在");
+    if (port.findDraft(agentKey).isPresent())
+      throw new AdminWorkbenchPort.Conflict("Agent Key 已存在");
     return port.createDraft(
-        new CreateAgentRequest(agentKey, normalized.name().trim(), normalized.description().trim()));
+        new CreateAgentRequest(
+            agentKey, normalized.name().trim(), normalized.description().trim()));
   }
 
   public ComponentView updateComponent(String type, String componentKey, ComponentUpdate update) {
@@ -60,6 +80,7 @@ public final class AdminWorkbenchService {
   public ValidationView validate(String agentKey) {
     var draft =
         port.findDraft(agentKey).orElseThrow(() -> new AdminWorkbenchPort.NotFound("Agent 草稿不存在"));
+    if (resources != null && tools != null) return validateIndependent(draft);
     var snapshot = port.snapshot();
     var errors = new ArrayList<String>();
     var warnings = new ArrayList<String>();
@@ -82,6 +103,86 @@ public final class AdminWorkbenchService {
     if (draft.toolKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Tool");
     if (draft.skillKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Skill");
     return new ValidationView(errors.isEmpty(), errors, warnings);
+  }
+
+  private ValidationView validateIndependent(AgentDraftView draft) {
+    var errors = new ArrayList<String>();
+    var warnings = new ArrayList<String>();
+    var provider = resources.findProvider(draft.providerKey());
+    if (provider.isEmpty()) errors.add("Provider " + draft.providerKey() + " 不存在");
+    else {
+      if (!"ACTIVE".equals(provider.get().status())) errors.add("Provider 已停用");
+      if (!provider.get().configured()) errors.add("Provider 尚未配置 API Key");
+    }
+    resources.listModels(draft.providerKey()).stream()
+        .filter(item -> item.modelKey().equals(draft.modelKey()))
+        .findFirst()
+        .ifPresentOrElse(
+            item -> {
+              if (!"ACTIVE".equals(item.status())) errors.add("模型 " + draft.modelKey() + " 已停用");
+            },
+            () -> errors.add("模型 " + draft.modelKey() + " 不存在或不属于当前 Provider"));
+    requireActive(
+        errors,
+        "Framework",
+        draft.frameworkKey(),
+        resources.listFrameworks().stream()
+            .map(item -> Map.entry(item.frameworkKey(), item.status()))
+            .toList());
+    requireActive(
+        errors,
+        "Prompt",
+        draft.promptKey(),
+        resources.listPrompts().stream()
+            .map(item -> Map.entry(item.promptKey(), item.status()))
+            .toList());
+    requireActive(
+        errors,
+        "Memory",
+        draft.memoryKey(),
+        resources.listMemories().stream()
+            .map(item -> Map.entry(item.memoryKey(), item.status()))
+            .toList());
+    var toolKeys =
+        tools.descriptors().stream()
+            .map(item -> item.toolKey())
+            .collect(java.util.stream.Collectors.toSet());
+    draft
+        .toolKeys()
+        .forEach(
+            key -> {
+              if (!toolKeys.contains(key)) errors.add("Tool " + key + " 没有已注册的运行时实现");
+            });
+    var skills = resources.listSkills();
+    draft
+        .skillKeys()
+        .forEach(
+            key -> {
+              var item = skills.stream().filter(value -> value.skillKey().equals(key)).findFirst();
+              if (item.isEmpty()
+                  || !"ACTIVE".equals(item.get().status())
+                  || !item.get().runtimeReady()) errors.add("Skill " + key + " 当前不可用");
+            });
+    var hooks = resources.listHooks();
+    draft
+        .hookKeys()
+        .forEach(
+            key -> {
+              var item = hooks.stream().filter(value -> value.hookKey().equals(key)).findFirst();
+              if (item.isEmpty()
+                  || !"ACTIVE".equals(item.get().status())
+                  || !item.get().runtimeReady()) errors.add("Hook " + key + " 当前不可用");
+            });
+    if (draft.toolKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Tool");
+    if (draft.skillKeys().isEmpty()) warnings.add("当前 Agent 没有绑定 Skill");
+    return new ValidationView(errors.isEmpty(), errors, warnings);
+  }
+
+  private static void requireActive(
+      List<String> errors, String label, String key, List<Map.Entry<String, String>> values) {
+    var item = values.stream().filter(value -> value.getKey().equals(key)).findFirst();
+    if (item.isEmpty()) errors.add(label + " " + key + " 不存在");
+    else if (!"ACTIVE".equals(item.get().getValue())) errors.add(label + " " + key + " 已停用");
   }
 
   public ProviderView saveCredential(String providerKey, char[] credential) {
@@ -125,7 +226,8 @@ public final class AdminWorkbenchService {
 
   private static void requireModelProviderAlignment(
       WorkbenchSnapshot snapshot, List<String> errors, String modelKey, String providerKey) {
-    if (modelKey == null || modelKey.isBlank() || providerKey == null || providerKey.isBlank()) return;
+    if (modelKey == null || modelKey.isBlank() || providerKey == null || providerKey.isBlank())
+      return;
     snapshot.components().stream()
         .filter(item -> item.type().equals("MODEL") && item.componentKey().equals(modelKey))
         .findFirst()

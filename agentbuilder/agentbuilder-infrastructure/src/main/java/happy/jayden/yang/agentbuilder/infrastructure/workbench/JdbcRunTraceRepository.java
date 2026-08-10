@@ -1,26 +1,29 @@
 package happy.jayden.yang.agentbuilder.infrastructure.workbench;
 
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationMessage;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunPage;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunQuery;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunSummary;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunTrace;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.TraceEvent;
-import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
-import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationMessage;
-import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Run listing, trace detail, and bulk upsert for trace state.
@@ -31,6 +34,8 @@ import org.springframework.dao.DuplicateKeyException;
  */
 public final class JdbcRunTraceRepository {
 
+  private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
+  private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
   private final JdbcTemplate jdbc;
 
   public JdbcRunTraceRepository(DataSource dataSource) {
@@ -88,7 +93,8 @@ public final class JdbcRunTraceRepository {
         agentKey,
         Timestamp.from(expiry));
     var existing =
-        jdbc.query(
+        jdbc
+            .query(
                 "SELECT conversation_id, user_id, agent_key, title, status, started_at, last_message_at,"
                     + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
                     + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
@@ -152,22 +158,22 @@ public final class JdbcRunTraceRepository {
         bounded);
   }
 
-  public List<ConversationSummary> listConversationSummaries(UUID userId, int page, int size) {
+  public List<ConversationSummary> listRecentConversationSummaries(int page, int size) {
     int boundedSize = size <= 0 ? 20 : Math.min(size, 100);
     int offset = Math.max(page, 0) * boundedSize;
     return jdbc.query(
         "SELECT c.conversation_id, c.user_id, c.agent_key, c.title, c.status, c.started_at, c.last_message_at,"
             + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
             + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
-            + " FROM agent_conversations c WHERE c.user_id=? ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
+            + " FROM agent_conversations c ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
         (rs, row) -> mapConversationSummary(rs),
-        userId,
         boundedSize,
         offset);
   }
 
   public Optional<ConversationDetail> findConversation(UUID conversationId) {
-    return jdbc.query(
+    return jdbc
+        .query(
             "SELECT c.conversation_id, c.user_id, c.agent_key, c.title, c.status, c.started_at, c.last_message_at,"
                 + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
                 + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
@@ -298,6 +304,181 @@ public final class JdbcRunTraceRepository {
         Timestamp.from(Instant.now()));
   }
 
+  public StreamEvent appendStreamEvent(UUID runId, String type, Map<String, ?> data) {
+    long sequence =
+        jdbc.queryForObject(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_run_stream_events WHERE run_id=?",
+            Long.class,
+            runId);
+    String payload = json(data);
+    jdbc.update(
+        "INSERT INTO agent_run_stream_events (run_id, sequence, event_type, occurred_at, payload)"
+            + " VALUES (?, ?, ?, ?, ?::jsonb)",
+        runId,
+        sequence,
+        type,
+        Timestamp.from(Instant.now()),
+        payload);
+    return new StreamEvent(sequence, type, map(payload), Instant.now());
+  }
+
+  public List<StreamEvent> streamEventsAfter(UUID runId, long afterSequence) {
+    return jdbc.query(
+        "SELECT sequence,event_type,payload::text,occurred_at FROM agent_run_stream_events"
+            + " WHERE run_id=? AND sequence>? ORDER BY sequence",
+        (rs, row) ->
+            new StreamEvent(
+                rs.getLong("sequence"),
+                rs.getString("event_type"),
+                map(rs.getString("payload")),
+                rs.getTimestamp("occurred_at").toInstant()),
+        runId,
+        afterSequence);
+  }
+
+  public Optional<UUID> findRunOwner(UUID runId) {
+    return jdbc
+        .query(
+            "SELECT user_id FROM agent_runs WHERE run_id=?",
+            (rs, row) -> rs.getObject("user_id", UUID.class),
+            runId)
+        .stream()
+        .findFirst();
+  }
+
+  public Optional<UUID> findRunConversation(UUID runId) {
+    return jdbc
+        .query(
+            "SELECT conversation_id FROM agent_runs WHERE run_id=?",
+            (rs, row) -> rs.getObject("conversation_id", UUID.class),
+            runId)
+        .stream()
+        .findFirst();
+  }
+
+  public Optional<String> findRunStatus(UUID runId) {
+    return jdbc
+        .query(
+            "SELECT status FROM agent_runs WHERE run_id=?",
+            (rs, row) -> rs.getString("status"),
+            runId)
+        .stream()
+        .findFirst();
+  }
+
+  public void updateRunStatus(UUID runId, String status) {
+    if ("QUEUED".equals(status) || "RUNNING".equals(status) || "WAITING_APPROVAL".equals(status)) {
+      jdbc.update("UPDATE agent_runs SET status=?,completed_at=NULL WHERE run_id=?", status, runId);
+      return;
+    }
+    jdbc.update("UPDATE agent_runs SET status=? WHERE run_id=?", status, runId);
+  }
+
+  public ApprovalRecord requestApproval(
+      UUID runId, UUID userId, String toolKey, String title, Map<String, ?> arguments) {
+    return requestApproval(UUID.randomUUID(), runId, userId, toolKey, title, arguments);
+  }
+
+  public ApprovalRecord requestApproval(
+      UUID approvalId,
+      UUID runId,
+      UUID userId,
+      String toolKey,
+      String title,
+      Map<String, ?> arguments) {
+    UUID toolCallId = UUID.randomUUID();
+    String payload = json(arguments);
+    jdbc.update(
+        "INSERT INTO agent_run_approvals"
+            + " (approval_id,run_id,user_id,tool_call_id,tool_key,title,arguments,status)"
+            + " VALUES (?,?,?,?,?,?,?::jsonb,'REQUESTED')",
+        approvalId,
+        runId,
+        userId,
+        toolCallId,
+        toolKey,
+        title,
+        payload);
+    updateRunStatus(runId, "WAITING_APPROVAL");
+    return new ApprovalRecord(
+        approvalId, runId, userId, toolCallId, toolKey, title, map(payload), "REQUESTED");
+  }
+
+  public ApprovalRecord decideApproval(
+      UUID runId, UUID approvalId, UUID userId, String decision, String idempotencyKey) {
+    if (!("APPROVE".equals(decision) || "REJECT".equals(decision))) {
+      throw new IllegalArgumentException("decision must be APPROVE or REJECT");
+    }
+    ApprovalRow row =
+        jdbc
+            .query(
+                "SELECT user_id,tool_call_id,tool_key,title,arguments::text,status,decision_key"
+                    + " FROM agent_run_approvals WHERE run_id=? AND approval_id=?",
+                (rs, ignored) ->
+                    new ApprovalRow(
+                        rs.getObject("user_id", UUID.class),
+                        rs.getObject("tool_call_id", UUID.class),
+                        rs.getString("tool_key"),
+                        rs.getString("title"),
+                        rs.getString("arguments"),
+                        rs.getString("status"),
+                        rs.getString("decision_key")),
+                runId,
+                approvalId)
+            .stream()
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("approval not found"));
+    if (!row.userId().equals(userId)) throw new IllegalStateException("approval owner mismatch");
+    String status = "APPROVE".equals(decision) ? "APPROVED" : "REJECTED";
+    if (!"REQUESTED".equals(row.status())) {
+      if (status.equals(row.status()) && Objects.equals(idempotencyKey, row.decisionKey())) {
+        return approval(approvalId, runId, row);
+      }
+      throw new IllegalStateException("approval already decided");
+    }
+    int changed =
+        jdbc.update(
+            "UPDATE agent_run_approvals SET status=?,decision_key=?,decided_at=CURRENT_TIMESTAMP"
+                + " WHERE run_id=? AND approval_id=? AND status='REQUESTED'",
+            status,
+            idempotencyKey,
+            runId,
+            approvalId);
+    if (changed != 1) throw new IllegalStateException("approval decision raced");
+    return new ApprovalRecord(
+        approvalId,
+        runId,
+        row.userId(),
+        row.toolCallId(),
+        row.toolKey(),
+        row.title(),
+        map(row.arguments()),
+        status);
+  }
+
+  public Optional<ApprovalRecord> findApproval(UUID runId, UUID approvalId) {
+    return jdbc
+        .query(
+            "SELECT user_id,tool_call_id,tool_key,title,arguments::text,status,decision_key"
+                + " FROM agent_run_approvals WHERE run_id=? AND approval_id=?",
+            (rs, ignored) ->
+                approval(
+                    approvalId,
+                    runId,
+                    new ApprovalRow(
+                        rs.getObject("user_id", UUID.class),
+                        rs.getObject("tool_call_id", UUID.class),
+                        rs.getString("tool_key"),
+                        rs.getString("title"),
+                        rs.getString("arguments"),
+                        rs.getString("status"),
+                        rs.getString("decision_key"))),
+            runId,
+            approvalId)
+        .stream()
+        .findFirst();
+  }
+
   public Optional<Instant> latestEventAt(UUID runId) {
     return jdbc
         .query(
@@ -394,4 +575,67 @@ public final class JdbcRunTraceRepository {
     if (value == null) return "";
     return value.length() <= max ? value : value.substring(0, max) + "…";
   }
+
+  private static ApprovalRecord approval(UUID approvalId, UUID runId, ApprovalRow row) {
+    return new ApprovalRecord(
+        approvalId,
+        runId,
+        row.userId(),
+        row.toolCallId(),
+        row.toolKey(),
+        row.title(),
+        map(row.arguments()),
+        row.status());
+  }
+
+  private static String streamTitle(String type) {
+    return switch (type) {
+      case "TEXT_DELTA" -> "回复增量";
+      case "RUN_STATE" -> "运行状态";
+      case "STRUCTURED_COMPONENT" -> "结构化内容";
+      case "APPROVAL" -> "等待确认";
+      case "ERROR" -> "运行失败";
+      case "COMPLETED" -> "运行结束";
+      default -> type;
+    };
+  }
+
+  private static String json(Map<String, ?> value) {
+    try {
+      return MAPPER.writeValueAsString(value);
+    } catch (Exception exception) {
+      throw new IllegalArgumentException(
+          "stream event payload is not JSON serializable", exception);
+    }
+  }
+
+  private static Map<String, Object> map(String value) {
+    try {
+      return MAPPER.readValue(value, MAP_TYPE);
+    } catch (Exception exception) {
+      throw new IllegalStateException("stored stream event payload is invalid", exception);
+    }
+  }
+
+  public record StreamEvent(
+      long sequence, String type, Map<String, Object> data, Instant occurredAt) {}
+
+  public record ApprovalRecord(
+      UUID approvalId,
+      UUID runId,
+      UUID userId,
+      UUID toolCallId,
+      String toolKey,
+      String title,
+      Map<String, Object> arguments,
+      String status) {}
+
+  private record ApprovalRow(
+      UUID userId,
+      UUID toolCallId,
+      String toolKey,
+      String title,
+      String arguments,
+      String status,
+      String decisionKey) {}
 }

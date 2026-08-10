@@ -9,7 +9,51 @@ if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = () => {};
 }
 
-const snapshot = {
+type ComponentFixture = {
+  type: string;
+  componentKey: string;
+  displayName: string;
+  description: string;
+  version: number;
+  status: string;
+  tags: string[];
+  config: Record<string, unknown>;
+};
+
+type WorkbenchFixture = {
+  overview: Record<string, unknown>;
+  agents: Array<{
+    agentKey: string;
+    name: string;
+    description: string;
+    status: string;
+    frameworkKey: string;
+    providerKey: string;
+    modelKey: string;
+    promptKey: string;
+    toolKeys: string[];
+    skillKeys: string[];
+    hookKeys: string[];
+    memoryKey: string;
+    temperature: number;
+    maxToolCalls: number;
+    publishedVersion: number;
+    revision: number;
+    updatedAt: string;
+  }>;
+  components: ComponentFixture[];
+  providers: Array<{
+    providerKey: string;
+    displayName: string;
+    endpoint: string;
+    configured: boolean;
+    maskedCredential: string;
+    status: string;
+  }>;
+  runs: unknown[];
+};
+
+const snapshot: WorkbenchFixture = {
   overview: { agentCount: 1, platformStatus: 'NEEDS_CONFIGURATION', availableComponents: 2, configuredProviders: 0, runCount: 0 },
   agents: [{
     agentKey: 'fitness.coach', name: '瘦瘦健身教练', description: '陪伴用户完成训练与饮食管理', status: 'DRAFT',
@@ -26,16 +70,35 @@ const snapshot = {
   runs: [],
 };
 
+function independentRoutes(source: WorkbenchFixture = snapshot): Record<string, unknown> {
+  const component = (type: string) => source.components.filter((item) => item.type === type);
+  return {
+    '/api/admin/agents': source.agents,
+    '/api/admin/providers': source.providers.map((item) => ({ ...item, protocol: 'OPENAI_COMPATIBLE', status: item.status === 'AVAILABLE' ? 'ACTIVE' : item.status, revision: 1, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/models': component('MODEL').map((item) => ({ modelKey: item.componentKey, providerKey: String(item.config.providerKey ?? source.agents[0]?.providerKey ?? ''), modelId: item.componentKey.replace(/^model\./, ''), displayName: item.displayName, description: item.description, supportsStreaming: true, supportsToolCalling: true, supportsVision: false, status: item.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED', revision: item.version, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/prompts': component('PROMPT').map((item) => ({ promptKey: item.componentKey, displayName: item.displayName, description: item.description, template: String(item.config.template ?? ''), status: item.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED', revision: item.version, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/tools': component('TOOL').map((item) => ({ toolKey: item.componentKey, contractVersion: item.version, runtimeName: item.componentKey, displayName: item.displayName, description: item.description, whenToUse: '', whenNotToUse: '', sideEffect: 'READ_ONLY', riskLevel: 'LOW', requiredScopes: [], inputSchema: {}, outputSchema: {} })),
+    '/api/admin/skills': component('SKILL').map((item) => ({ skillKey: item.componentKey, displayName: item.displayName, description: item.description, whenToUse: String(item.config.whenToUse ?? ''), whenNotToUse: String(item.config.whenNotToUse ?? ''), content: '', requiredToolKeys: item.config.requiredTools ?? [], runtimeReady: item.status === 'AVAILABLE', status: item.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED', revision: item.version, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/hooks': component('HOOK').map((item) => ({ hookKey: item.componentKey, displayName: item.displayName, description: item.description, phase: 'BEFORE_TOOL', mandatory: Boolean(item.config.mandatory), runtimeReady: item.status === 'AVAILABLE', status: item.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED', revision: item.version, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/frameworks': component('FRAMEWORK').map((item) => ({ frameworkKey: item.componentKey, displayName: item.displayName, description: item.description, capabilities: item.config, status: item.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED', revision: item.version, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/memories': component('MEMORY').map((item) => ({ memoryKey: item.componentKey, displayName: item.displayName, description: item.description, retentionHours: 24, maxTokens: 8000, status: item.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED', revision: item.version, updatedAt: '2026-08-06T01:00:00Z' })),
+    '/api/admin/runs': { items: source.runs, totalElements: source.runs.length, totalPages: source.runs.length ? 1 : 0, page: 0, size: 4 },
+  };
+}
+
 function mockFetch(overrides: Record<string, unknown> = {}) {
+  const legacySnapshot = overrides['/api/admin/workbench'] as typeof snapshot | undefined;
+  const source = legacySnapshot ?? snapshot;
   const routes: Record<string, unknown> = {
     '/api/admin/auth/session': { username: 'admin' },
-    '/api/admin/workbench': snapshot,
+    ...independentRoutes(source),
     ...overrides,
   };
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const path = url.startsWith('/api/admin/runs?') ? '/api/admin/runs' : url;
-    const payload = routes[path] ?? routes[url];
+    const method = init?.method ?? 'GET';
+    const payload = routes[`${method} ${path}`] ?? routes[path] ?? routes[url];
     if (payload !== undefined) return new Response(JSON.stringify(payload), { status: 200 });
     return new Response('{}', { status: 200 });
   });
@@ -62,7 +125,7 @@ describe('AdminWorkbench', () => {
     expect(screen.getByText('瘦瘦健身教练')).toBeInTheDocument();
     expect(screen.getByText('尚未配置运行依赖')).toBeInTheDocument();
     expect(screen.getByText('暂无真实 Run')).toBeInTheDocument();
-    expect(screen.getByText('等待 Fitness Tool Bean 接线')).toBeInTheDocument();
+    expect(screen.getByText('可用能力')).toBeInTheDocument();
   });
 
   it('presents Agent drafts as scannable configuration cards instead of a sparse table', async () => {
@@ -107,13 +170,87 @@ describe('AdminWorkbench', () => {
     expect(screen.getByLabelText('Agent Key')).toBeInTheDocument();
   });
 
-  it('keeps Trace in the developer navigation for user-scoped conversation inspection', async () => {
-    mockFetch();
+  it('loads recent conversations without exposing UUID search', async () => {
+    const conversation = {
+      conversationId: 'conversation-1', userId: 'user-1', agentKey: 'fitness.coach', title: '明天怎么训练', status: 'ACTIVE',
+      startedAt: '2026-08-10T08:00:00Z', lastMessageAt: '2026-08-10T08:01:00Z', messageCount: 2, runCount: 1,
+    };
+    const fetchMock = mockFetch({
+      '/api/admin/traces/conversations?page=0&size=30': [conversation],
+      '/api/admin/traces/conversations/conversation-1': {
+        conversation,
+        messages: [
+          { messageId: 'm1', conversationId: 'conversation-1', runId: 'run-1', role: 'USER', content: '明天怎么训练？', createdAt: '2026-08-10T08:00:00Z' },
+          { messageId: 'm2', conversationId: 'conversation-1', runId: 'run-1', role: 'ASSISTANT', content: '## 全身训练\n- 深蹲 4 组', createdAt: '2026-08-10T08:01:00Z' },
+        ],
+        runs: [],
+      },
+    });
     renderAt('/admin/traces');
 
     expect(await screen.findByRole('link', { name: 'Trace' })).toHaveAttribute('href', '/admin/traces');
     expect(screen.getByRole('heading', { name: '会话 Trace' })).toBeInTheDocument();
-    expect(screen.getByLabelText('用户 ID')).toBeInTheDocument();
+    expect(screen.queryByLabelText('用户 ID')).not.toBeInTheDocument();
+    expect(screen.queryByText('最近运行')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /明天怎么训练/ })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/traces/conversations?page=0&size=30', expect.anything());
+  });
+
+  it('opens model creation in a modal with compact capability declarations', async () => {
+    mockFetch();
+    const user = userEvent.setup();
+    renderAt('/admin/models');
+
+    await user.click(await screen.findByRole('button', { name: '新增模型' }));
+    expect(screen.getByRole('dialog', { name: '新增模型' })).toBeInTheDocument();
+    expect(screen.queryByText('支持流式输出')).not.toBeInTheDocument();
+    expect(screen.getByText('模型能力声明')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消' })).toHaveClass('admin-secondary');
+    expect(screen.getByRole('button', { name: '保存模型' })).toHaveClass('admin-primary');
+  });
+
+  it('creates prompts and skills from resource modals', async () => {
+    const prompt = { promptKey: 'custom.prompt', displayName: '自定义提示词', description: '页面创建', template: '你好', status: 'ACTIVE', revision: 1, updatedAt: '2026-08-11T00:00:00Z' };
+    const skill = { skillKey: 'custom.skill', displayName: '自定义技能', description: '页面创建', whenToUse: '需要时', whenNotToUse: '', content: '先读取资料。', requiredToolKeys: [], runtimeReady: true, status: 'ACTIVE', revision: 1, updatedAt: '2026-08-11T00:00:00Z' };
+    const fetchMock = mockFetch({ 'POST /api/admin/prompts': prompt, 'POST /api/admin/skills': skill });
+    const user = userEvent.setup();
+
+    const promptView = renderAt('/admin/prompts');
+    await user.click(await screen.findByRole('button', { name: '新增提示词' }));
+    await user.type(screen.getByLabelText('Prompt Key'), 'custom.prompt');
+    await user.type(screen.getByLabelText('提示词名称'), '自定义提示词');
+    await user.type(screen.getByLabelText('提示词模板'), '你好');
+    await user.click(screen.getByRole('button', { name: '保存提示词' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/prompts', expect.objectContaining({ method: 'POST' })));
+    promptView.unmount();
+
+    renderAt('/admin/skills');
+    await user.click(await screen.findByRole('button', { name: '新增技能' }));
+    expect(screen.getByRole('dialog', { name: '新增技能' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Skill Key')).toBeInTheDocument();
+  });
+
+  it('renders a Run Trace as a conversation with collapsed execution details', async () => {
+    mockFetch({
+      '/api/admin/runs/run-1': {
+        runId: 'run-1', agentKey: 'fitness.coach', agentVersion: 1, status: 'SUCCEEDED', startedAt: '2026-08-10T08:00:00Z',
+        completedAt: '2026-08-10T08:00:02Z', durationMs: 2000, toolCalls: 1, promptTokens: 20, completionTokens: 30,
+        costUsd: 0, modelKey: 'MiniMax-M3', frameworkKey: 'agentscope', errorCode: null, errorMessage: null,
+        inputSummary: '明天怎么训练？', outputSummary: '## 全身训练\n- 深蹲 4 组',
+        events: [
+          { sequence: 1, type: 'TOOL_STARTED', title: '调用 Tool', detail: 'fitness.plan.generate', occurredAt: '2026-08-10T08:00:00Z' },
+          { sequence: 2, type: 'TOOL_COMPLETED', title: 'Tool 返回', detail: 'fitness.plan.generate', occurredAt: '2026-08-10T08:00:01Z' },
+          { sequence: 3, type: 'TOKEN', title: 'model output', detail: '重复正文', occurredAt: '2026-08-10T08:00:02Z' },
+        ],
+      },
+    });
+    renderAt('/admin/runs/run-1?from=trace');
+
+    expect(await screen.findByText('明天怎么训练？')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '全身训练' })).toBeInTheDocument();
+    expect(screen.getByText('执行过程')).toBeInTheDocument();
+    expect(screen.queryByText('事件时间轴')).not.toBeInTheDocument();
+    expect(screen.queryByText('重复正文')).not.toBeInTheDocument();
   });
 
   it('shows an error screen with retry when the workbench is unreachable', async () => {
@@ -158,7 +295,7 @@ describe('AdminWorkbench', () => {
           { type: 'SKILL', componentKey: 'fitness.plan.skill', displayName: '训练计划编排', description: '组合目标和训练记录。', version: 1, status: 'AVAILABLE', tags: ['计划'], config: { requiredTools: ['tool.fitness.plan'] } },
         ],
       },
-      '/api/admin/components/SKILL/fitness.plan.skill': { type: 'SKILL', componentKey: 'fitness.plan.skill', displayName: '训练计划编排', description: '组合目标和训练记录。', version: 1, status: 'AVAILABLE', tags: ['计划'], config: { requiredTools: ['tool.fitness.plan'], whenToUse: '需要新计划时' } },
+      '/api/admin/skills/fitness.plan.skill': { skillKey: 'fitness.plan.skill', displayName: '训练计划编排', description: '组合目标和训练记录。', whenToUse: '需要新计划时', whenNotToUse: '', content: '', requiredToolKeys: ['tool.fitness.plan'], runtimeReady: true, status: 'ACTIVE', revision: 2, updatedAt: '2026-08-06T01:00:00Z' },
     });
     const user = userEvent.setup();
     renderAt('/admin/skills');
@@ -167,7 +304,7 @@ describe('AdminWorkbench', () => {
     await user.type(screen.getByLabelText('何时使用'), ' 用户要求制定计划');
     expect(screen.getByText('有未保存的修改')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '保存' }));
-    expect(await screen.findByText('组件配置已保存')).toBeInTheDocument();
+    expect(await screen.findByText('技能配置已保存')).toBeInTheDocument();
   });
 
   it('keeps the mandatory safety Hook selected in the Agent editor', async () => {
@@ -233,7 +370,7 @@ describe('AdminWorkbench', () => {
     const user = userEvent.setup();
     renderAt('/admin/providers');
 
-    await user.type(await screen.findByLabelText('API Key'), 'sk-test-secret');
+    await user.type(await screen.findByLabelText('阿里云百炼 API Key'), 'sk-test-secret');
     await user.click(screen.getByRole('button', { name: /保存密钥/ }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -270,95 +407,7 @@ describe('AdminWorkbench', () => {
     expect(screen.getByPlaceholderText('完成前置准备后解锁')).toBeDisabled();
   });
 
-  it('clears the model detail while the skills catalog is loading', async () => {
-    let snapshotRequests = 0;
-    let resolveSkillsSnapshot: ((value: Response) => void) | undefined;
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
-      snapshotRequests += 1;
-      if (snapshotRequests < 3) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
-      return new Promise<Response>((resolve) => { resolveSkillsSnapshot = resolve; });
-    }));
-    const user = userEvent.setup();
-    renderAt('/admin/models');
-
-    await user.click(await screen.findByRole('button', { name: /通义千问 Plus/ }));
-    expect(screen.getByRole('heading', { name: '通义千问 Plus' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('link', { name: '技能' }));
-
-    expect(await screen.findByText('正在拉取组件目录…')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
-
-    resolveSkillsSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
-    expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
-  });
-
-  it('shows loading synchronously when the selected component belongs to the previous route', async () => {
-    let snapshotRequests = 0;
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
-      snapshotRequests += 1;
-      if (snapshotRequests < 3) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
-      return new Promise<Response>(() => {});
-    }));
-    const user = userEvent.setup();
-    renderAt('/admin/models');
-
-    await user.click(await screen.findByRole('button', { name: /通义千问 Plus/ }));
-    fireEvent.click(screen.getByRole('link', { name: '技能' }));
-
-    expect(screen.getByText('正在拉取组件目录…')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '通义千问 Plus' })).not.toBeInTheDocument();
-  });
-
-  it('keeps the skills route when the earlier model catalog request resolves late', async () => {
-    let snapshotRequests = 0;
-    let resolveModelSnapshot: ((value: Response) => void) | undefined;
-    let resolveSkillsSnapshot: ((value: Response) => void) | undefined;
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
-      snapshotRequests += 1;
-      if (snapshotRequests === 1) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
-      return new Promise<Response>((resolve) => {
-        if (snapshotRequests === 2) resolveModelSnapshot = resolve;
-        else resolveSkillsSnapshot = resolve;
-      });
-    }));
-    renderAt('/admin/models');
-
-    expect(await screen.findByText('正在拉取组件目录…')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('link', { name: '技能' }));
-    resolveModelSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: '技能' })).toBeInTheDocument());
-    expect(screen.queryByText('通义千问 Plus')).not.toBeInTheDocument();
-    resolveSkillsSnapshot?.(new Response(JSON.stringify(snapshot), { status: 200 }));
-    expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
-  });
-
-  it('shows the catalog error and retries loading the current route', async () => {
-    let snapshotRequests = 0;
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      if (String(input) !== '/api/admin/workbench') return Promise.resolve(new Response('{}', { status: 200 }));
-      snapshotRequests += 1;
-      if (snapshotRequests === 1) return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
-      if (snapshotRequests === 2) return Promise.reject(new TypeError('catalog offline'));
-      return Promise.resolve(new Response(JSON.stringify(snapshot), { status: 200 }));
-    }));
-    const user = userEvent.setup();
-    renderAt('/admin/skills');
-
-    expect(await screen.findByText('组件目录加载失败')).toBeInTheDocument();
-    expect(screen.getByText('后端服务连接失败，请确认后端服务已启动并可访问')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '重新加载' }));
-
-    expect(await screen.findByText('选择左侧组件')).toBeInTheDocument();
-    expect(snapshotRequests).toBe(3);
-  });
-
-  it('selects the published Agent before sending a playground message through the developer runtime endpoint', async () => {
+  it('lists every published Agent and streams the selected Agent key', async () => {
     const readySnapshot = {
       ...snapshot,
       agents: [
@@ -373,11 +422,21 @@ describe('AdminWorkbench', () => {
         ? { ...item, status: 'AVAILABLE', config: { providerKey: 'provider.bailian' } }
         : { ...item, status: 'AVAILABLE' }),
     };
+    const readyRoutes = independentRoutes(readySnapshot);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === '/api/admin/workbench') return new Response(JSON.stringify(readySnapshot), { status: 200 });
-      if (url === '/api/admin/playground/messages' && init?.method === 'POST') {
-        return new Response(JSON.stringify({ message: '今天也要好好吃饭。' }), { status: 200 });
+      if (url === '/api/admin/auth/session') return new Response(JSON.stringify({ username: 'admin' }), { status: 200 });
+      if (readyRoutes[url] !== undefined) return new Response(JSON.stringify(readyRoutes[url]), { status: 200 });
+      if (url === '/api/v1/admin/playground/runs' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ runId: 'run-1', status: 'RUNNING' }), { status: 202 });
+      }
+      if (url === '/api/v1/admin/playground/runs/run-1/events') {
+        const events = [
+          { type: 'RUN_STATE', data: { status: 'RUNNING', summary: '正在整理建议' } },
+          { type: 'TEXT_DELTA', data: { messageId: 'run-1', delta: '今天也要好好吃饭。' } },
+          { type: 'COMPLETED', data: { status: 'SUCCEEDED' } },
+        ];
+        return new Response(events.map((event, index) => `id: ${index + 1}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
       }
       return new Response('{}', { status: 200 });
     });
@@ -385,17 +444,20 @@ describe('AdminWorkbench', () => {
     const user = userEvent.setup();
     renderAt('/admin/playground');
 
-    await screen.findByRole('option', { name: /辅食助手/ });
-    const agentSelector = screen.getByLabelText('调试 Agent');
-    await user.selectOptions(agentSelector, 'baby.food');
+    expect(await screen.findByRole('option', { name: /瘦瘦健身教练/ })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('调试 Agent'), 'baby.food');
+    expect(screen.getByRole('option', { name: /辅食助手/ })).toBeInTheDocument();
     const input = await screen.findByPlaceholderText('请输入测试问题');
     await user.type(input, '晚饭吃什么');
     await user.click(screen.getByRole('button', { name: /发送/ }));
 
     expect(await screen.findByText('今天也要好好吃饭。')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/admin/playground/messages',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ agentKey: 'baby.food', message: '晚饭吃什么' }) }),
+      '/api/v1/admin/playground/runs',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ agentKey: 'baby.food', target: { kind: 'PUBLISHED_VERSION', revision: 1 }, input: '晚饭吃什么', businessUserId: '00000000-0000-0000-0000-000000000000' }),
+      }),
     );
   });
 });

@@ -17,11 +17,10 @@ public final class JdbcAgentProviderStatus implements AgentProviderStatus {
     Long count =
         jdbc.queryForObject(
             "SELECT COUNT(*) "
-                + "FROM agent_component_projection c "
+                + "FROM agent_providers c "
                 + "JOIN agent_provider_credentials p "
-                + "  ON p.provider_key = c.component_key "
-                + "WHERE c.component_type='PROVIDER' "
-                + "  AND c.status='AVAILABLE'",
+                + "  ON p.provider_key = c.provider_key "
+                + "WHERE c.status='ACTIVE'",
             Long.class);
     return count != null && count > 0;
   }

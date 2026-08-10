@@ -1,30 +1,27 @@
 package happy.jayden.yang.agentbuilder;
 
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunPage;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunQuery;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunTrace;
-import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
-import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcRunTraceRepository;
+import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.AgentDraftView;
-import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ComponentUpdate;
-import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ComponentView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.CreateAgentRequest;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.DraftUpdate;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ProviderView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.PublicationView;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.ValidationView;
-import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.WorkbenchSnapshot;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
-import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -46,20 +43,10 @@ public class AdminWorkbenchController {
   private final JdbcRunTraceRepository runTraces;
 
   public AdminWorkbenchController(
-      AdminWorkbenchService workbench,
-      AdminAuthService auth,
-      JdbcRunTraceRepository runTraces) {
+      AdminWorkbenchService workbench, AdminAuthService auth, JdbcRunTraceRepository runTraces) {
     this.workbench = workbench;
     this.auth = auth;
     this.runTraces = runTraces;
-  }
-
-  @GetMapping("/workbench")
-  WorkbenchSnapshot snapshot(
-      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false)
-          String sessionToken) {
-    authenticate(sessionToken);
-    return workbench.snapshot();
   }
 
   @PatchMapping("/agents/{agentKey}/draft")
@@ -81,14 +68,12 @@ public class AdminWorkbenchController {
     return ResponseEntity.status(HttpStatus.CREATED).body(workbench.createDraft(request));
   }
 
-  @PatchMapping("/components/{type}/{componentKey}")
-  ComponentView updateComponent(
-      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @PathVariable("type") String type,
-      @PathVariable("componentKey") String componentKey,
-      @RequestBody ComponentUpdate request) {
+  @GetMapping("/agents")
+  List<AgentDraftView> agents(
+      @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false)
+          String sessionToken) {
     authenticate(sessionToken);
-    return workbench.updateComponent(type, componentKey, request);
+    return workbench.agents();
   }
 
   @PostMapping("/agents/{agentKey}/validate")
@@ -149,15 +134,14 @@ public class AdminWorkbenchController {
     return runTraces.findTrace(runId).orElseThrow(() -> new IllegalArgumentException("运行记录不存在"));
   }
 
-  /** Developer-only conversation explorer. It deliberately starts with a concrete user id. */
+  /** Developer-only conversation explorer ordered by recent activity. */
   @GetMapping("/traces/conversations")
   List<ConversationSummary> conversations(
       @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
-      @RequestParam("userId") UUID userId,
       @RequestParam(value = "page", defaultValue = "0") int page,
       @RequestParam(value = "size", defaultValue = "30") int size) {
     authenticate(sessionToken);
-    return runTraces.listConversationSummaries(userId, page, size);
+    return runTraces.listRecentConversationSummaries(page, size);
   }
 
   @GetMapping("/traces/conversations/{conversationId}")

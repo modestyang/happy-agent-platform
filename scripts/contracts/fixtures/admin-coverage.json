@@ -2,72 +2,641 @@
   "service": "admin",
   "document": "docs/architecture/openapi/admin-v1.yaml",
   "operations": [
-    {"method":"get","path":"/api/v1/admin/frameworks","operationId":"listFrameworks","success":"200","schema":"FrameworkPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"get","path":"/api/v1/admin/frameworks/{frameworkKey}/versions/{version}","operationId":"getFrameworkVersion","success":"200","schema":"FrameworkComponent"},
-    {"method":"get","path":"/api/v1/admin/providers","operationId":"listProviders","success":"200","schema":"ProviderPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/providers","operationId":"createProvider","success":"201","schema":"ProviderComponent"},
-    {"method":"get","path":"/api/v1/admin/providers/{providerKey}/versions/{version}","operationId":"getProviderVersion","success":"200","schema":"ProviderComponent"},
-    {"method":"patch","path":"/api/v1/admin/providers/{providerKey}/versions/{version}","operationId":"updateProviderVersion","success":"200","schema":"ProviderComponent","optimistic":true},
-    {"method":"post","path":"/api/v1/admin/providers/{providerKey}/versions/{version}/credential-rotation","operationId":"rotateProviderCredential","success":"200","schema":"ProviderComponent","optimistic":true},
-    {"method":"post","path":"/api/v1/admin/providers/{providerKey}/versions/{version}/probe-jobs","operationId":"createProviderProbeJob","success":"202","schema":"ProbeJob","async":true},
-    {"method":"get","path":"/api/v1/admin/models","operationId":"listModels","success":"200","schema":"ModelPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/models","operationId":"createModel","success":"201","schema":"ModelComponent"},
-    {"method":"get","path":"/api/v1/admin/models/{modelKey}","operationId":"getModel","success":"200","schema":"ModelComponent"},
-    {"method":"patch","path":"/api/v1/admin/models/{modelKey}","operationId":"updateModel","success":"200","schema":"ModelComponent","optimistic":true},
-    {"method":"post","path":"/api/v1/admin/models/{modelKey}/probe-jobs","operationId":"createModelProbeJob","success":"202","schema":"ProbeJob","async":true},
-    {"method":"get","path":"/api/v1/admin/tools","operationId":"listTools","success":"200","schema":"ToolPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"get","path":"/api/v1/admin/tools/{toolKey}/versions/{version}","operationId":"getToolVersion","success":"200","schema":"ToolComponent"},
-    {"method":"get","path":"/api/v1/admin/skills","operationId":"listSkills","success":"200","schema":"SkillPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/skills","operationId":"createSkill","success":"201","schema":"SkillComponent"},
-    {"method":"get","path":"/api/v1/admin/skills/{skillKey}/versions/{version}","operationId":"getSkillVersion","success":"200","schema":"SkillComponent"},
-    {"method":"patch","path":"/api/v1/admin/skills/{skillKey}/versions/{version}","operationId":"updateSkillVersion","success":"200","schema":"SkillComponent","optimistic":true},
-    {"method":"post","path":"/api/v1/admin/skills/{skillKey}/versions/{version}/copies","operationId":"copySkillVersion","success":"201","schema":"SkillComponent"},
-    {"method":"post","path":"/api/v1/admin/skills/{skillKey}/versions/{version}/publication","operationId":"publishSkillVersion","success":"200","schema":"SkillComponent","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/hooks","operationId":"listHooks","success":"200","schema":"HookPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"get","path":"/api/v1/admin/hooks/{hookKey}/versions/{version}","operationId":"getHookVersion","success":"200","schema":"HookComponent"},
-    {"method":"get","path":"/api/v1/admin/memory-policies","operationId":"listMemoryPolicies","success":"200","schema":"MemoryPolicyPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/memory-policies","operationId":"createMemoryPolicy","success":"201","schema":"MemoryPolicyComponent"},
-    {"method":"get","path":"/api/v1/admin/memory-policies/{componentKey}/versions/{version}","operationId":"getMemoryPolicyVersion","success":"200","schema":"MemoryPolicyComponent"},
-    {"method":"patch","path":"/api/v1/admin/memory-policies/{componentKey}/versions/{version}","operationId":"updateMemoryPolicyVersion","success":"200","schema":"MemoryPolicyComponent","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/prompts","operationId":"listPrompts","success":"200","schema":"PromptPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/prompts","operationId":"createPrompt","success":"201","schema":"PromptComponent"},
-    {"method":"get","path":"/api/v1/admin/prompts/{componentKey}/versions/{version}","operationId":"getPromptVersion","success":"200","schema":"PromptComponent"},
-    {"method":"patch","path":"/api/v1/admin/prompts/{componentKey}/versions/{version}","operationId":"updatePromptVersion","success":"200","schema":"PromptComponent","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/output-schemas","operationId":"listOutputSchemas","success":"200","schema":"OutputSchemaPage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/output-schemas","operationId":"createOutputSchema","success":"201","schema":"OutputSchemaComponent"},
-    {"method":"get","path":"/api/v1/admin/output-schemas/{componentKey}/versions/{version}","operationId":"getOutputSchemaVersion","success":"200","schema":"OutputSchemaComponent"},
-    {"method":"patch","path":"/api/v1/admin/output-schemas/{componentKey}/versions/{version}","operationId":"updateOutputSchemaVersion","success":"200","schema":"OutputSchemaComponent","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/evaluation-suites","operationId":"listEvaluationSuites","success":"200","schema":"EvaluationSuitePage","queryParameters":["cursor","pageSize","status","category","compatibleFramework"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/evaluation-suites","operationId":"createEvaluationSuite","success":"201","schema":"EvaluationSuiteComponent"},
-    {"method":"get","path":"/api/v1/admin/evaluation-suites/{componentKey}/versions/{version}","operationId":"getEvaluationSuiteVersion","success":"200","schema":"EvaluationSuiteComponent"},
-    {"method":"patch","path":"/api/v1/admin/evaluation-suites/{componentKey}/versions/{version}","operationId":"updateEvaluationSuiteVersion","success":"200","schema":"EvaluationSuiteComponent","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/default-profiles","operationId":"listDefaultProfiles","success":"200","schema":"DefaultProfilePage"},
-    {"method":"post","path":"/api/v1/admin/default-profiles","operationId":"createDefaultProfile","success":"201","schema":"DefaultProfile"},
-    {"method":"get","path":"/api/v1/admin/default-profiles/{profileKey}/versions/{version}","operationId":"getDefaultProfileVersion","success":"200","schema":"DefaultProfile"},
-    {"method":"patch","path":"/api/v1/admin/default-profiles/{profileKey}/versions/{version}","operationId":"updateDefaultProfileVersion","success":"200","schema":"DefaultProfile","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/agents","operationId":"listAgents","success":"200","schema":"AgentPage"},
-    {"method":"post","path":"/api/v1/admin/agents","operationId":"createAgent","success":"201","schema":"Agent"},
-    {"method":"get","path":"/api/v1/admin/agents/{agentKey}","operationId":"getAgent","success":"200","schema":"Agent"},
-    {"method":"get","path":"/api/v1/admin/agents/{agentKey}/draft","operationId":"getAgentDraft","success":"200","schema":"AgentDraft"},
-    {"method":"patch","path":"/api/v1/admin/agents/{agentKey}/draft","operationId":"updateAgentDraft","success":"200","schema":"AgentDraft","optimistic":true},
-    {"method":"post","path":"/api/v1/admin/agents/{agentKey}/draft/resolution","operationId":"resolveAgentDraft","success":"200","schema":"ResolvedAgentConfig"},
-    {"method":"post","path":"/api/v1/admin/agents/{agentKey}/draft/evaluation-jobs","operationId":"createDraftEvaluationJob","success":"202","schema":"EvaluationJob","async":true},
-    {"method":"post","path":"/api/v1/admin/agents/{agentKey}/draft/publication","operationId":"publishAgentDraft","success":"201","schema":"AgentVersion","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/agents/{agentKey}/versions","operationId":"listAgentVersions","success":"200","schema":"AgentVersionPage"},
-    {"method":"post","path":"/api/v1/admin/agents/{agentKey}/versions/{version}/rollback","operationId":"rollbackAgentVersion","success":"201","schema":"AgentVersion","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/evaluation-jobs/{jobId}","operationId":"getEvaluationJob","success":"200","schema":"EvaluationJob"},
-    {"method":"get","path":"/api/v1/admin/probe-jobs/{jobId}","operationId":"getProbeJob","success":"200","schema":"ProbeJob"},
-    {"method":"get","path":"/api/v1/admin/sessions","operationId":"listAdminSessions","success":"200","schema":"AdminSessionPage","queryParameters":["cursor","pageSize","agentKey","agentVersion","businessUserId","status","from","to"],"exactQueryParameters":true},
-    {"method":"get","path":"/api/v1/admin/sessions/{sessionId}","operationId":"getAdminSession","success":"200","schema":"AdminSessionDetail"},
-    {"method":"get","path":"/api/v1/admin/runs","operationId":"listRuns","success":"200","schema":"RunPage","queryParameters":["cursor","pageSize","agentKey","sessionId","status","from","to"],"exactQueryParameters":true},
-    {"method":"get","path":"/api/v1/admin/runs/{runId}","operationId":"getRun","success":"200","schema":"RunDetail"},
-    {"method":"get","path":"/api/v1/admin/runs/{runId}/trace-events","operationId":"listRunTraceEvents","success":"200","schema":"TraceEventPage"},
-    {"method":"post","path":"/api/v1/admin/playground/runs","operationId":"createPlaygroundRun","success":"202","schema":"RunDetail","async":true},
-    {"method":"get","path":"/api/v1/admin/playground/runs/{runId}/events","operationId":"streamPlaygroundRunEvents","success":"200","schema":"AgentRunEvent","sse":true},
-    {"method":"get","path":"/api/v1/admin/analytics/usage","operationId":"getUsageAnalytics","success":"200","schema":"UsageAnalyticsSummary","queryParameters":["from","to","agentKey","modelKey"],"exactQueryParameters":true},
-    {"method":"get","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases","operationId":"listKnowledgeBases","success":"200","schema":"KnowledgeBasePage","queryParameters":["cursor","pageSize"],"exactQueryParameters":true},
-    {"method":"post","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases","operationId":"createKnowledgeBase","success":"201","schema":"KnowledgeBase"},
-    {"method":"patch","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases/{knowledgeId}","operationId":"updateKnowledgeBase","success":"200","schema":"KnowledgeBase","optimistic":true},
-    {"method":"get","path":"/api/v1/admin/agents/{agentKey}/knowledge-bases/search","operationId":"searchKnowledgeBase","success":"200","schema":"KnowledgeSearchResult","queryParameters":["q","limit"],"exactQueryParameters":true}
+    {
+      "method": "post",
+      "path": "/api/admin/prompts",
+      "operationId": "adminCreatePrompt",
+      "success": "201",
+      "schema": "WorkbenchPrompt"
+    },
+    {
+      "method": "post",
+      "path": "/api/admin/skills",
+      "operationId": "adminCreateSkill",
+      "success": "201",
+      "schema": "WorkbenchSkill"
+    },
+    {
+      "method": "get",
+      "path": "/api/admin/traces/conversations",
+      "operationId": "adminListRecentConversations",
+      "success": "200",
+      "schema": "WorkbenchConversationSummaryList",
+      "queryParameters": ["page", "size"],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/frameworks",
+      "operationId": "listFrameworks",
+      "success": "200",
+      "schema": "FrameworkPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/frameworks/{frameworkKey}/versions/{version}",
+      "operationId": "getFrameworkVersion",
+      "success": "200",
+      "schema": "FrameworkComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/providers",
+      "operationId": "listProviders",
+      "success": "200",
+      "schema": "ProviderPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/providers",
+      "operationId": "createProvider",
+      "success": "201",
+      "schema": "ProviderComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/providers/{providerKey}/versions/{version}",
+      "operationId": "getProviderVersion",
+      "success": "200",
+      "schema": "ProviderComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/providers/{providerKey}/versions/{version}",
+      "operationId": "updateProviderVersion",
+      "success": "200",
+      "schema": "ProviderComponent",
+      "optimistic": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/providers/{providerKey}/versions/{version}/credential-rotation",
+      "operationId": "rotateProviderCredential",
+      "success": "200",
+      "schema": "ProviderComponent",
+      "optimistic": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/providers/{providerKey}/versions/{version}/probe-jobs",
+      "operationId": "createProviderProbeJob",
+      "success": "202",
+      "schema": "ProbeJob",
+      "async": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/models",
+      "operationId": "listModels",
+      "success": "200",
+      "schema": "ModelPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/models",
+      "operationId": "createModel",
+      "success": "201",
+      "schema": "ModelComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/models/{modelKey}",
+      "operationId": "getModel",
+      "success": "200",
+      "schema": "ModelComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/models/{modelKey}",
+      "operationId": "updateModel",
+      "success": "200",
+      "schema": "ModelComponent",
+      "optimistic": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/models/{modelKey}/probe-jobs",
+      "operationId": "createModelProbeJob",
+      "success": "202",
+      "schema": "ProbeJob",
+      "async": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/tools",
+      "operationId": "listTools",
+      "success": "200",
+      "schema": "ToolPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/tools/{toolKey}/versions/{version}",
+      "operationId": "getToolVersion",
+      "success": "200",
+      "schema": "ToolComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/skills",
+      "operationId": "listSkills",
+      "success": "200",
+      "schema": "SkillPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/skills",
+      "operationId": "createSkill",
+      "success": "201",
+      "schema": "SkillComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/skills/{skillKey}/versions/{version}",
+      "operationId": "getSkillVersion",
+      "success": "200",
+      "schema": "SkillComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/skills/{skillKey}/versions/{version}",
+      "operationId": "updateSkillVersion",
+      "success": "200",
+      "schema": "SkillComponent",
+      "optimistic": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/skills/{skillKey}/versions/{version}/copies",
+      "operationId": "copySkillVersion",
+      "success": "201",
+      "schema": "SkillComponent"
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/skills/{skillKey}/versions/{version}/publication",
+      "operationId": "publishSkillVersion",
+      "success": "200",
+      "schema": "SkillComponent",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/hooks",
+      "operationId": "listHooks",
+      "success": "200",
+      "schema": "HookPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/hooks/{hookKey}/versions/{version}",
+      "operationId": "getHookVersion",
+      "success": "200",
+      "schema": "HookComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/memory-policies",
+      "operationId": "listMemoryPolicies",
+      "success": "200",
+      "schema": "MemoryPolicyPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/memory-policies",
+      "operationId": "createMemoryPolicy",
+      "success": "201",
+      "schema": "MemoryPolicyComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/memory-policies/{componentKey}/versions/{version}",
+      "operationId": "getMemoryPolicyVersion",
+      "success": "200",
+      "schema": "MemoryPolicyComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/memory-policies/{componentKey}/versions/{version}",
+      "operationId": "updateMemoryPolicyVersion",
+      "success": "200",
+      "schema": "MemoryPolicyComponent",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/prompts",
+      "operationId": "listPrompts",
+      "success": "200",
+      "schema": "PromptPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/prompts",
+      "operationId": "createPrompt",
+      "success": "201",
+      "schema": "PromptComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/prompts/{componentKey}/versions/{version}",
+      "operationId": "getPromptVersion",
+      "success": "200",
+      "schema": "PromptComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/prompts/{componentKey}/versions/{version}",
+      "operationId": "updatePromptVersion",
+      "success": "200",
+      "schema": "PromptComponent",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/output-schemas",
+      "operationId": "listOutputSchemas",
+      "success": "200",
+      "schema": "OutputSchemaPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/output-schemas",
+      "operationId": "createOutputSchema",
+      "success": "201",
+      "schema": "OutputSchemaComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/output-schemas/{componentKey}/versions/{version}",
+      "operationId": "getOutputSchemaVersion",
+      "success": "200",
+      "schema": "OutputSchemaComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/output-schemas/{componentKey}/versions/{version}",
+      "operationId": "updateOutputSchemaVersion",
+      "success": "200",
+      "schema": "OutputSchemaComponent",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/evaluation-suites",
+      "operationId": "listEvaluationSuites",
+      "success": "200",
+      "schema": "EvaluationSuitePage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "status",
+        "category",
+        "compatibleFramework"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/evaluation-suites",
+      "operationId": "createEvaluationSuite",
+      "success": "201",
+      "schema": "EvaluationSuiteComponent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/evaluation-suites/{componentKey}/versions/{version}",
+      "operationId": "getEvaluationSuiteVersion",
+      "success": "200",
+      "schema": "EvaluationSuiteComponent"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/evaluation-suites/{componentKey}/versions/{version}",
+      "operationId": "updateEvaluationSuiteVersion",
+      "success": "200",
+      "schema": "EvaluationSuiteComponent",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/default-profiles",
+      "operationId": "listDefaultProfiles",
+      "success": "200",
+      "schema": "DefaultProfilePage"
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/default-profiles",
+      "operationId": "createDefaultProfile",
+      "success": "201",
+      "schema": "DefaultProfile"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/default-profiles/{profileKey}/versions/{version}",
+      "operationId": "getDefaultProfileVersion",
+      "success": "200",
+      "schema": "DefaultProfile"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/default-profiles/{profileKey}/versions/{version}",
+      "operationId": "updateDefaultProfileVersion",
+      "success": "200",
+      "schema": "DefaultProfile",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/agents",
+      "operationId": "listAgents",
+      "success": "200",
+      "schema": "AgentPage"
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/agents",
+      "operationId": "createAgent",
+      "success": "201",
+      "schema": "Agent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/agents/{agentKey}",
+      "operationId": "getAgent",
+      "success": "200",
+      "schema": "Agent"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/agents/{agentKey}/draft",
+      "operationId": "getAgentDraft",
+      "success": "200",
+      "schema": "AgentDraft"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/agents/{agentKey}/draft",
+      "operationId": "updateAgentDraft",
+      "success": "200",
+      "schema": "AgentDraft",
+      "optimistic": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/agents/{agentKey}/draft/resolution",
+      "operationId": "resolveAgentDraft",
+      "success": "200",
+      "schema": "ResolvedAgentConfig"
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/agents/{agentKey}/draft/evaluation-jobs",
+      "operationId": "createDraftEvaluationJob",
+      "success": "202",
+      "schema": "EvaluationJob",
+      "async": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/agents/{agentKey}/draft/publication",
+      "operationId": "publishAgentDraft",
+      "success": "201",
+      "schema": "AgentVersion",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/agents/{agentKey}/versions",
+      "operationId": "listAgentVersions",
+      "success": "200",
+      "schema": "AgentVersionPage"
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/agents/{agentKey}/versions/{version}/rollback",
+      "operationId": "rollbackAgentVersion",
+      "success": "201",
+      "schema": "AgentVersion",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/evaluation-jobs/{jobId}",
+      "operationId": "getEvaluationJob",
+      "success": "200",
+      "schema": "EvaluationJob"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/probe-jobs/{jobId}",
+      "operationId": "getProbeJob",
+      "success": "200",
+      "schema": "ProbeJob"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/sessions",
+      "operationId": "listAdminSessions",
+      "success": "200",
+      "schema": "AdminSessionPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "agentKey",
+        "agentVersion",
+        "businessUserId",
+        "status",
+        "from",
+        "to"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/sessions/{sessionId}",
+      "operationId": "getAdminSession",
+      "success": "200",
+      "schema": "AdminSessionDetail"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/runs",
+      "operationId": "listRuns",
+      "success": "200",
+      "schema": "RunPage",
+      "queryParameters": [
+        "cursor",
+        "pageSize",
+        "agentKey",
+        "sessionId",
+        "status",
+        "from",
+        "to"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/runs/{runId}",
+      "operationId": "getRun",
+      "success": "200",
+      "schema": "RunDetail"
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/runs/{runId}/trace-events",
+      "operationId": "listRunTraceEvents",
+      "success": "200",
+      "schema": "TraceEventPage"
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/playground/runs",
+      "operationId": "createPlaygroundRun",
+      "success": "202",
+      "schema": "RunDetail",
+      "async": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/playground/runs/{runId}/events",
+      "operationId": "streamPlaygroundRunEvents",
+      "success": "200",
+      "schema": "AgentRunEvent",
+      "sse": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/analytics/usage",
+      "operationId": "getUsageAnalytics",
+      "success": "200",
+      "schema": "UsageAnalyticsSummary",
+      "queryParameters": [
+        "from",
+        "to",
+        "agentKey",
+        "modelKey"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/agents/{agentKey}/knowledge-bases",
+      "operationId": "listKnowledgeBases",
+      "success": "200",
+      "schema": "KnowledgeBasePage",
+      "queryParameters": [
+        "cursor",
+        "pageSize"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/agents/{agentKey}/knowledge-bases",
+      "operationId": "createKnowledgeBase",
+      "success": "201",
+      "schema": "KnowledgeBase"
+    },
+    {
+      "method": "patch",
+      "path": "/api/v1/admin/agents/{agentKey}/knowledge-bases/{knowledgeId}",
+      "operationId": "updateKnowledgeBase",
+      "success": "200",
+      "schema": "KnowledgeBase",
+      "optimistic": true
+    },
+    {
+      "method": "get",
+      "path": "/api/v1/admin/agents/{agentKey}/knowledge-bases/search",
+      "operationId": "searchKnowledgeBase",
+      "success": "200",
+      "schema": "KnowledgeSearchResult",
+      "queryParameters": [
+        "q",
+        "limit"
+      ],
+      "exactQueryParameters": true
+    },
+    {
+      "method": "post",
+      "path": "/api/v1/admin/playground/runs/{runId}/approvals/{approvalId}",
+      "operationId": "decidePlaygroundRunApproval",
+      "success": "200",
+      "schema": "RunDetail"
+    }
   ]
 }

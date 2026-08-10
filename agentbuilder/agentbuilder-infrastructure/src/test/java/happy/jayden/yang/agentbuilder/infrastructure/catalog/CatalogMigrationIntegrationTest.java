@@ -34,27 +34,24 @@ class CatalogMigrationIntegrationTest {
   static DataSource dataSource;
 
   @BeforeAll
-  static void migrateThroughV2() throws Exception {
+  static void migrateBaseline() throws Exception {
     dataSource =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     try (var connection = dataSource.getConnection()) {
       ScriptUtils.executeSqlScript(
           connection, new ClassPathResource("db/agent/V1__agent_baseline.sql"));
-      ScriptUtils.executeSqlScript(
-          connection, new ClassPathResource("db/agent/V2__component_catalogs.sql"));
     }
   }
 
   @Test
-  void v3BackfillsLegacyActiveProfileRemovesLegacyJsonAndEnforcesCompositeOwnership()
-      throws Exception {
+  void baselineStoresActiveProfilePointerAndEnforcesCompositeOwnership() {
     var application = new ApplicationKey("migration-fitness");
     var profile = profile(application);
     var codec = CatalogJsonCodec.standard();
     var jdbc = new JdbcTemplate(dataSource);
     jdbc.update(
-        "INSERT INTO default_profile_catalog(application_key,profile_key,version,status,revision,checksum,defaults,defaults_payload,tags,active) VALUES (?,?,1,'AVAILABLE',1,?,?::jsonb,(?::jsonb || '{\"active\":true}'::jsonb),?::text[],true)",
+        "INSERT INTO default_profile_catalog(application_key,profile_key,version,status,revision,checksum,defaults,defaults_payload,tags) VALUES (?,?,1,'AVAILABLE',1,?,?::jsonb,?::jsonb,?::text[])",
         application.value(),
         profile.profile().componentKey().value(),
         CHECKSUM,
@@ -62,10 +59,10 @@ class CatalogMigrationIntegrationTest {
         codec.write(profile),
         AbstractJdbcCatalogRepository.postgresArray(profile.tags()));
 
-    try (var connection = dataSource.getConnection()) {
-      ScriptUtils.executeSqlScript(
-          connection, new ClassPathResource("db/agent/V3__default_profile_active_pointer.sql"));
-    }
+    jdbc.update(
+        "INSERT INTO default_profile_active_pointer(application_key,profile_key,version,revision) VALUES (?,?,1,1)",
+        application.value(),
+        profile.profile().componentKey().value());
 
     var repository = new JdbcDefaultProfileRepository(dataSource, new ObjectMapper());
     assertEquals(profile, repository.findActive(application).orElseThrow());

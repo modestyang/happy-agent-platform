@@ -16,9 +16,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import happy.jayden.yang.StarterApplication;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
-import happy.jayden.yang.agentbuilder.infrastructure.workbench.AdminWorkbenchLocalSeed;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminWorkbenchStore;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
+import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools.SavePlanToolRequest;
+import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools.ToolPlanDay;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportConclusion;
 import happy.jayden.yang.fitness.service.FitnessDtos.CurrentGoalReportGenerationResult;
@@ -62,12 +63,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -89,6 +92,15 @@ import org.testcontainers.utility.MountableFile;
 class FitnessExperienceIntegrationTest {
 
   private static final Path PROJECT_ROOT = projectRoot();
+
+  @Test
+  void localProfileEnablesLocalMediaForEndToEndMealRecognition() throws Exception {
+    var properties =
+        new YamlPropertySourceLoader()
+            .load("application-local", new ClassPathResource("application-local.yml"));
+
+    assertThat(properties.get(0).getProperty("happy.fitness.local-media.enabled")).isEqualTo(true);
+  }
 
   @Container
   static final PostgreSQLContainer<?> POSTGRES =
@@ -122,6 +134,68 @@ class FitnessExperienceIntegrationTest {
   @Autowired private DailyMealPlanScheduler dailyMealPlanScheduler;
   @Autowired private ControlledCurrentGoalReportPort currentGoalReportPort;
   @Autowired private CurrentGoalReportGenerationWorker currentGoalReportWorker;
+
+  @Test
+  void confirmedPlanToolSavesDayAndWeekIdempotentlyWithoutOverwritingCompletedHistory()
+      throws Exception {
+    Cookie owner = login();
+    UUID userId = UUID.fromString(bootstrap(owner).path("user").path("id").asText());
+    var jdbc = new JdbcTemplate(fitnessDataSource);
+    var exercises =
+        fitnessStore.loadForAi(userId).exercises().stream()
+            .limit(4)
+            .map(item -> item.id())
+            .toList();
+    LocalDate start = LocalDate.now().plusDays(40);
+    jdbc.update(
+        "DELETE FROM workout_plans WHERE user_id=? AND scheduled_for BETWEEN ? AND ?",
+        userId,
+        start,
+        start.plusDays(6));
+    UUID completedPlanId = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for,completion_ratio,completed_at)"
+            + " VALUES (?,?,?,30,'COMPLETED',?,1,CURRENT_TIMESTAMP)",
+        completedPlanId,
+        userId,
+        "已完成历史",
+        start.plusDays(2));
+    var days =
+        java.util.stream.IntStream.range(0, 7)
+            .mapToObj(
+                offset ->
+                    new ToolPlanDay(
+                        start.plusDays(offset), "第" + (offset + 1) + "天训练", 28, exercises))
+            .toList();
+    UUID approvalId = UUID.randomUUID();
+    var request = new SavePlanToolRequest(approvalId, "WEEK", days);
+    var context =
+        new ToolExecutionContext(
+            userId.toString(),
+            UUID.randomUUID().toString(),
+            Set.of("fitness.write"),
+            "fitness.chat");
+
+    var saved = fitnessTools.savePlan(request, context);
+    var replayed = fitnessTools.savePlan(request, context);
+
+    assertThat(saved.planIds()).hasSize(7);
+    assertThat(replayed.planIds()).containsExactlyElementsOf(saved.planIds());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM workout_plans WHERE user_id=? AND scheduled_for BETWEEN ? AND ? AND status='PLANNED'",
+                Integer.class,
+                userId,
+                start,
+                start.plusDays(6)))
+        .isEqualTo(7);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM workout_plans WHERE workout_plan_id=? AND status='COMPLETED'",
+                Integer.class,
+                completedPlanId))
+        .isEqualTo(1);
+  }
 
   @Autowired
   @Qualifier("fitnessDataSource")
@@ -1030,15 +1104,20 @@ class FitnessExperienceIntegrationTest {
       throws Exception {
     JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+    upsertMealRuntimeComponents(
+        agentJdbc,
+        "mutable-draft-provider",
+        "mutable-draft-model",
+        "{\"providerKey\":\"mutable-draft-provider\",\"model\":\"mutable-draft-model\",\"vision\":false}");
     agentJdbc.update(
         "UPDATE agent_drafts SET provider_key='mutable-draft-provider',model_key='mutable-draft-model' WHERE agent_key='fitness.coach'");
     upsertMealRuntimeComponents(
         agentJdbc,
         "published-provider",
         "published-model",
-        "{\"providerKey\":\"published-provider\",\"model\":\"published-model\"}");
+        "{\"providerKey\":\"published-provider\",\"model\":\"published-model\",\"vision\":true}");
     publishMealRuntimeSnapshot(
-        agentJdbc, 1, "{\"providerKey\":\"published-provider\",\"modelKey\":\"published-model\"}");
+        agentJdbc, 1, publishedUnifiedRuntimeSnapshot("published-provider", "published-model"));
     MealPlanGenerationRuntime runtime =
         new MealPlanGenerationRuntime(
             agentDataSource, objectMapper, "build/missing-agent-master-key");
@@ -1049,7 +1128,11 @@ class FitnessExperienceIntegrationTest {
     assertThat(publishedConfig.endpoint()).isEqualTo("https://example.test/v1");
 
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
-    publishMealRuntimeSnapshot(agentJdbc, 2, "{\"modelKey\":\"published-model\"}");
+    publishMealRuntimeSnapshot(
+        agentJdbc,
+        2,
+        publishedUnifiedRuntimeSnapshot("published-provider", "published-model")
+            .replaceFirst("\\\"providerKey\\\":\\\"published-provider\\\",", ""));
     assertThat(
             runtime
                 .generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback())
@@ -1058,27 +1141,68 @@ class FitnessExperienceIntegrationTest {
 
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
     publishMealRuntimeSnapshot(
-        agentJdbc, 3, "{\"providerKey\":\"published-provider\",\"modelKey\":\"published-model\"}");
-    upsertMealRuntimeComponents(
         agentJdbc,
-        "published-provider",
-        "published-model",
-        "{\"providerKey\":\"different-provider\",\"model\":\"published-model\"}");
+        3,
+        publishedUnifiedRuntimeSnapshot("published-provider", "published-model")
+            .replace(
+                "{\"providerKey\":\"published-provider\",\"model\":\"published-model\",\"vision\":true}",
+                "{\"providerKey\":\"different-provider\",\"model\":\"published-model\",\"vision\":true}"));
     assertThat(
             runtime
                 .generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback())
                 .failureMessage())
         .isEqualTo("模型未绑定当前 Provider");
 
+    agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+    publishMealRuntimeSnapshot(
+        agentJdbc, 4, publishedUnifiedRuntimeSnapshot("published-provider", "published-model"));
+    DailyMealPlanGenerationResult credentialFailure =
+        runtime.generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback());
+    assertThat(credentialFailure.failureCode()).isEqualTo("DEPENDENCY_NOT_CONFIGURED");
+    assertThat(credentialFailure.failureMessage()).isEqualTo("已发布三餐凭据快照无法解密");
+  }
+
+  @Test
+  void mealPlanAndRecognitionResolveTheSameImmutablePublishedAgentRuntime() throws Exception {
+    JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
+    agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
     upsertMealRuntimeComponents(
         agentJdbc,
         "published-provider",
         "published-model",
-        "{\"providerKey\":\"published-provider\",\"model\":\"published-model\"}");
-    DailyMealPlanGenerationResult credentialFailure =
-        runtime.generate(UUID.randomUUID(), LocalDate.of(2026, 8, 14), emptyFeedback());
-    assertThat(credentialFailure.failureCode()).isEqualTo("DEPENDENCY_NOT_CONFIGURED");
-    assertThat(credentialFailure.failureMessage()).isEqualTo("三餐 Provider 凭据未配置");
+        "{\"providerKey\":\"published-provider\",\"model\":\"published-model\",\"vision\":true}");
+    publishMealRuntimeSnapshot(
+        agentJdbc, 81, publishedUnifiedRuntimeSnapshot("published-provider", "published-model"));
+
+    upsertMealRuntimeComponents(
+        agentJdbc,
+        "mutable-draft-provider",
+        "mutable-draft-model",
+        "{\"providerKey\":\"mutable-draft-provider\",\"model\":\"mutable-draft-model\",\"vision\":false}");
+    agentJdbc.update(
+        "UPDATE agent_drafts SET provider_key='mutable-draft-provider',model_key='mutable-draft-model' WHERE agent_key='fitness.coach'");
+    agentJdbc.update(
+        "UPDATE agent_providers SET endpoint='https://mutable.example/v1' WHERE provider_key='published-provider'");
+    agentJdbc.update(
+        "UPDATE agent_models SET model_id='mutable-model',supports_vision=false WHERE model_key='published-model'");
+
+    var mealPlan =
+        new MealPlanGenerationRuntime(
+                agentDataSource, objectMapper, "build/missing-agent-master-key")
+            .config();
+    var recognition =
+        new MealRecognitionRuntime(
+                agentDataSource, agentDataSource, objectMapper, "build/missing-agent-master-key")
+            .config();
+
+    assertThat(mealPlan.providerKey()).isEqualTo("published-provider");
+    assertThat(mealPlan.model()).isEqualTo("published-model");
+    assertThat(mealPlan.endpoint()).isEqualTo("https://example.test/v1");
+    assertThat(mealPlan.credentialKeyVersion()).isEqualTo(1);
+    assertThat(recognition.providerKey()).isEqualTo(mealPlan.providerKey());
+    assertThat(recognition.model()).isEqualTo(mealPlan.model());
+    assertThat(recognition.endpoint()).isEqualTo(mealPlan.endpoint());
+    assertThat(recognition.credentialKeyVersion()).isEqualTo(mealPlan.credentialKeyVersion());
   }
 
   @Test
@@ -1086,6 +1210,11 @@ class FitnessExperienceIntegrationTest {
       throws Exception {
     JdbcTemplate agentJdbc = new JdbcTemplate(agentDataSource);
     agentJdbc.update("DELETE FROM agent_versions WHERE agent_key='fitness.coach'");
+    upsertMealRuntimeComponents(
+        agentJdbc,
+        "mutable-draft-provider",
+        "mutable-draft-model",
+        "{\"providerKey\":\"mutable-draft-provider\",\"model\":\"mutable-draft-model\",\"vision\":false}");
     agentJdbc.update(
         "UPDATE agent_drafts SET provider_key='mutable-draft-provider',model_key='mutable-draft-model' WHERE agent_key='fitness.coach'");
     upsertMealRuntimeComponents(
@@ -1106,6 +1235,9 @@ class FitnessExperienceIntegrationTest {
     assertThat(publishedConfig.model()).isEqualTo("published-model");
     JsonNode request =
         objectMapper.valueToTree(runtime.requestBody(publishedConfig, currentGoalReportFacts()));
+    assertThat(request.path("max_tokens").asInt()).isEqualTo(2000);
+    assertThat(request.path("messages").get(0).path("content").asText())
+        .contains("conclusion", "highlights", "weaknesses", "nextActions", "OPEN_RECORD");
     assertThat(request.path("response_format").path("type").asText()).isEqualTo("json_schema");
     assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean())
         .isTrue();
@@ -1167,14 +1299,12 @@ class FitnessExperienceIntegrationTest {
           testSecret("published-report-runtime", Base64.getEncoder().encodeToString(new byte[32]));
       JdbcAdminWorkbenchStore workbench =
           new JdbcAdminWorkbenchStore(agentDataSource, objectMapper, masterKey);
-      new AdminWorkbenchLocalSeed(workbench).seed();
+      resetChatAgentDraft(agentJdbc);
       String publishedEndpoint = "http://localhost:" + server.getAddress().getPort() + "/v1";
       agentJdbc.update(
-          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='PROVIDER' AND component_key='bailian'",
-          "{\"endpoint\":\"%s\"}".formatted(publishedEndpoint));
+          "UPDATE agent_providers SET endpoint=? WHERE provider_key='bailian'", publishedEndpoint);
       agentJdbc.update(
-          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='MODEL' AND component_key='qwen-plus'",
-          "{\"providerKey\":\"bailian\",\"model\":\"published-model\"}");
+          "UPDATE agent_models SET model_id='published-model' WHERE model_key='qwen-plus'");
       workbench.saveCredential("bailian", "published-key".toCharArray());
       workbench.publish(workbench.findDraft("fitness.coach").orElseThrow());
 
@@ -1185,11 +1315,10 @@ class FitnessExperienceIntegrationTest {
       assertThat(authorization.get()).isEqualTo("Bearer published-key");
 
       agentJdbc.update(
-          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='PROVIDER' AND component_key='bailian'",
-          "{\"endpoint\":\"%s/changed\"}".formatted(publishedEndpoint));
+          "UPDATE agent_providers SET endpoint=? WHERE provider_key='bailian'",
+          publishedEndpoint + "/changed");
       agentJdbc.update(
-          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='MODEL' AND component_key='qwen-plus'",
-          "{\"providerKey\":\"bailian\",\"model\":\"mutable-model\"}");
+          "UPDATE agent_models SET model_id='mutable-model' WHERE model_key='qwen-plus'");
       workbench.saveCredential("bailian", "mutable-key".toCharArray());
 
       assertThat(runtime.generate(currentGoalReportFacts()).status()).isEqualTo("SUCCEEDED");
@@ -1225,19 +1354,15 @@ class FitnessExperienceIntegrationTest {
           testSecret("published-chat-runtime", Base64.getEncoder().encodeToString(new byte[32]));
       JdbcAdminWorkbenchStore workbench =
           new JdbcAdminWorkbenchStore(agentDataSource, objectMapper, masterKey);
-      new AdminWorkbenchLocalSeed(workbench).seed();
       resetChatAgentDraft(agentJdbc);
       workbench.reconcileRuntimeCapabilities(
           new happy.jayden.yang.agentbuilder.FitnessSkillRegistry(
               new happy.jayden.yang.agentbuilder.FitnessSafetyHook()));
       agentJdbc.update(
-          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='PROVIDER'"
-              + " AND component_key='bailian'",
-          "{\"endpoint\":\"http://localhost:%d/v1\"}".formatted(server.getAddress().getPort()));
+          "UPDATE agent_providers SET endpoint=? WHERE provider_key='bailian'",
+          "http://localhost:%d/v1".formatted(server.getAddress().getPort()));
       agentJdbc.update(
-          "UPDATE agent_component_projection SET config=?::jsonb WHERE component_type='MODEL'"
-              + " AND component_key='qwen-plus'",
-          "{\"providerKey\":\"bailian\",\"model\":\"published-chat-model\"}");
+          "UPDATE agent_models SET model_id='published-chat-model' WHERE model_key='qwen-plus'");
       workbench.saveCredential("bailian", "published-chat-key".toCharArray());
       workbench.publish(workbench.findDraft("fitness.coach").orElseThrow());
       agentJdbc.update(
@@ -1888,7 +2013,9 @@ class FitnessExperienceIntegrationTest {
     jdbc.update(
         "UPDATE agent_drafts SET name='花爷健身教练',description='结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。',status='DRAFT',framework_key='agentscope',provider_key='bailian',model_key='qwen-plus',prompt_key='fitness.coach.prompt',tool_keys='[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,skill_keys='[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,hook_keys='[\"fitness.safety\"]'::jsonb,memory_key='fitness.daily-memory',temperature=0.5,max_tool_calls=8,updated_at=CURRENT_TIMESTAMP WHERE agent_key='fitness.coach'");
     jdbc.update(
-        "UPDATE agent_component_projection SET status='AVAILABLE' WHERE (component_type,component_key) IN (('FRAMEWORK','agentscope'),('PROMPT','fitness.coach.prompt'),('MEMORY','fitness.daily-memory'),('TOOL','fitness.profile.query'),('TOOL','fitness.workout.query'),('TOOL','fitness.meal.query'),('TOOL','fitness.meal.feedback_context'),('TOOL','fitness.plan.generate'),('SKILL','fitness.meal.skill'),('SKILL','fitness.plan.skill'),('HOOK','fitness.safety'))");
+        "UPDATE agent_skills SET status='ACTIVE',runtime_ready=true WHERE skill_key IN ('fitness.meal.skill','fitness.plan.skill')");
+    jdbc.update(
+        "UPDATE agent_hooks SET status='ACTIVE',runtime_ready=true WHERE hook_key='fitness.safety'");
   }
 
   private static String publishedCurrentGoalRuntimeSnapshot(String providerKey, String modelKey) {
@@ -1898,18 +2025,30 @@ class FitnessExperienceIntegrationTest {
         .formatted(providerKey, modelKey, providerKey, modelKey);
   }
 
+  private static String publishedUnifiedRuntimeSnapshot(String providerKey, String modelKey) {
+    return """
+        {"providerKey":"%s","modelKey":"%s","currentGoalReportRuntime":{"provider":{"key":"%s","version":1,"status":"AVAILABLE","config":{"endpoint":"https://example.test/v1/"}},"model":{"key":"%s","version":1,"status":"AVAILABLE","config":{"providerKey":"%s","model":"%s","vision":true}},"credential":{"keyVersion":1,"ciphertext":"AA==","iv":"AAAAAAAAAAAAAAAA","aad":""}}}
+        """
+        .formatted(providerKey, modelKey, providerKey, modelKey, providerKey, modelKey);
+  }
+
   private static void upsertMealRuntimeComponents(
       JdbcTemplate jdbc, String providerKey, String modelKey, String modelConfiguration) {
-    String checksum = "0".repeat(64);
     jdbc.update(
-        "INSERT INTO agent_component_projection(component_type,component_key,version,display_name,description,status,tags,config,source_checksum) VALUES ('PROVIDER', ?, 1, 'test provider', 'test provider', 'AVAILABLE', ARRAY[]::text[], '{\"endpoint\":\"https://example.test/v1/\"}'::jsonb, ?) ON CONFLICT(component_type,component_key,version) DO UPDATE SET status=EXCLUDED.status,config=EXCLUDED.config",
-        providerKey,
-        checksum);
+        "INSERT INTO agent_providers(provider_key,display_name,endpoint,status) VALUES (?,'test provider','https://example.test/v1/','ACTIVE') ON CONFLICT(provider_key) DO UPDATE SET status='ACTIVE',endpoint=EXCLUDED.endpoint",
+        providerKey);
+    com.fasterxml.jackson.databind.JsonNode model;
+    try {
+      model = new com.fasterxml.jackson.databind.ObjectMapper().readTree(modelConfiguration);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+      throw new IllegalArgumentException(exception);
+    }
     jdbc.update(
-        "INSERT INTO agent_component_projection(component_type,component_key,version,display_name,description,status,tags,config,source_checksum) VALUES ('MODEL', ?, 1, 'test model', 'test model', 'AVAILABLE', ARRAY[]::text[], ?::jsonb, ?) ON CONFLICT(component_type,component_key,version) DO UPDATE SET status=EXCLUDED.status,config=EXCLUDED.config",
+        "INSERT INTO agent_models(model_key,provider_key,model_id,display_name,description,supports_streaming,supports_tool_calling,supports_vision,status) VALUES (?,?,?,'test model','test model',true,true,?,'ACTIVE') ON CONFLICT(model_key) DO UPDATE SET provider_key=EXCLUDED.provider_key,model_id=EXCLUDED.model_id,supports_vision=EXCLUDED.supports_vision,status='ACTIVE'",
         modelKey,
-        modelConfiguration,
-        checksum);
+        providerKey,
+        model.path("model").asText(modelKey),
+        model.path("vision").asBoolean(false));
   }
 
   private static DailyMealPlanGenerationResult dailyPlanResult(String foodName) {

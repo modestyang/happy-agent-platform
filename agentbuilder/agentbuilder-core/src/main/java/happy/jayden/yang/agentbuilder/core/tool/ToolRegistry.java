@@ -8,6 +8,11 @@ import java.util.Map;
 public interface ToolRegistry {
   ResolvedToolSet resolve(List<ToolBinding> bindings);
 
+  /** Returns the runtime contracts that may be exposed to a model or an operator console. */
+  default List<ToolDescriptor> descriptors() {
+    return List.of();
+  }
+
   /** Invokes the newest registered contract for a Tool through its normal scope guard. */
   default Object invoke(String toolKey, Map<String, Object> input, ToolExecutionContext context)
       throws Exception {

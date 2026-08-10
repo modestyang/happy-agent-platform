@@ -4,6 +4,7 @@ import { ChevronLeft } from 'lucide-react';
 
 import { admin, type RunTrace } from '../api';
 import { PageHeading } from '../components/PageHeading';
+import { TraceConversation } from '../components/TraceConversation';
 
 export function RunTracePage() {
   const { runId } = useParams<{ runId: string }>();
@@ -38,40 +39,6 @@ export function RunTracePage() {
       description={`Run ${trace.runId} · v${trace.agentVersion} · ${trace.status}`}
       action={<button className="admin-secondary" onClick={() => navigate(returnPath)}><ChevronLeft /> {returnLabel}</button>}
     />
-    <section className="admin-trace__metrics">
-      <div className="admin-trace__metric"><small>状态</small><strong>{trace.status}</strong><p>{trace.errorCode ?? '无错误'}</p></div>
-      <div className="admin-trace__metric"><small>耗时</small><strong>{trace.durationMs} ms</strong><p>{new Date(trace.startedAt).toLocaleString('zh-CN')}</p></div>
-      <div className="admin-trace__metric"><small>Tokens</small><strong>{trace.promptTokens + trace.completionTokens}</strong><p>prompt {trace.promptTokens} · completion {trace.completionTokens}</p></div>
-      <div className="admin-trace__metric"><small>成本</small><strong>${trace.costUsd.toFixed(4)}</strong><p>{trace.modelKey ?? 'model unknown'}</p></div>
-    </section>
-    <section className="admin-trace">
-      <div className="admin-trace__section">
-        <h3>输入</h3>
-        <p>{trace.inputSummary || '—'}</p>
-      </div>
-      <div className="admin-trace__section">
-        <h3>输出</h3>
-        <p>{trace.outputSummary || '—'}</p>
-      </div>
-      {trace.errorMessage && (
-        <div className="admin-trace__section" style={{background: '#fff3f3', borderColor: '#f3c0c1'}}>
-          <h3 style={{color: '#a14c4e'}}>错误</h3>
-          <p style={{color: '#a14c4e'}}>{trace.errorMessage}</p>
-        </div>
-      )}
-      <div className="admin-trace__section">
-        <h3>事件时间轴（{trace.events.length} 条）</h3>
-        <div className="admin-trace__events">
-          {trace.events.map((event) => {
-            const variant = event.type === 'TOKEN' ? 'admin-token' : event.type === 'RUN_FAILED' ? 'admin-run-failed' : event.type === 'RUN_COMPLETED' ? 'admin-run-completed' : null;
-            return <div key={event.sequence} className={`admin-trace__event ${variant ?? ''}`}>
-              <small>{new Date(event.occurredAt).toLocaleTimeString('zh-CN')}</small>
-              <strong>{event.type}</strong>
-              <em><b>{event.title}</b> {event.detail}</em>
-            </div>;
-          })}
-        </div>
-      </div>
-    </section>
+    <TraceConversation trace={trace} />
   </>;
 }

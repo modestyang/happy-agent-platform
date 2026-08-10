@@ -91,10 +91,34 @@ export type Provider = {
   providerKey: string;
   displayName: string;
   endpoint: string;
+  protocol: 'OPENAI_COMPATIBLE';
   configured: boolean;
   maskedCredential: string;
-  status: string;
+  status: 'ACTIVE' | 'DISABLED';
+  revision: number;
+  updatedAt: string;
 };
+
+export type Model = {
+  modelKey: string;
+  providerKey: string;
+  modelId: string;
+  displayName: string;
+  description: string;
+  supportsStreaming: boolean;
+  supportsToolCalling: boolean;
+  supportsVision: boolean;
+  status: 'ACTIVE' | 'DISABLED';
+  revision: number;
+  updatedAt: string;
+};
+
+export type Prompt = { promptKey: string; displayName: string; description: string; template: string; status: string; revision: number; updatedAt: string };
+export type Skill = { skillKey: string; displayName: string; description: string; whenToUse: string; whenNotToUse: string; content: string; requiredToolKeys: string[]; runtimeReady: boolean; status: string; revision: number; updatedAt: string };
+export type Hook = { hookKey: string; displayName: string; description: string; phase: string; mandatory: boolean; runtimeReady: boolean; status: string; revision: number; updatedAt: string };
+export type Framework = { frameworkKey: string; displayName: string; description: string; capabilities: Record<string, unknown>; status: string; revision: number; updatedAt: string };
+export type Memory = { memoryKey: string; displayName: string; description: string; retentionHours: number; maxTokens: number; status: string; revision: number; updatedAt: string };
+export type Tool = { toolKey: string; contractVersion: number; runtimeName: string; displayName: string; description: string; whenToUse: string; whenNotToUse: string; sideEffect: string; riskLevel: string; requiredScopes: string[]; inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> };
 
 export type ValidationResult = { valid: boolean; errors: string[]; warnings: string[] };
 export type Publication = { agentKey: string; publishedVersion: number; publishedAt: string };
@@ -202,7 +226,44 @@ const admin = {
     request<{ message: string }>('/api/admin/playground/messages', {
       method: 'POST', body: JSON.stringify({ agentKey, message }),
     }),
-  snapshot: () => request<WorkbenchSnapshot>('/api/admin/workbench'),
+  createPlaygroundRun: (agentKey: string, input: string, idempotencyKey: string) =>
+    request<{ runId: string; sessionId?: string; status: string }>('/api/v1/admin/playground/runs', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ agentKey, target: { kind: 'PUBLISHED_VERSION', revision: 1 }, input, businessUserId: '00000000-0000-0000-0000-000000000000' }),
+    }),
+  decidePlaygroundRunApproval: (runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT', idempotencyKey: string) =>
+    request<{ runId: string; status: string }>(`/api/v1/admin/playground/runs/${runId}/approvals/${approvalId}`, {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ decision }),
+    }),
+  listAgents: () => request<AgentDraft[]>('/api/admin/agents'),
+  listProviders: () => request<Provider[]>('/api/admin/providers'),
+  createProvider: (payload: Pick<Provider, 'providerKey' | 'displayName' | 'endpoint'>) =>
+    request<Provider>('/api/admin/providers', { method: 'POST', body: JSON.stringify(payload) }),
+  updateProvider: (providerKey: string, payload: Pick<Provider, 'displayName' | 'endpoint' | 'status'>, revision: number) =>
+    request<Provider>(`/api/admin/providers/${encodeURIComponent(providerKey)}`, { method: 'PATCH', headers: { 'If-Match': String(revision) }, body: JSON.stringify(payload) }),
+  listModels: (providerKey?: string) => request<Model[]>(`/api/admin/models${providerKey ? `?providerKey=${encodeURIComponent(providerKey)}` : ''}`),
+  createModel: (payload: Omit<Model, 'status' | 'revision' | 'updatedAt'>) =>
+    request<Model>('/api/admin/models', { method: 'POST', body: JSON.stringify(payload) }),
+  updateModel: (modelKey: string, payload: Omit<Model, 'modelKey' | 'providerKey' | 'revision' | 'updatedAt'>, revision: number) =>
+    request<Model>(`/api/admin/models/${encodeURIComponent(modelKey)}`, { method: 'PATCH', headers: { 'If-Match': String(revision) }, body: JSON.stringify(payload) }),
+  listPrompts: () => request<Prompt[]>('/api/admin/prompts'),
+  createPrompt: (payload: Omit<Prompt, 'status' | 'revision' | 'updatedAt'>) =>
+    request<Prompt>('/api/admin/prompts', {
+      method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(payload),
+    }),
+  updatePrompt: (key: string, payload: Pick<Prompt, 'displayName' | 'description' | 'template' | 'status'>, revision: number) => request<Prompt>(`/api/admin/prompts/${encodeURIComponent(key)}`, { method: 'PATCH', headers: { 'If-Match': String(revision) }, body: JSON.stringify(payload) }),
+  listSkills: () => request<Skill[]>('/api/admin/skills'),
+  createSkill: (payload: Omit<Skill, 'status' | 'revision' | 'updatedAt' | 'runtimeReady'>) =>
+    request<Skill>('/api/admin/skills', {
+      method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(payload),
+    }),
+  updateSkill: (key: string, payload: Pick<Skill, 'displayName' | 'description' | 'whenToUse' | 'whenNotToUse' | 'content' | 'requiredToolKeys' | 'status'>, revision: number) => request<Skill>(`/api/admin/skills/${encodeURIComponent(key)}`, { method: 'PATCH', headers: { 'If-Match': String(revision) }, body: JSON.stringify(payload) }),
+  listHooks: () => request<Hook[]>('/api/admin/hooks'),
+  updateHook: (key: string, payload: Pick<Hook, 'displayName' | 'description' | 'phase' | 'mandatory' | 'status'>, revision: number) => request<Hook>(`/api/admin/hooks/${encodeURIComponent(key)}`, { method: 'PATCH', headers: { 'If-Match': String(revision) }, body: JSON.stringify(payload) }),
+  listFrameworks: () => request<Framework[]>('/api/admin/frameworks'),
+  listMemories: () => request<Memory[]>('/api/admin/memories'),
+  listTools: () => request<Tool[]>('/api/admin/tools'),
   createAgent: (createRequest: CreateAgentRequest) =>
     request<AgentDraft>('/api/admin/agents', { method: 'POST', body: JSON.stringify(createRequest) }),
   updateDraft: (agentKey: string, update: AgentDraftUpdate, revision: number) =>
@@ -225,11 +286,6 @@ const admin = {
       `/api/admin/providers/${encodeURIComponent(providerKey)}/credential`,
       { method: 'PUT', body: JSON.stringify({ apiKey }) },
     ),
-  saveComponent: (type: string, key: string, update: WorkbenchComponentUpdate) =>
-    request<WorkbenchComponent>(
-      `/api/admin/components/${encodeURIComponent(type)}/${encodeURIComponent(key)}`,
-      { method: 'PATCH', body: JSON.stringify(update) },
-    ),
   listRuns: (params: { agent?: string; status?: string; from?: string; to?: string; page?: number; size?: number; sort?: string }) => {
     const search = new URLSearchParams();
     if (params.agent) search.set('agent', params.agent);
@@ -242,8 +298,7 @@ const admin = {
     return request<RunPage>(`/api/admin/runs?${search.toString()}`);
   },
   runTrace: (runId: string) => request<RunTrace>(`/api/admin/runs/${runId}`),
-  listConversations: (userId: string) =>
-    request<ConversationSummary[]>(`/api/admin/traces/conversations?userId=${encodeURIComponent(userId)}`),
+  listConversations: () => request<ConversationSummary[]>('/api/admin/traces/conversations?page=0&size=30'),
   conversationTrace: (conversationId: string) =>
     request<ConversationDetail>(`/api/admin/traces/conversations/${encodeURIComponent(conversationId)}`),
 };

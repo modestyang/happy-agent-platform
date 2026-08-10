@@ -61,10 +61,6 @@ class CatalogRepositoryIntegrationTest {
     try (var connection = dataSource.getConnection()) {
       ScriptUtils.executeSqlScript(
           connection, new ClassPathResource("db/agent/V1__agent_baseline.sql"));
-      ScriptUtils.executeSqlScript(
-          connection, new ClassPathResource("db/agent/V2__component_catalogs.sql"));
-      ScriptUtils.executeSqlScript(
-          connection, new ClassPathResource("db/agent/V3__default_profile_active_pointer.sql"));
     }
   }
 

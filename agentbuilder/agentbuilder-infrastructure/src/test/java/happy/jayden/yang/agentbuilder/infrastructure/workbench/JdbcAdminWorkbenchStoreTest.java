@@ -37,6 +37,7 @@ class JdbcAdminWorkbenchStoreTest {
   private ObjectMapper mapper;
   private Path masterKey;
   private JdbcAdminWorkbenchStore store;
+  private JdbcAdminResourceStore resources;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -49,27 +50,30 @@ class JdbcAdminWorkbenchStoreTest {
     try (var connection = dataSource.getConnection()) {
       ScriptUtils.executeSqlScript(
           connection, new ClassPathResource("db/agent/V1__agent_baseline.sql"));
-      ScriptUtils.executeSqlScript(
-          connection, new ClassPathResource("db/agent/V4__agent_workbench.sql"));
     }
     mapper = new ObjectMapper().findAndRegisterModules();
     masterKey = Files.createTempFile("happy-agent-workbench", ".key");
     Files.writeString(
         masterKey, Base64.getEncoder().encodeToString(new byte[32]), StandardCharsets.US_ASCII);
     store = new JdbcAdminWorkbenchStore(dataSource, mapper, masterKey);
-    new AdminWorkbenchLocalSeed(store).seed();
+    resources = new JdbcAdminResourceStore(dataSource, mapper);
   }
 
   @Test
-  void localSeedIsIdempotentAndSnapshotComesFromPostgres() {
-    new AdminWorkbenchLocalSeed(store).seed();
+  void baselineDraftAndProvidersComeFromPostgres() {
+    var draft = store.findDraft("fitness.coach").orElseThrow();
 
-    var snapshot = store.snapshot();
-
-    assertEquals("fitness.coach", snapshot.agents().get(0).agentKey());
-    assertTrue(snapshot.components().size() >= 10);
-    assertEquals(1, snapshot.providers().size());
-    assertFalse(snapshot.providers().get(0).configured());
+    assertEquals("minimax", draft.providerKey());
+    assertEquals("minimax-m3", draft.modelKey());
+    assertEquals(2, resources.listProviders().size());
+    assertTrue(resources.listProviders().stream().noneMatch(item -> item.configured()));
+    assertEquals(
+        "https://api.minimaxi.com/v1",
+        resources.listProviders().stream()
+            .filter(provider -> provider.providerKey().equals("minimax"))
+            .findFirst()
+            .orElseThrow()
+            .endpoint());
     assertEquals(
         1,
         new JdbcTemplate(dataSource)
@@ -81,16 +85,20 @@ class JdbcAdminWorkbenchStoreTest {
     var plaintext = "sk-secret-value";
     store.saveCredential("bailian", plaintext.toCharArray());
 
-    var snapshotJson = mapper.writeValueAsString(store.snapshot());
     var stored =
         new JdbcTemplate(dataSource)
             .queryForObject(
                 "SELECT encode(credential_ciphertext,'base64') FROM agent_provider_credentials WHERE provider_key='bailian'",
                 String.class);
 
-    assertFalse(snapshotJson.contains(plaintext));
     assertFalse(stored.contains(plaintext));
-    assertEquals("••••••••", store.snapshot().providers().get(0).maskedCredential());
+    assertEquals(
+        "••••••••",
+        resources.listProviders().stream()
+            .filter(provider -> provider.providerKey().equals("bailian"))
+            .findFirst()
+            .orElseThrow()
+            .maskedCredential());
   }
 
   @Test
@@ -131,21 +139,19 @@ class JdbcAdminWorkbenchStoreTest {
 
   @Test
   void newAgentStartsFromPlatformDefaultsInsteadOfFitnessBusinessBindings() {
-    var created =
-        store.createDraft(
-            new CreateAgentRequest("baby.food", "辅食助手", "为家庭提供辅食安排建议"));
+    var created = store.createDraft(new CreateAgentRequest("baby.food", "辅食助手", "为家庭提供辅食安排建议"));
 
     assertEquals("agent.default.prompt", created.promptKey());
     assertEquals("agent.default.memory", created.memoryKey());
     assertEquals(List.of(), created.toolKeys());
     assertEquals(List.of(), created.skillKeys());
     assertEquals(List.of(), created.hookKeys());
-    assertTrue(
-        component(store.snapshot().components(), "PROMPT", "agent.default.prompt")
-            .config()
-            .get("template")
-            .toString()
-            .contains("通用 AI 助手"));
+    assertEquals(
+        1,
+        new JdbcTemplate(dataSource)
+            .queryForObject(
+                "SELECT count(*) FROM agent_prompts WHERE prompt_key='agent.default.prompt'",
+                Integer.class));
   }
 
   @Test
@@ -154,24 +160,25 @@ class JdbcAdminWorkbenchStoreTest {
         (RuntimeCapabilityRegistry)
             (type, key) -> type.equals("SKILL") && key.equals("fitness.meal.skill"));
 
-    var components = store.snapshot().components();
-    var meal = component(components, "SKILL", "fitness.meal.skill");
-    var plan = component(components, "SKILL", "fitness.plan.skill");
-    var safety = component(components, "HOOK", "fitness.safety");
-
-    assertEquals("AVAILABLE", meal.status());
-    assertEquals(Boolean.TRUE, meal.config().get("runtimeReady"));
-    assertEquals("UNAVAILABLE", plan.status());
-    assertEquals(Boolean.FALSE, plan.config().get("runtimeReady"));
-    assertEquals("运行时 handler 未注册", plan.config().get("runtimeReason"));
-    assertEquals("UNAVAILABLE", safety.status());
+    var jdbc = new JdbcTemplate(dataSource);
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT runtime_ready FROM agent_skills WHERE skill_key='fitness.meal.skill'",
+            Boolean.class));
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT runtime_ready FROM agent_skills WHERE skill_key='fitness.plan.skill'",
+            Boolean.class));
+    assertFalse(
+        jdbc.queryForObject(
+            "SELECT runtime_ready FROM agent_hooks WHERE hook_key='fitness.safety'",
+            Boolean.class));
   }
 
   @Test
-  void publishingEmbedsAnEncryptedCurrentGoalRuntimeSnapshotWithoutLeakingPlaintext()
-      throws Exception {
+  void publishingEmbedsTheUnifiedMiniMaxRuntimeSnapshotWithoutLeakingPlaintext() throws Exception {
     String secret = "published-report-key";
-    store.saveCredential("bailian", secret.toCharArray());
+    store.saveCredential("minimax", secret.toCharArray());
 
     store.publish(store.findDraft("fitness.coach").orElseThrow());
 
@@ -181,22 +188,17 @@ class JdbcAdminWorkbenchStoreTest {
                 "SELECT configuration::text FROM agent_versions WHERE agent_key='fitness.coach' AND version=1",
                 String.class);
     JsonNode snapshot = mapper.readTree(configuration).path("currentGoalReportRuntime");
-    assertEquals("bailian", snapshot.path("provider").path("key").asText());
+    assertEquals("minimax", snapshot.path("provider").path("key").asText());
     assertEquals(
-        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "https://api.minimaxi.com/v1",
         snapshot.path("provider").path("config").path("endpoint").asText());
-    assertEquals("qwen-plus", snapshot.path("model").path("key").asText());
+    assertEquals("minimax-m3", snapshot.path("model").path("key").asText());
+    assertEquals("MiniMax-M3", snapshot.path("model").path("config").path("model").asText());
+    assertTrue(snapshot.path("model").path("config").path("vision").asBoolean());
     assertFalse(snapshot.path("credential").path("ciphertext").asText().isBlank());
     assertFalse(snapshot.path("credential").path("iv").asText().isBlank());
     assertFalse(configuration.contains(secret));
-    assertFalse(mapper.writeValueAsString(store.snapshot()).contains(secret));
-  }
-
-  private static ComponentView component(List<ComponentView> components, String type, String key) {
-    return components.stream()
-        .filter(item -> item.type().equals(type) && item.componentKey().equals(key))
-        .findFirst()
-        .orElseThrow();
+    assertFalse(mapper.writeValueAsString(resources.listProviders()).contains(secret));
   }
 
   @Test
@@ -204,8 +206,6 @@ class JdbcAdminWorkbenchStoreTest {
     new JdbcTemplate(dataSource)
         .update("UPDATE agent_drafts SET tool_keys='[1,2,3]' WHERE agent_key='fitness.coach'");
 
-    var snapshot = store.snapshot();
-
-    assertEquals(List.of("1", "2", "3"), snapshot.agents().get(0).toolKeys());
+    assertEquals(List.of("1", "2", "3"), store.findDraft("fitness.coach").orElseThrow().toolKeys());
   }
 }

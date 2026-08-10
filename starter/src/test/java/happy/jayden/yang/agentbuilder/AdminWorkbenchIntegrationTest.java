@@ -23,10 +23,10 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -85,31 +85,36 @@ class AdminWorkbenchIntegrationTest {
   @Test
   @Order(1)
   void workbenchRequiresSessionAndReturnsDatabaseSeed() throws Exception {
-    mvc.perform(get("/api/admin/workbench")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/admin/agents")).andExpect(status().isUnauthorized());
 
-    mvc.perform(get("/api/admin/workbench").cookie(adminLogin("admin", "admin123")))
+    Cookie session = adminLogin("admin", "admin123");
+    mvc.perform(get("/api/admin/agents").cookie(session))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.agents[0].agentKey").value("fitness.coach"))
-        .andExpect(jsonPath("$.providers[0].configured").value(false))
-        .andExpect(jsonPath("$.components.length()").value(org.hamcrest.Matchers.greaterThan(9)));
+        .andExpect(jsonPath("$[0].agentKey").value("fitness.coach"));
+    mvc.perform(get("/api/admin/providers").cookie(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].configured").value(false));
+    mvc.perform(get("/api/admin/tools").cookie(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(org.hamcrest.Matchers.greaterThan(5)));
   }
 
   @Test
   @Order(2)
   void adminSessionIsIndependentFromFitnessSession() throws Exception {
-    mvc.perform(get("/api/admin/workbench")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/admin/agents")).andExpect(status().isUnauthorized());
 
-    mvc.perform(get("/api/admin/workbench").cookie(login())).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/admin/agents").cookie(login())).andExpect(status().isUnauthorized());
 
     Cookie adminSession = adminLogin("admin", "admin123");
-    mvc.perform(get("/api/admin/workbench").cookie(adminSession)).andExpect(status().isOk());
+    mvc.perform(get("/api/admin/agents").cookie(adminSession)).andExpect(status().isOk());
 
     mvc.perform(
             post("/api/local/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"user\",\"password\":\"demo123\"}"))
         .andExpect(status().isOk());
-    mvc.perform(get("/api/admin/workbench").cookie(adminSession)).andExpect(status().isOk());
+    mvc.perform(get("/api/admin/agents").cookie(adminSession)).andExpect(status().isOk());
   }
 
   @Test
@@ -196,8 +201,8 @@ class AdminWorkbenchIntegrationTest {
     mvc.perform(
             post("/api/admin/playground/messages")
                 .cookie(adminLogin("admin", "admin123"))
-        .contentType(MediaType.APPLICATION_JSON)
-        .content("{\"agentKey\":\"fitness.coach\",\"message\":\"请给我一条训练建议\"}"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"agentKey\":\"fitness.coach\",\"message\":\"请给我一条训练建议\"}"))
         .andExpect(status().isServiceUnavailable());
 
     mvc.perform(
@@ -233,11 +238,12 @@ class AdminWorkbenchIntegrationTest {
         runId);
 
     Cookie session = adminLogin("admin", "admin123");
-    mvc.perform(get("/api/admin/traces/conversations").cookie(session).param("userId", userId.toString()))
+    mvc.perform(get("/api/admin/traces/conversations").cookie(session))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].conversationId").value(conversationId.toString()))
         .andExpect(jsonPath("$[0].messageCount").value(1));
-    mvc.perform(get("/api/admin/traces/conversations/{conversationId}", conversationId).cookie(session))
+    mvc.perform(
+            get("/api/admin/traces/conversations/{conversationId}", conversationId).cookie(session))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.messages[0].content").value("晚饭怎么安排？"))
         .andExpect(jsonPath("$.runs[0].runId").value(runId.toString()));
@@ -267,16 +273,81 @@ class AdminWorkbenchIntegrationTest {
         .andExpect(jsonPath("$.hookKeys.length()").value(0))
         .andExpect(jsonPath("$.revision").value(1));
 
-    mvc.perform(get("/api/admin/workbench").cookie(session))
+    mvc.perform(get("/api/admin/agents").cookie(session))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.agents[?(@.agentKey == 'baby.food.coach')].name").value("辅食助手"));
+        .andExpect(jsonPath("$[?(@.agentKey == 'baby.food.coach')].name").value("辅食助手"));
 
     mvc.perform(
             post("/api/admin/agents")
                 .cookie(session)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agentKey\":\"baby.food.coach\",\"name\":\"重复\",\"description\":\"重复\"}"))
+                .content(
+                    "{\"agentKey\":\"baby.food.coach\",\"name\":\"重复\",\"description\":\"重复\"}"))
         .andExpect(status().isConflict());
+  }
+
+  @Test
+  @Order(8)
+  void developerCanCreatePromptAndSkillWithoutPublishingCode() throws Exception {
+    Cookie session = adminLogin("admin", "admin123");
+
+    mvc.perform(
+            post("/api/admin/prompts")
+                .cookie(session)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"promptKey":"acceptance.prompt","displayName":"验收提示词","description":"页面新增提示词","template":"你好 {{name}}"}
+                    """))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.promptKey").value("acceptance.prompt"))
+        .andExpect(jsonPath("$.revision").value(1));
+
+    mvc.perform(
+            post("/api/admin/skills")
+                .cookie(session)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"skillKey":"acceptance.skill","displayName":"验收技能","description":"页面新增技能","whenToUse":"验收时","whenNotToUse":"无","content":"读取档案后回答。","requiredToolKeys":["fitness.profile.query"]}
+                    """))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.skillKey").value("acceptance.skill"))
+        .andExpect(jsonPath("$.runtimeReady").value(true))
+        .andExpect(jsonPath("$.revision").value(1));
+
+    mvc.perform(
+            post("/api/admin/skills")
+                .cookie(session)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"skillKey":"missing.tool.skill","displayName":"错误技能","description":"依赖不存在工具","whenToUse":"测试","whenNotToUse":"无","content":"测试","requiredToolKeys":["missing.tool"]}
+                    """))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  @Order(9)
+  void developerCanUpdateSkillFromTheAdminPage() throws Exception {
+    Cookie session = adminLogin("admin", "admin123");
+
+    mvc.perform(
+            patch("/api/admin/skills/acceptance.skill")
+                .cookie(session)
+                .header("If-Match", "1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"displayName":"验收技能（已修改）","description":"页面修改技能","whenToUse":"需要验收时","whenNotToUse":"无需验收时","content":"读取资料后回答。","requiredToolKeys":["fitness.profile.query"],"status":"ACTIVE"}
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.skillKey").value("acceptance.skill"))
+        .andExpect(jsonPath("$.displayName").value("验收技能（已修改）"))
+        .andExpect(jsonPath("$.revision").value(2));
   }
 
   private Cookie login() throws Exception {
@@ -297,7 +368,8 @@ class AdminWorkbenchIntegrationTest {
         mvc.perform(
                 post("/api/admin/auth/login")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
+                    .content(
+                        "{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
             .andExpect(status().isOk())
             .andReturn();
     var cookie = result.getResponse().getCookie("AGENT_ADMIN_SESSION");

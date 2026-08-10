@@ -3,20 +3,21 @@ package happy.jayden.yang.agentbuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
+import happy.jayden.yang.agentbuilder.infrastructure.auth.JdbcAdminAuthStore;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcHookRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcModelRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcPromptRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcProviderRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcSkillRepository;
-import happy.jayden.yang.agentbuilder.infrastructure.auth.JdbcAdminAuthStore;
 import happy.jayden.yang.agentbuilder.infrastructure.tool.DefaultToolRegistry;
 import happy.jayden.yang.agentbuilder.infrastructure.tool.SpringToolCatalogScanner;
-import happy.jayden.yang.agentbuilder.infrastructure.workbench.AdminWorkbenchLocalSeed;
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminResourceStore;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcAdminWorkbenchStore;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcRunTraceRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.PublishedAgentPlaygroundRuntime;
-import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
 import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminResourceService;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import java.nio.file.Path;
 import java.util.List;
@@ -47,8 +48,27 @@ public class AdminWorkbenchConfig {
 
   @Bean
   AdminWorkbenchService adminWorkbenchService(
-      JdbcAdminWorkbenchStore store, RuntimeCapabilityRegistry runtimeCapabilities) {
-    return new AdminWorkbenchService(store, runtimeCapabilities);
+      JdbcAdminWorkbenchStore store,
+      JdbcAdminResourceStore resources,
+      RuntimeCapabilityRegistry runtimeCapabilities,
+      ToolRegistry tools) {
+    return new AdminWorkbenchService(store, runtimeCapabilities, resources, tools);
+  }
+
+  @Bean
+  @DependsOn("agentFlyway")
+  JdbcAdminResourceStore adminResourceStore(
+      @Qualifier("agentDataSource") DataSource dataSource, ObjectMapper mapper) {
+    return new JdbcAdminResourceStore(dataSource, mapper);
+  }
+
+  @Bean
+  AdminResourceService adminResourceService(JdbcAdminResourceStore store, ToolRegistry tools) {
+    return new AdminResourceService(
+        store,
+        tools.descriptors().stream()
+            .map(happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor::toolKey)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet()));
   }
 
   @Bean
@@ -135,16 +155,6 @@ public class AdminWorkbenchConfig {
       name = "happy.agent.workbench.local-seed.enabled",
       havingValue = "true",
       matchIfMissing = false)
-  ApplicationRunner adminWorkbenchLocalSeed(JdbcAdminWorkbenchStore store) {
-    return ignored -> new AdminWorkbenchLocalSeed(store).seed();
-  }
-
-  @Bean
-  @Order(2)
-  @ConditionalOnProperty(
-      name = "happy.agent.workbench.local-seed.enabled",
-      havingValue = "true",
-      matchIfMissing = false)
   ApplicationRunner adminAuthLocalSeed(
       JdbcAdminAuthStore store,
       @Value("${happy.agent.workbench.admin.username:admin}") String username,
@@ -153,7 +163,7 @@ public class AdminWorkbenchConfig {
   }
 
   @Bean
-  @Order(3)
+  @Order(2)
   ApplicationRunner runtimeCapabilityReconciler(
       JdbcAdminWorkbenchStore store, FitnessSkillRegistry runtimeCapabilities) {
     return ignored -> store.reconcileRuntimeCapabilities(runtimeCapabilities);

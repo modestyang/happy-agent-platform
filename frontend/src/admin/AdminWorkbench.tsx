@@ -8,6 +8,7 @@ import {
 
 import { admin, ApiError } from './api';
 import './admin.css';
+import './admin-experience.css';
 
 type NavItem = {
   path: string;
@@ -30,7 +31,7 @@ const navigation: NavItem[] = [
 ];
 
 function Loading() {
-  return <main className="admin-load"><div><LoaderCircle /><strong>正在连接工作台</strong><small>读取 Agent 配置与组件状态…</small></div></main>;
+  return <main className="admin-load"><div><LoaderCircle /><strong>正在连接工作台</strong><small>读取 Agent 与各项能力状态…</small></div></main>;
 }
 
 function ErrorScreen({ error, status, onRetry }: { error: string; status: number; onRetry: () => void }) {
@@ -50,7 +51,7 @@ function DeveloperLogin({ onLoggedIn }: { onLoggedIn: (session: { username: stri
   }
   return <main className="admin-login"><section>
     <div className="admin-login__brand"><span><Bot /></span><div><strong>Agent Console</strong><small>Developer workspace</small></div></div>
-    <div className="admin-login__copy"><p>欢迎回来</p><h1>开发者登录</h1><span>管理 Agent、组件与真实运行链路。</span></div>
+    <div className="admin-login__copy"><p>欢迎回来</p><h1>开发者登录</h1><span>管理 Agent、模型、工具、技能与真实运行链路。</span></div>
     <form onSubmit={submit}><label>用户名<input aria-label="管理员用户名" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label>密码<input aria-label="管理员密码" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>{error && <p role="alert">{error}</p>}<button className="admin-primary" disabled={pending}>{pending ? '正在验证…' : '进入工作台'}</button></form>
     <small className="admin-login__hint">此处使用独立的开发者会话，不关联健身应用账号。</small>
   </section></main>;
@@ -78,7 +79,6 @@ export function AdminWorkbench() {
     try {
       const session = await admin.session();
       setAdminUser(session.username || 'admin');
-      await admin.snapshot();
       setReady(true);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) { setAdminUser(''); return; }
@@ -128,7 +128,7 @@ export function AdminWorkbench() {
                   navigate('/admin/playground');
                 }
               }}
-              placeholder="搜索 Agent、组件或运行记录"
+              placeholder="搜索 Agent、工具、技能或运行记录"
             />
           </label>
           <div className="admin-topbar__right">
@@ -143,7 +143,7 @@ export function AdminWorkbench() {
             <Route path="/admin/agents/new" element={<AgentCreatePage />} />
             <Route path="/admin/agents/:agentKey" element={<AgentEditor />} />
             <Route path="/admin/providers" element={<Providers />} />
-            <Route path="/admin/models" element={<ComponentType type="MODEL" label="模型" />} />
+            <Route path="/admin/models" element={<Models />} />
             <Route path="/admin/prompts" element={<ComponentType type="PROMPT" label="提示词" />} />
             <Route path="/admin/tools" element={<ComponentType type="TOOL" label="工具" readOnly />} />
             <Route path="/admin/skills" element={<ComponentType type="SKILL" label="技能" />} />
@@ -166,6 +166,7 @@ import { AgentCreatePage } from './pages/AgentCreatePage';
 import { AgentEditor } from './pages/AgentEditor';
 import { ComponentType } from './pages/ComponentType';
 import { Providers } from './pages/Providers';
+import { Models } from './pages/Models';
 import { RunTracePage } from './pages/RunTracePage';
 import { ConversationTracePage } from './pages/ConversationTracePage';
 import { PlaygroundPage } from './pages/PlaygroundPage';

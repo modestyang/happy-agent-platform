@@ -441,6 +441,26 @@ input, select { width: 100%; border: 1px solid #ded5c8; border-radius: 14px; pad
 .md ul:last-child { margin-bottom: 0; }
 .md li { margin: 3px 0; }
 .md strong { font-weight: 800; }
+.md h1, .md h2, .md h3 { margin: 10px 0 6px; line-height: 1.35; }
+.md h1:first-child, .md h2:first-child, .md h3:first-child { margin-top: 0; }
+.md table { display: block; overflow-x: auto; width: 100%; margin: 8px 0; border-collapse: collapse; }
+.md th, .md td { padding: 6px 8px; border: 1px solid rgba(75,63,50,.16); text-align: left; white-space: nowrap; }
+.md code { border-radius: 5px; padding: 1px 4px; background: rgba(255,255,255,.52); }
+.md pre { overflow-x: auto; padding: 9px; border-radius: 9px; background: rgba(45,39,32,.08); }
+.run-progress { margin-top: 9px; border-top: 1px solid rgba(78,65,50,.12); padding-top: 7px; color: #7b6d60; font-size: 10px; }
+.run-progress summary { cursor: pointer; font-weight: 800; }
+.run-progress ul { margin: 6px 0 0; padding-left: 18px; }
+.run-approval { display: grid; gap: 10px; margin-top: 11px; border: 1px solid rgba(111,83,47,.16); border-radius: 14px; padding: 12px; background: rgba(255,255,255,.6); }
+.run-approval header { display: flex; justify-content: space-between; gap: 8px; }
+.run-approval header small { color: #9b7752; }
+.run-approval article { display: grid; gap: 2px; padding: 7px 0; border-top: 1px solid rgba(111,83,47,.1); }
+.run-approval article small { color: #74685d; line-height: 1.45; }
+.run-approval footer { display: grid; grid-template-columns: 1fr 1.25fr; gap: 7px; }
+.run-approval button { display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #ded1c2; border-radius: 10px; padding: 8px; color: #65584d; background: #fff; font-size: 10px; font-weight: 800; }
+.run-approval button:last-child { border-color: var(--ink); color: #fff; background: var(--ink); }
+.run-approval button svg { width: 14px; height: 14px; padding: 0; background: none; }
+.run-approval__status { margin: 0; color: #807368; font-size: 10px; font-weight: 800; }
+.run-approval__status.is-approved { color: #2f8265; }
 .typing { display: flex; gap: 4px; width: max-content; border-radius: 14px; padding: 10px 12px; background: #f0e8dd; }
 .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); animation: typing 1s ease-in-out infinite; }
 .typing i:nth-child(2) { animation-delay: .15s; }.typing i:nth-child(3) { animation-delay: .3s; }

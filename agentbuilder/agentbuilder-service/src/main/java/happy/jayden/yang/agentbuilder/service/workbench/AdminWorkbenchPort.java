@@ -2,11 +2,16 @@ package happy.jayden.yang.agentbuilder.service.workbench;
 
 import static happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.*;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface AdminWorkbenchPort {
   WorkbenchSnapshot snapshot();
+
+  default List<AgentDraftView> agents() {
+    return snapshot().agents();
+  }
 
   Optional<AgentDraftView> findDraft(String agentKey);
 

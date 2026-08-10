@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, Bot, CheckCircle2, CircleDashed, LoaderCircle, Rocket } from 'lucide-react';
 
 import { ApiError, admin, type AgentDraft, type WorkbenchSnapshot } from '../api';
-import { ChatMarkdown } from '../../components/ChatMarkdown';
+import { AgentRunMessage, consumeAgentRunStream, type AgentRunEvent, type AgentRunUiMessage, type RunApproval } from '../../components/AgentRunMessage';
 import { PageHeading } from '../components/PageHeading';
 
-type ChatMessage = { role: 'user' | 'assistant'; content: string };
+type ChatMessage = AgentRunUiMessage;
 
 type RuntimeReadiness = {
   ready: boolean;
@@ -46,6 +46,7 @@ export function PlaygroundPage() {
   const [selectedAgentKey, setSelectedAgentKey] = useState('');
   const [latestRunId, setLatestRunId] = useState('');
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const activeStream = useRef<AbortController | undefined>(undefined);
 
   const publishedAgents = useMemo(
     () => (snapshot?.agents ?? []).filter((item) => item.publishedVersion > 0),
@@ -57,8 +58,15 @@ export function PlaygroundPage() {
 
   useEffect(() => {
     let active = true;
-    admin.snapshot().then((next) => {
+    Promise.all([admin.listAgents(), admin.listProviders(), admin.listModels(), admin.listTools(), admin.listSkills(), admin.listHooks()]).then(([agents, providers, models, tools, skills, hooks]) => {
       if (!active) return;
+      const components = [
+        ...models.map((item) => ({ type: 'MODEL', componentKey: item.modelKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: { providerKey: item.providerKey } })),
+        ...tools.map((item) => ({ type: 'TOOL', componentKey: item.toolKey, displayName: item.displayName, description: item.description, version: item.contractVersion, status: 'AVAILABLE', tags: [], config: {} })),
+        ...skills.map((item) => ({ type: 'SKILL', componentKey: item.skillKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+        ...hooks.map((item) => ({ type: 'HOOK', componentKey: item.hookKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+      ];
+      const next: WorkbenchSnapshot = { overview: { agentCount: agents.length, platformStatus: 'READY', availableComponents: components.filter((item) => item.status === 'AVAILABLE').length, configuredProviders: providers.filter((item) => item.configured).length, runCount: 0 }, agents, providers, components, runs: [] };
       setSnapshot(next);
       const published = next.agents.filter((item) => item.publishedVersion > 0);
       setSelectedAgentKey((current) => {
@@ -75,6 +83,7 @@ export function PlaygroundPage() {
   useEffect(() => { bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }); }, [trace, sending]);
 
   function selectAgent(agentKey: string) {
+    activeStream.current?.abort();
     setSelectedAgentKey(agentKey);
     setTrace([]);
     setSendError('');
@@ -89,14 +98,12 @@ export function PlaygroundPage() {
     setTrace((current) => [...current, { role: 'user', content: payload }]);
     setMessage('');
     try {
-      const json = await admin.debugMessage(selectedAgent.agentKey, payload);
-      setTrace((current) => [...current, { role: 'assistant', content: json.message ?? '(empty)' }]);
-      try {
-        const runs = await admin.listRuns({ agent: selectedAgent.agentKey, size: 1 });
-        setLatestRunId(runs.items[0]?.runId ?? '');
-      } catch {
-        // The reply remains real even when trace refresh has a separate transient failure.
-      }
+      const run = await admin.createPlaygroundRun(selectedAgent.agentKey, payload, crypto.randomUUID());
+      setLatestRunId(run.runId);
+      setTrace((current) => [...current, { role: 'assistant', content: '', runId: run.runId, progress: ['已创建真实 Run'] }]);
+      const controller = new AbortController();
+      activeStream.current = controller;
+      await consumeAgentRunStream(`/api/v1/admin/playground/runs/${run.runId}/events`, (event) => applyEvent(run.runId, event), controller.signal);
     } catch (caught) {
       const error = caught instanceof ApiError && caught.status === 503
         ? `运行时暂不可用：${caught.message}`
@@ -104,6 +111,35 @@ export function PlaygroundPage() {
       setSendError(error);
       setTrace((current) => [...current, { role: 'assistant', content: `调用失败：${error}` }]);
     } finally { setSending(false); }
+  }
+
+  function applyEvent(runId: string, event: AgentRunEvent) {
+    setTrace((items) => items.map((item) => {
+      if (item.runId !== runId) return item;
+      if (event.type === 'TEXT_DELTA') return { ...item, content: item.content + String(event.data.delta ?? '') };
+      if (event.type === 'RUN_STATE' && event.data.summary) {
+        const progress = [...(item.progress ?? [])];
+        const summary = String(event.data.summary);
+        if (!progress.includes(summary)) progress.push(summary);
+        return { ...item, progress };
+      }
+      if (event.type === 'APPROVAL') {
+        const incoming = event.data as unknown as RunApproval;
+        return { ...item, deciding: false, approval: { ...(item.approval ?? incoming), ...incoming } };
+      }
+      return item;
+    }));
+    if (event.type === 'ERROR') setSendError(String(event.data.message ?? 'AI 运行失败'));
+  }
+
+  async function decide(runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT') {
+    setTrace((items) => items.map((item) => item.runId === runId ? { ...item, deciding: true } : item));
+    try {
+      await admin.decidePlaygroundRunApproval(runId, approvalId, decision, crypto.randomUUID());
+    } catch (caught) {
+      setTrace((items) => items.map((item) => item.runId === runId ? { ...item, deciding: false } : item));
+      setSendError(caught instanceof Error ? caught.message : '确认操作失败');
+    }
   }
 
   return <>
@@ -120,10 +156,10 @@ export function PlaygroundPage() {
           {trace.length ? trace.map((item, index) => (
             <div key={`${item.role}-${index}`} className={`admin-playground__bubble ${item.role === 'user' ? 'is-user' : 'is-assistant'}`}>
               <small>{item.role === 'user' ? '你' : agentName}</small>
-              <ChatMarkdown text={item.content} className="admin-md" />
+              {item.role === 'assistant' ? <AgentRunMessage message={item} markdownClassName="admin-md" onDecision={(approvalId, decision) => item.runId && void decide(item.runId, approvalId, decision)} /> : <span>{item.content}</span>}
             </div>
           )) : <div className="admin-empty"><CircleDashed /><strong>{selectedAgent ? `等待与 ${agentName} 的一次真实对话` : '先发布一个 Agent'}</strong><p>{selectedAgent ? '模型调用、会话上下文与 Run Trace 会一并写入数据库。' : '只有已发布的版本才会进入调试台，避免把草稿配置误用于真实调用。'}</p></div>}
-          {sending && <div className="admin-playground__bubble is-assistant is-thinking"><small>{agentName}</small><p><LoaderCircle className="is-spin" /> 正在思考…</p></div>}
+          {sending && trace.at(-1)?.role !== 'assistant' && <div className="admin-playground__bubble is-assistant is-thinking"><small>{agentName}</small><p><LoaderCircle className="is-spin" /> 正在思考…</p></div>}
           {sendError && <p className="admin-form-error"><AlertTriangle />{sendError}</p>}
           {latestRunId && <p className="admin-success-row"><CheckCircle2 />真实 Run 已写入 <Link to={`/admin/runs/${latestRunId}`}>查看 Trace</Link></p>}
         </div>

@@ -18,11 +18,13 @@ import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestExcepti
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** Public v1 resource root — deliberately separate from legacy local experience endpoints. */
 @RestController
@@ -42,13 +45,145 @@ public class FitnessV1Controller {
   private final FitnessApplicationService application;
   private final MediaUploadPort media;
   private final ObjectMapper mapper;
+  private final FitnessAgentRunService agentRuns;
 
   public FitnessV1Controller(
-      FitnessApplicationService application, MediaUploadPort media, ObjectMapper mapper) {
+      FitnessApplicationService application,
+      MediaUploadPort media,
+      ObjectMapper mapper,
+      FitnessAgentRunService agentRuns) {
     this.application = application;
     this.media = media;
     this.mapper = mapper;
+    this.agentRuns = agentRuns;
   }
+
+  @PostMapping("/ai/runs")
+  ResponseEntity<FitnessAgentRunService.RunAccepted> createAiRun(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody CreateAiRunBody request) {
+    if (key == null || key.isBlank()) throw new InvalidRequestException("Idempotency-Key 必填");
+    var run = agentRuns.startUser(token, request == null ? null : request.text());
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .header(HttpHeaders.LOCATION, "/api/v1/app/ai/runs/" + run.runId())
+        .header(HttpHeaders.RETRY_AFTER, "1")
+        .body(run);
+  }
+
+  @GetMapping(value = "/ai/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+  SseEmitter streamAiRun(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @PathVariable("runId") UUID runId,
+      @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId) {
+    return agentRuns.streamUser(token, runId, lastEventId);
+  }
+
+  @PostMapping("/ai/runs/{runId}/approvals/{approvalId}")
+  FitnessAgentRunService.RunAccepted decideAiRunApproval(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @PathVariable("runId") UUID runId,
+      @PathVariable("approvalId") UUID approvalId,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody ApprovalDecisionBody request) {
+    return agentRuns.decideUser(
+        token, runId, approvalId, request == null ? null : request.decision(), key);
+  }
+
+  record CreateAiRunBody(String text, UUID clientMessageId) {}
+
+  record ApprovalDecisionBody(String decision) {}
+
+  @GetMapping("/workout-plans")
+  WorkoutPlanPage workoutPlans(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @RequestParam(name = "from", required = false) java.time.LocalDate from,
+      @RequestParam(name = "to", required = false) java.time.LocalDate to,
+      @RequestParam(name = "cursor", required = false) String cursor,
+      @RequestParam(name = "pageSize", required = false) Integer pageSize) {
+    java.time.LocalDate start = from == null ? java.time.LocalDate.now() : from;
+    java.time.LocalDate end = to == null ? start : to;
+    if (end.isBefore(start) || end.isAfter(start.plusDays(31))) {
+      throw new InvalidRequestException("训练计划查询日期范围不合法");
+    }
+    var items = new java.util.ArrayList<WorkoutPlanSummary>();
+    for (var date = start; !date.isAfter(end); date = date.plusDays(1)) {
+      var plan = application.trainingPlan(token, date);
+      if (plan != null) {
+        items.add(
+            new WorkoutPlanSummary(
+                plan.id(),
+                plan.title(),
+                date,
+                plan.status(),
+                plan.exercises().size(),
+                plan.estimatedMinutes(),
+                1));
+      }
+    }
+    return new WorkoutPlanPage(List.copyOf(items), new CursorPage(false));
+  }
+
+  @GetMapping("/workout-plans/{workoutPlanId}")
+  WorkoutPlanDetail workoutPlan(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @PathVariable("workoutPlanId") UUID workoutPlanId) {
+    var plan = application.trainingPlan(token, workoutPlanId);
+    var exercises = new java.util.ArrayList<WorkoutPlanExercise>();
+    for (int index = 0; index < plan.exercises().size(); index++) {
+      var exercise = plan.exercises().get(index);
+      exercises.add(
+          new WorkoutPlanExercise(
+              index + 1,
+              exercise.id(),
+              exercise.name(),
+              exercise.sets(),
+              0,
+              exercise.seconds(),
+              0,
+              exercise.steps()));
+    }
+    return new WorkoutPlanDetail(
+        plan.id(),
+        plan.title(),
+        plan.scheduledFor(),
+        plan.status(),
+        plan.estimatedMinutes(),
+        List.copyOf(exercises),
+        1);
+  }
+
+  record CursorPage(boolean hasMore) {}
+
+  record WorkoutPlanPage(List<WorkoutPlanSummary> items, CursorPage page) {}
+
+  record WorkoutPlanSummary(
+      UUID workoutPlanId,
+      String title,
+      java.time.LocalDate scheduledDate,
+      String state,
+      int exerciseCount,
+      int estimatedMinutes,
+      int version) {}
+
+  record WorkoutPlanDetail(
+      UUID workoutPlanId,
+      String title,
+      java.time.LocalDate scheduledDate,
+      String state,
+      int estimatedMinutes,
+      List<WorkoutPlanExercise> exercises,
+      int version) {}
+
+  record WorkoutPlanExercise(
+      int position,
+      UUID exerciseId,
+      String name,
+      int sets,
+      int repetitions,
+      int durationSeconds,
+      int restSeconds,
+      List<String> voiceCues) {}
 
   @PostMapping("/media-upload-tickets")
   ResponseEntity<MediaUploadTicket> ticket(

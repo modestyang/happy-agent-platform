@@ -36,6 +36,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackD
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.SaveTrainingPlanRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
@@ -824,6 +825,38 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   @Override
+  public List<UUID> saveTrainingPlan(UUID userId, SaveTrainingPlanRequest request) {
+    var planIds = new java.util.ArrayList<UUID>();
+    for (var day : request.days()) {
+      jdbc.update(
+          "DELETE FROM workout_plans WHERE user_id=? AND scheduled_for=? AND status<>'COMPLETED'",
+          userId,
+          day.scheduledFor());
+      UUID planId =
+          UUID.nameUUIDFromBytes(
+              (request.approvalId() + ":" + day.scheduledFor())
+                  .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      jdbc.update(
+          "INSERT INTO workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for)"
+              + " VALUES (?,?,?,?, 'PLANNED',?)",
+          planId,
+          userId,
+          day.title().trim(),
+          day.estimatedMinutes(),
+          day.scheduledFor());
+      for (int index = 0; index < day.exerciseIds().size(); index++) {
+        jdbc.update(
+            "INSERT INTO workout_plan_exercises(workout_plan_id,exercise_id,display_order) VALUES (?,?,?)",
+            planId,
+            day.exerciseIds().get(index),
+            index + 1);
+      }
+      planIds.add(planId);
+    }
+    return List.copyOf(planIds);
+  }
+
+  @Override
   public GoalState createGoal(UUID userId, CreateGoalRequest request) {
     BigDecimal current =
         jdbc
@@ -1138,15 +1171,38 @@ public final class JdbcFitnessStore implements FitnessStore {
                         rs.getString("title"),
                         rs.getInt("estimated_minutes"),
                         rs.getString("status"),
+                        scheduledFor,
                         List.of()),
                 userId,
                 scheduledFor)
             .stream()
             .findFirst()
             .orElse(null);
-    if (base == null) {
-      return null;
-    }
+    return base == null ? null : withPlanExercises(base);
+  }
+
+  @Override
+  public Optional<PlanDto> findTrainingPlan(UUID userId, UUID workoutPlanId) {
+    return jdbc
+        .query(
+            "SELECT workout_plan_id,title,estimated_minutes,status,scheduled_for FROM workout_plans"
+                + " WHERE user_id=? AND workout_plan_id=?",
+            (rs, row) ->
+                new PlanDto(
+                    rs.getObject("workout_plan_id", UUID.class),
+                    rs.getString("title"),
+                    rs.getInt("estimated_minutes"),
+                    rs.getString("status"),
+                    rs.getObject("scheduled_for", LocalDate.class),
+                    List.of()),
+            userId,
+            workoutPlanId)
+        .stream()
+        .findFirst()
+        .map(this::withPlanExercises);
+  }
+
+  private PlanDto withPlanExercises(PlanDto base) {
     List<PlanExerciseDto> exercises =
         jdbc.query(
             "SELECT e.exercise_id,e.name,e.target_area,e.sets,e.seconds,e.steps,e.errors FROM"
@@ -1162,7 +1218,13 @@ public final class JdbcFitnessStore implements FitnessStore {
                     strings(rs.getString("steps")),
                     strings(rs.getString("errors"))),
             base.id());
-    return new PlanDto(base.id(), base.title(), base.estimatedMinutes(), base.status(), exercises);
+    return new PlanDto(
+        base.id(),
+        base.title(),
+        base.estimatedMinutes(),
+        base.status(),
+        base.scheduledFor(),
+        exercises);
   }
 
   private List<ExerciseDto> exerciseDetails() {

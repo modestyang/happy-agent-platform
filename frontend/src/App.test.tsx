@@ -38,7 +38,8 @@ describe('App', () => {
       if (overrides[path] !== undefined) return new Response(JSON.stringify(overrides[path]), { status: 200 });
       if (path === '/api/app/bootstrap') return new Response(JSON.stringify(dashboard), { status: 200 });
       if (path === '/api/local/login') return new Response(JSON.stringify({ username: '小秦' }), { status: 200 });
-      if (path === '/api/app/ai/messages') return new Response(JSON.stringify({ code: 'DEPENDENCY_NOT_CONFIGURED' }), { status: 503 });
+      if (path === '/api/v1/app/ai/runs') return new Response(JSON.stringify({ code: 'DEPENDENCY_NOT_CONFIGURED' }), { status: 503 });
+      if (path.startsWith('/api/v1/app/workout-plans?')) return new Response(JSON.stringify({ items: [], page: { hasMore: false } }), { status: 200 });
       return new Response('{}', { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -98,7 +99,7 @@ describe('App', () => {
   });
 
   it('shows an honest empty state when today has no meal recommendation', async () => {
-    mockFetch({ '/api/app/bootstrap': { ...dashboard, mealRecommendations: [] } });
+    const fetchMock = mockFetch({ '/api/app/bootstrap': { ...dashboard, mealRecommendations: [] } });
     const user = userEvent.setup();
     render(<App />);
 
@@ -106,6 +107,12 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '饮食' })).toHaveTextContent('今日建议尚未生成');
     await user.click(screen.getByRole('button', { name: '饮食' }));
     expect(await screen.findByRole('heading', { name: '今天还没有饮食建议' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '立即生成三餐建议' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/app/meal-plans/daily/generate',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    expect(screen.getByText('正在生成三餐建议…')).toBeInTheDocument();
   });
 
   it('offers AI generation only for a future date without a plan', async () => {
@@ -124,10 +131,10 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: /AI 生成训练计划/ })).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: /AI 生成训练计划/ }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/app/ai/runs', expect.objectContaining({ method: 'POST' })));
     const calls = fetchMock.mock.calls as unknown as [RequestInfo | URL, RequestInit?][];
-    const aiCall = calls.find(([path]) => path === '/api/app/ai/messages');
-    expect(JSON.parse(String(aiCall?.[1]?.body)).message).toContain('训练计划');
+    const aiCall = calls.find(([path]) => path === '/api/v1/app/ai/runs');
+    expect(JSON.parse(String(aiCall?.[1]?.body)).text).toContain('训练计划');
   });
 
   it('logs in with the supplied credentials then loads the app', async () => {
@@ -159,7 +166,7 @@ describe('App', () => {
       ai: { configured: false, reason: '请在 Agent 工作台配置模型 Provider' },
     };
     let bootstrapCalls = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === '/api/app/bootstrap') {
         bootstrapCalls += 1;
@@ -270,7 +277,7 @@ describe('App', () => {
 
     await user.click(screen.getByRole('link', { name: '花爷' }));
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/app/ai/messages', expect.objectContaining({ method: 'POST', body: JSON.stringify({ message: '根据我的计划，告诉我今天怎么练' }) })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/app/ai/runs', expect.objectContaining({ method: 'POST' })));
     expect(await screen.findByText(/花爷还没接上大模型/)).toBeInTheDocument();
   });
 
@@ -504,7 +511,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === '/api/app/bootstrap') return new Response(JSON.stringify(dashboard), { status: 200 });
-      if (path === '/api/app/ai/messages') return new Promise<Response>((resolve) => { resolveAi = resolve; });
+      if (path === '/api/v1/app/ai/runs') return new Promise<Response>((resolve) => { resolveAi = resolve; });
       return new Response('{}', { status: 200 });
     }));
     const user = userEvent.setup();
@@ -514,7 +521,7 @@ describe('App', () => {
     await user.click(screen.getByRole('link', { name: '花爷' }));
     await user.click(await screen.findByRole('button', { name: /今天怎么练/ }));
     await user.click(screen.getByRole('button', { name: '新建会话' }));
-    resolveAi?.(new Response(JSON.stringify({ message: '旧会话迟到的回复' }), { status: 200 }));
+    resolveAi?.(new Response(JSON.stringify({ runId: 'old-run', sessionId: 'old-session', status: 'RUNNING', eventStreamUrl: '/old-events', result: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), { status: 202 }));
 
     await waitFor(() => expect(screen.getByRole('region', { name: '花爷快捷能力' })).toBeInTheDocument());
     expect(screen.queryByText('旧会话迟到的回复')).not.toBeInTheDocument();

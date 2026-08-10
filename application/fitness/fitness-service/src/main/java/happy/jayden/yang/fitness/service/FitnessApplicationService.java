@@ -29,6 +29,7 @@ import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfigur
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConflictException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
+import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.UnauthorizedException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
@@ -235,6 +236,17 @@ public final class FitnessApplicationService {
 
   public UUID authenticateSession(String sessionToken) {
     return authenticate(sessionToken);
+  }
+
+  public FitnessDtos.PlanDto trainingPlan(String sessionToken, LocalDate scheduledFor) {
+    LocalDate date = scheduledFor == null ? LocalDate.now(USER_ZONE) : scheduledFor;
+    return store.loadBootstrap(authenticate(sessionToken), date).plan();
+  }
+
+  public FitnessDtos.PlanDto trainingPlan(String sessionToken, UUID workoutPlanId) {
+    return store
+        .findTrainingPlan(authenticate(sessionToken), workoutPlanId)
+        .orElseThrow(() -> new NotFoundException("训练计划不存在"));
   }
 
   public void completeFirstSetup(String sessionToken, FirstSetupRequest request) {
@@ -965,6 +977,50 @@ public final class FitnessApplicationService {
     return store.completeWorkout(authenticate(sessionToken), workoutId, request);
   }
 
+  public FitnessDtos.SavedTrainingPlanResult saveTrainingPlan(
+      UUID userId, FitnessDtos.SaveTrainingPlanRequest request) {
+    if (userId == null
+        || request == null
+        || request.approvalId() == null
+        || request.days() == null
+        || !("DAY".equals(request.scope()) || "WEEK".equals(request.scope()))) {
+      throw new InvalidRequestException("训练计划保存参数不完整");
+    }
+    int expectedDays = "DAY".equals(request.scope()) ? 1 : 7;
+    if (request.days().size() != expectedDays) {
+      throw new InvalidRequestException("DAY 必须包含 1 天，WEEK 必须包含连续 7 天");
+    }
+    LocalDate today = LocalDate.now(USER_ZONE);
+    var availableExercises =
+        store.loadForAi(userId).exercises().stream()
+            .map(FitnessDtos.ExerciseDto::id)
+            .collect(java.util.stream.Collectors.toSet());
+    LocalDate previous = null;
+    for (var day : request.days()) {
+      if (day == null
+          || day.scheduledFor() == null
+          || day.scheduledFor().isBefore(today)
+          || day.scheduledFor().isAfter(today.plusYears(1))
+          || blank(day.title())
+          || day.title().trim().length() > 160
+          || day.estimatedMinutes() < 1
+          || day.estimatedMinutes() > 240
+          || day.exerciseIds() == null
+          || day.exerciseIds().isEmpty()
+          || day.exerciseIds().size() > 12
+          || day.exerciseIds().stream().distinct().count() != day.exerciseIds().size()
+          || !availableExercises.containsAll(day.exerciseIds())) {
+        throw new InvalidRequestException("训练计划日期、时长或动作不合法");
+      }
+      if (previous != null && !day.scheduledFor().equals(previous.plusDays(1))) {
+        throw new InvalidRequestException("周计划日期必须连续且按升序排列");
+      }
+      previous = day.scheduledFor();
+    }
+    return transactionRunner.inTransaction(
+        () -> new FitnessDtos.SavedTrainingPlanResult(store.saveTrainingPlan(userId, request)));
+  }
+
   public GoalDto createGoal(String sessionToken, CreateGoalRequest request) {
     UUID userId = authenticate(sessionToken);
     if (request == null || blank(request.name()) || request.targetWeightJin() == null) {
@@ -989,11 +1045,13 @@ public final class FitnessApplicationService {
    * impersonate a fitness-app browser session.
    */
   public AiMessageResponse sendAiMessageForDeveloper(String message) {
-    UUID userId =
-        store.activeUserIds().stream()
-            .findFirst()
-            .orElseThrow(() -> new InvalidRequestException("没有可用于调试的本地用户数据"));
-    return sendAiMessageForUser(userId, message);
+    return sendAiMessageForUser(developerUserId(), message);
+  }
+
+  public UUID developerUserId() {
+    return store.activeUserIds().stream()
+        .findFirst()
+        .orElseThrow(() -> new InvalidRequestException("没有可用于调试的本地用户数据"));
   }
 
   private AiMessageResponse sendAiMessageForUser(UUID userId, String message) {

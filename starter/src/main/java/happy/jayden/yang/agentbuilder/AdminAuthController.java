@@ -26,10 +26,16 @@ public class AdminAuthController {
 
   @PostMapping("/login")
   ResponseEntity<SessionResponse> login(@RequestBody LoginBody request) {
-    if (request == null || request.password() == null) throw new AdminAuthService.AdminAuthenticationException();
-    var session = auth.login(new AdminAuthService.LoginRequest(request.username(), request.password().toCharArray()));
+    if (request == null || request.password() == null)
+      throw new AdminAuthService.AdminAuthenticationException();
+    var session =
+        auth.login(
+            new AdminAuthService.LoginRequest(
+                request.username(), request.password().toCharArray()));
     return ResponseEntity.ok()
-        .header(HttpHeaders.SET_COOKIE, sessionCookie(session.sessionToken(), Duration.ofDays(14)).toString())
+        .header(
+            HttpHeaders.SET_COOKIE,
+            sessionCookie(session.sessionToken(), Duration.ofDays(14)).toString())
         .body(new SessionResponse(session.username()));
   }
 

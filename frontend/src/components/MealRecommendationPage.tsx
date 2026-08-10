@@ -54,7 +54,7 @@ export function recommendationKcal(recommendation?: MealRecommendation) {
   return recommendation?.items.reduce((total, item) => total + item.estimatedKcal, 0) ?? 0;
 }
 
-export function MealRecommendationPage({ recommendations, now = new Date() }: { recommendations: MealRecommendation[]; now?: Date }) {
+export function MealRecommendationPage({ recommendations, now = new Date(), onGenerated }: { recommendations: MealRecommendation[]; now?: Date; onGenerated?: () => Promise<void> }) {
   const navigate = useNavigate();
   const nextType = nextMealType(now);
   const mealTypes: MealRecommendation['mealType'][] = ['BREAKFAST', 'LUNCH', 'DINNER'];
@@ -65,6 +65,8 @@ export function MealRecommendationPage({ recommendations, now = new Date() }: { 
   const [dislikeId, setDislikeId] = useState<string>();
   const [reason, setReason] = useState<FeedbackReason>();
   const [note, setNote] = useState('');
+  const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'failed'>('idle');
+  const [generationError, setGenerationError] = useState('');
   const requestSequence = useRef<Record<string, number>>({});
   const dislikeButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<HTMLButtonElement | null>(null);
@@ -140,6 +142,31 @@ export function MealRecommendationPage({ recommendations, now = new Date() }: { 
   };
   const selectedDislike = recommendations.find((item) => item.id === dislikeId);
 
+  const generate = async () => {
+    setGenerationState('generating');
+    setGenerationError('');
+    const date = localDate(now);
+    try {
+      const plan = await api.generateDailyMealPlan(date, idempotencyKey());
+      if (plan.status === 'READY') {
+        await onGenerated?.();
+        setGenerationState('idle');
+        return;
+      }
+      if (plan.status === 'FAILED') {
+        setGenerationState('failed');
+        setGenerationError(plan.failure.message);
+        return;
+      }
+      if (plan.status === 'GENERATING') {
+        void pollGenerated(date, onGenerated, setGenerationState, setGenerationError);
+      }
+    } catch (cause) {
+      setGenerationState('failed');
+      setGenerationError(feedbackMessage(cause));
+    }
+  };
+
   return <section className="page meal-page">
     <header className="subpage-head">
       <button aria-label="返回首页" onClick={() => navigate('/')}><ArrowLeft /></button>
@@ -159,7 +186,7 @@ export function MealRecommendationPage({ recommendations, now = new Date() }: { 
         </article>;
       })}</div>
       {selectedDislike && <aside className="meal-feedback-sheet" ref={feedbackDialog} role="dialog" aria-modal="true" aria-labelledby="meal-feedback-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeDislike(); } }}><div><strong id="meal-feedback-title">这餐哪里不合适？</strong><button type="button" aria-label="关闭反馈面板" onClick={closeDislike}>×</button></div><div className="meal-feedback-reasons">{feedbackReasons.map((item) => <button type="button" key={item.value} aria-pressed={reason === item.value} onClick={() => setReason(item.value)}>{item.label}</button>)}</div>{reason === 'OTHER' && <label>补充说明<textarea aria-label="其他原因说明" value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} /></label>}<button type="button" className="primary" disabled={!reason || (reason === 'OTHER' && !note.trim()) || pendingIds.has(selectedDislike.id)} onClick={() => void submitDislike()}>{pendingIds.has(selectedDislike.id) ? '正在提交…' : '提交反馈'}</button></aside>}
-    </> : <section className="empty-card meal-empty"><span><ChefHat /></span><h2>今天还没有饮食建议</h2><p>推荐生成后会在这里展示三餐安排，现在不会用假数据凑一份菜单。</p></section>}
+    </> : <section className="empty-card meal-empty"><span><ChefHat /></span><h2>今天还没有饮食建议</h2><p>让花爷结合你的目标和近期反馈，认真生成今天的三餐。</p>{generationState === 'generating' ? <p className="meal-generation-status"><Sparkles /> 正在生成三餐建议…</p> : <button type="button" className="primary" onClick={() => void generate()}>{generationState === 'failed' ? '重新生成' : '立即生成三餐建议'}</button>}{generationError && <p className="meal-feedback-error" role="alert">{generationError}</p>}</section>}
   </section>;
 }
 
@@ -169,6 +196,39 @@ function feedbackFrom(recommendations: MealRecommendation[]) {
 
 function idempotencyKey() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function localDate(value: Date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+}
+
+async function pollGenerated(
+  date: string,
+  onGenerated: (() => Promise<void>) | undefined,
+  setState: (value: 'idle' | 'generating' | 'failed') => void,
+  setError: (value: string) => void,
+) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    try {
+      const plan = await api.dailyMealPlan(date);
+      if (plan.status === 'READY') {
+        await onGenerated?.();
+        setState('idle');
+        return;
+      }
+      if (plan.status === 'FAILED') {
+        setState('failed');
+        setError(plan.failure.message);
+        return;
+      }
+    } catch (cause) {
+      if (attempt === 59) {
+        setState('failed');
+        setError(feedbackMessage(cause));
+      }
+    }
+  }
 }
 
 function feedbackMessage(cause: unknown) {

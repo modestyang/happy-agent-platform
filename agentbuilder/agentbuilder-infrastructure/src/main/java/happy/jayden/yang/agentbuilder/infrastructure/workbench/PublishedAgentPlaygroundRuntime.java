@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -35,7 +36,10 @@ public final class PublishedAgentPlaygroundRuntime {
   private final JdbcRunTraceRepository traces;
 
   public PublishedAgentPlaygroundRuntime(
-      DataSource dataSource, ObjectMapper mapper, Path masterKeyFile, JdbcRunTraceRepository traces) {
+      DataSource dataSource,
+      ObjectMapper mapper,
+      Path masterKeyFile,
+      JdbcRunTraceRepository traces) {
     this.jdbc = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource"));
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.masterKeyFile = Objects.requireNonNull(masterKeyFile, "masterKeyFile").toAbsolutePath();
@@ -85,23 +89,14 @@ public final class PublishedAgentPlaygroundRuntime {
       messages.add(Map.of("role", "user", "content", message.trim()));
       try (StreamingChatClient client =
           new StreamingChatClient(config.endpoint(), config.modelKey(), apiKey)) {
-        StringBuilder answer = new StringBuilder();
-        var result =
-            client.stream(
-                messages,
-                config.temperature(),
-                1500,
-                chunk -> {
-                  if (chunk.delta().isEmpty()) return;
-                  answer.append(chunk.delta());
-                  traces.appendEvent(
-                      runId, ++sequence[0], "TOKEN", "delta", truncate(chunk.delta(), 250));
-                });
-        String response = answer.toString().trim();
+        var result = client.stream(messages, config.temperature(), 1500, chunk -> {});
+        String response = result.text().trim();
         if (response.isEmpty()) throw new IllegalStateException("AI 返回内容为空");
+        traces.appendEvent(runId, ++sequence[0], "TOKEN", "model output", truncate(response, 250));
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-        traces.appendEvent(runId, ++sequence[0], "RUN_COMPLETED", "执行完成", "durationMs=" + durationMs);
+        traces.appendEvent(
+            runId, ++sequence[0], "RUN_COMPLETED", "执行完成", "durationMs=" + durationMs);
         traces.markCompleted(
             runId,
             "SUCCEEDED",
@@ -128,6 +123,125 @@ public final class PublishedAgentPlaygroundRuntime {
     }
   }
 
+  /** Starts a durable streamed run for any immutable published Agent snapshot. */
+  public StreamingRun startStreaming(String agentKey, String message, Executor executor) {
+    if (agentKey == null || agentKey.isBlank()) throw new IllegalArgumentException("agentKey 必填");
+    if (message == null || message.isBlank()) throw new IllegalArgumentException("message 不能为空");
+    Objects.requireNonNull(executor, "executor");
+    RuntimeConfig config = load(agentKey.trim());
+    Instant startedAt = Instant.now();
+    UUID runId = UUID.randomUUID();
+    var conversation = traces.resolveConversation(DEVELOPER_USER_ID, config.agentKey(), startedAt);
+    List<ConversationMessage> history =
+        traces.recentConversationMessages(conversation.conversationId(), 20);
+    traces.insertRun(
+        runId,
+        DEVELOPER_USER_ID,
+        conversation.conversationId(),
+        config.agentKey(),
+        config.version(),
+        config.frameworkKey(),
+        config.modelKey(),
+        truncate(message, 1000));
+    traces.appendConversationMessage(
+        conversation.conversationId(), runId, "USER", message.trim(), startedAt);
+    long[] sequence = {0};
+    traces.appendEvent(
+        runId,
+        ++sequence[0],
+        "RUN_STARTED",
+        "开始调试",
+        "agent=" + config.agentKey() + ",version=" + config.version());
+    traces.appendEvent(
+        runId,
+        ++sequence[0],
+        "CONVERSATION_CONTEXT",
+        "已载入会话上下文",
+        "historyMessages=" + history.size());
+    traces.appendStreamEvent(
+        runId, "RUN_STATE", Map.of("status", "RUNNING", "summary", "已建立运行上下文"));
+    executor.execute(
+        () ->
+            executeStreaming(
+                config,
+                message.trim(),
+                history,
+                runId,
+                conversation.conversationId(),
+                startedAt,
+                sequence));
+    return new StreamingRun(
+        runId,
+        conversation.conversationId(),
+        config.agentKey(),
+        config.version(),
+        "RUNNING",
+        startedAt);
+  }
+
+  private void executeStreaming(
+      RuntimeConfig config,
+      String message,
+      List<ConversationMessage> history,
+      UUID runId,
+      UUID conversationId,
+      Instant startedAt,
+      long[] sequence) {
+    char[] apiKey = null;
+    try {
+      apiKey = decrypt(config);
+      var messages = new ArrayList<Map<String, Object>>();
+      messages.add(Map.of("role", "system", "content", config.systemPrompt()));
+      appendHistory(messages, history);
+      messages.add(Map.of("role", "user", "content", message));
+      try (StreamingChatClient client =
+          new StreamingChatClient(config.endpoint(), config.modelKey(), apiKey)) {
+        var result =
+            client.stream(
+                messages,
+                config.temperature(),
+                1500,
+                chunk -> {
+                  if (!chunk.delta().isEmpty()) {
+                    traces.appendStreamEvent(
+                        runId,
+                        "TEXT_DELTA",
+                        Map.of("messageId", runId.toString(), "delta", chunk.delta()));
+                  }
+                });
+        String response = result.text().trim();
+        if (response.isEmpty()) throw new IllegalStateException("AI 返回内容为空");
+        traces.appendEvent(runId, ++sequence[0], "TOKEN", "model output", truncate(response, 250));
+        Instant completedAt = Instant.now();
+        long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
+        traces.appendEvent(
+            runId, ++sequence[0], "RUN_COMPLETED", "执行完成", "durationMs=" + durationMs);
+        traces.markCompleted(
+            runId,
+            "SUCCEEDED",
+            completedAt,
+            durationMs,
+            0,
+            result.usage().promptTokens(),
+            result.usage().completionTokens(),
+            0,
+            config.modelKey(),
+            null,
+            null,
+            truncate(response, 1500));
+        traces.appendConversationMessage(conversationId, runId, "ASSISTANT", response, completedAt);
+        traces.appendStreamEvent(runId, "COMPLETED", Map.of("status", "SUCCEEDED"));
+      }
+    } catch (RuntimeException exception) {
+      failure(runId, conversationId, sequence, exception.getMessage());
+      traces.appendStreamEvent(
+          runId, "ERROR", Map.of("message", safeMessage(exception.getMessage())));
+      traces.appendStreamEvent(runId, "COMPLETED", Map.of("status", "FAILED"));
+    } finally {
+      if (apiKey != null) Arrays.fill(apiKey, '\0');
+    }
+  }
+
   private RuntimeConfig load(String agentKey) {
     var rows =
         jdbc.query(
@@ -145,7 +259,9 @@ public final class PublishedAgentPlaygroundRuntime {
       JsonNode credential = object(runtime, "credential", "已发布版本缺少 Provider 凭据快照，请重新发布");
       String providerKey = text(provider, "key", "Provider 快照不完整");
       String modelKey = text(model, "key", "模型快照不完整");
-      String endpoint = text(object(provider, "config", "Provider 配置缺失"), "endpoint", "Provider 未配置 endpoint").replaceAll("/+$", "");
+      String endpoint =
+          text(object(provider, "config", "Provider 配置缺失"), "endpoint", "Provider 未配置 endpoint")
+              .replaceAll("/+$", "");
       String modelName = optional(object(model, "config", "模型配置缺失"), "model", modelKey);
       String promptText = text(object(prompt, "config", "提示词配置缺失"), "template", "提示词模板为空");
       return new RuntimeConfig(
@@ -176,7 +292,8 @@ public final class PublishedAgentPlaygroundRuntime {
     try {
       var ref =
           new ComponentRef(
-              new ComponentKey(config.providerKey()), new ComponentVersion(config.credentialVersion()));
+              new ComponentKey(config.providerKey()),
+              new ComponentVersion(config.credentialVersion()));
       var cipher =
           AesGcmCredentialCipher.fromEnvironment(
               Map.of(AesGcmCredentialCipher.MASTER_KEY_FILE, masterKeyFile.toString()), ref);
@@ -190,15 +307,19 @@ public final class PublishedAgentPlaygroundRuntime {
   private void failure(UUID runId, UUID conversationId, long[] sequence, String error) {
     Instant completedAt = Instant.now();
     traces.appendEvent(runId, ++sequence[0], "RUN_FAILED", "执行失败", truncate(error, 500));
-    traces.markCompleted(runId, "FAILED", completedAt, 0, 0, 0, 0, 0, null, "RUNTIME_ERROR", safeMessage(error), "");
+    traces.markCompleted(
+        runId, "FAILED", completedAt, 0, 0, 0, 0, 0, null, "RUNTIME_ERROR", safeMessage(error), "");
     traces.appendConversationMessage(
         conversationId, runId, "ASSISTANT", "本次请求暂未完成，请稍后重试。", completedAt);
   }
 
-  private static void appendHistory(List<Map<String, Object>> messages, List<ConversationMessage> history) {
+  private static void appendHistory(
+      List<Map<String, Object>> messages, List<ConversationMessage> history) {
     for (var item : history) {
-      if ("USER".equals(item.role())) messages.add(Map.of("role", "user", "content", item.content()));
-      if ("ASSISTANT".equals(item.role())) messages.add(Map.of("role", "assistant", "content", item.content()));
+      if ("USER".equals(item.role()))
+        messages.add(Map.of("role", "user", "content", item.content()));
+      if ("ASSISTANT".equals(item.role()))
+        messages.add(Map.of("role", "assistant", "content", item.content()));
     }
   }
 
@@ -246,6 +367,14 @@ public final class PublishedAgentPlaygroundRuntime {
       int credentialVersion,
       String ciphertext,
       String iv) {}
+
+  public record StreamingRun(
+      UUID runId,
+      UUID conversationId,
+      String agentKey,
+      int agentVersion,
+      String status,
+      Instant createdAt) {}
 
   public static final class PlaygroundRuntimeUnavailableException extends RuntimeException {
     public PlaygroundRuntimeUnavailableException(String message) {

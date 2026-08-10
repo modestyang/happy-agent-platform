@@ -26,11 +26,33 @@ export function Overview() {
 
   useEffect(() => {
     let mounted = true;
-    admin.snapshot().then(setSnapshot).catch((caught) => mounted && setError(String(caught)));
+    Promise.allSettled([
+      admin.listAgents(), admin.listProviders(), admin.listModels(), admin.listPrompts(),
+      admin.listTools(), admin.listSkills(), admin.listHooks(), admin.listFrameworks(),
+      admin.listMemories(), admin.listRuns({ page: 0, size: 4 }),
+    ]).then((results) => {
+      if (!mounted) return;
+      const value = <T,>(index: number, fallback: T): T => results[index].status === 'fulfilled' ? results[index].value as T : fallback;
+      const agents = value(0, []); const providers = value(1, []); const models = value(2, []);
+      const prompts = value(3, []); const tools = value(4, []); const skills = value(5, []);
+      const hooks = value(6, []); const frameworks = value(7, []); const memories = value(8, []);
+      const runs = value(9, { items: [], totalElements: 0, totalPages: 0, page: 0, size: 4 });
+      const components = [
+        ...models.map((item: import('../api').Model) => ({ type: 'MODEL', componentKey: item.modelKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: { providerKey: item.providerKey } })),
+        ...prompts.map((item: import('../api').Prompt) => ({ type: 'PROMPT', componentKey: item.promptKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+        ...tools.map((item: import('../api').Tool) => ({ type: 'TOOL', componentKey: item.toolKey, displayName: item.displayName, description: item.description, version: item.contractVersion, status: 'AVAILABLE', tags: [], config: {} })),
+        ...skills.map((item: import('../api').Skill) => ({ type: 'SKILL', componentKey: item.skillKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+        ...hooks.map((item: import('../api').Hook) => ({ type: 'HOOK', componentKey: item.hookKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+        ...frameworks.map((item: import('../api').Framework) => ({ type: 'FRAMEWORK', componentKey: item.frameworkKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: item.capabilities })),
+        ...memories.map((item: import('../api').Memory) => ({ type: 'MEMORY', componentKey: item.memoryKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+      ];
+      setSnapshot({ overview: { agentCount: agents.length, platformStatus: providers.some((item: import('../api').Provider) => item.configured) ? 'READY' : 'DEGRADED', availableComponents: components.filter((item) => item.status === 'AVAILABLE').length, configuredProviders: providers.filter((item: import('../api').Provider) => item.configured).length, runCount: runs.totalElements }, agents, providers, components, runs: runs.items });
+      const failures = results.filter((item) => item.status === 'rejected').length;
+      setError(failures ? `${failures} 项数据暂时不可用，其他区域仍可正常使用。` : '');
+    });
     return () => { mounted = false; };
   }, []);
 
-  if (error) return <main className="admin-load"><div className="admin-load__error">{error}</div></main>;
   if (!snapshot) return <main className="admin-load"><div><span>正在加载…</span></div></main>;
 
   const agent = snapshot.agents[0];
@@ -40,10 +62,11 @@ export function Overview() {
     : '尚未发布';
 
   return <>
+    {error && <p className="admin-form-error">{error}</p>}
     <PageHeading eyebrow="工作台概览" title="Agent 工作台" description="从配置、发布到运行追踪，都在同一个清晰的工作面里。" action={<button className="admin-primary" onClick={() => navigate('/admin/agents')}><Settings2 /> 配置 Agent</button>} />
     <section className="admin-kpis">
       <article className="admin-kpi admin-kpi--coral"><span><Bot /></span><div><small>Agent</small><strong>{snapshot.overview.agentCount}</strong><p>{releaseState}</p></div></article>
-      <article className="admin-kpi admin-kpi--blue"><span><Blocks /></span><div><small>可用组件</small><strong>{snapshot.overview.availableComponents}</strong><p>共 {snapshot.components.length} 个已登记</p></div></article>
+      <article className="admin-kpi admin-kpi--blue"><span><Blocks /></span><div><small>可用能力</small><strong>{snapshot.overview.availableComponents}</strong><p>共 {snapshot.components.length} 项已登记</p></div></article>
       <article className="admin-kpi admin-kpi--mint"><span><Cloud /></span><div><small>已配置服务</small><strong>{snapshot.overview.configuredProviders}</strong><p>共 {snapshot.providers.length} 个 Provider</p></div></article>
       <article className="admin-kpi admin-kpi--sand"><span><PlayCircle /></span><div><small>运行次数</small><strong>{snapshot.overview.runCount}</strong><p>来自真实执行记录</p></div></article>
     </section>
@@ -77,9 +100,9 @@ export function Overview() {
           <Gauge />
         </div>
         <div className="admin-readiness__meter"><i style={{ width: `${Math.round(snapshot.components.filter((item) => item.status === 'AVAILABLE').length / Math.max(snapshot.components.length, 1) * 100)}%` }} /></div>
-        <p>{unavailable.length ? `还有 ${unavailable.length} 个组件未就绪；草稿与已发布版本始终分开，发布前会重新校验。` : '必要组件已就绪，可以执行发布检查。'}</p>
+        <p>{unavailable.length ? `还有 ${unavailable.length} 项能力未就绪；草稿与已发布版本始终分开，发布前会重新校验。` : '必要能力已就绪，可以执行发布检查。'}</p>
         <ul>{unavailable.slice(0, 3).map((item) => <li key={item.componentKey}><span className={`admin-dot admin-dot--${item.status.toLowerCase()}`} /> <b>{item.displayName}</b><small>{String(item.config.reason ?? statusText(item.status))}</small></li>)}</ul>
-        <button className="admin-text-button" onClick={() => navigate('/admin/skills')}>查看可维护组件 <ChevronRight /></button>
+        <button className="admin-text-button" onClick={() => navigate('/admin/skills')}>查看技能目录 <ChevronRight /></button>
       </article>
       <article className="admin-card admin-runs-card">
         <div className="admin-card__head">

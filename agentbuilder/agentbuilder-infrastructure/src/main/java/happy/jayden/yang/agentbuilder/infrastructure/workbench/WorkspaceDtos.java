@@ -145,7 +145,8 @@ public final class WorkspaceDtos {
     }
   }
 
-  public record ConversationDetail(ConversationSummary conversation, List<ConversationMessage> messages, List<RunSummary> runs) {
+  public record ConversationDetail(
+      ConversationSummary conversation, List<ConversationMessage> messages, List<RunSummary> runs) {
     public ConversationDetail {
       Objects.requireNonNull(conversation, "conversation");
       messages = List.copyOf(Objects.requireNonNull(messages, "messages"));

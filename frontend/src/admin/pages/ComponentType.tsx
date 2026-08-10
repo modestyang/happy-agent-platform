@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Code2, FileText, LoaderCircle, Save, Search, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Code2, FileText, LoaderCircle, Plus, Save, Search, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 
 import { admin, type WorkbenchComponent, type WorkbenchComponentUpdate } from '../api';
 import { PageHeading } from '../components/PageHeading';
+import { ResourceCreateModal } from '../components/ResourceCreateModal';
 
 const TYPE_LABELS: Record<string, string> = {
   FRAMEWORK: '框架', PROVIDER: '服务商', MODEL: '模型', PROMPT: '提示词',
@@ -24,6 +25,26 @@ const configText = (config: Record<string, unknown>, key: string) => typeof conf
 const configStrings = (config: Record<string, unknown>, key: string) => Array.isArray(config[key]) ? (config[key] as unknown[]).filter((item): item is string => typeof item === 'string') : [];
 const promptVariables = (template: string) => Array.from(new Set(Array.from(template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)).map((match) => match[1])));
 
+async function loadResourceCatalog(type: string): Promise<WorkbenchComponent[]> {
+  if (type === 'PROMPT') return (await admin.listPrompts()).map((item) => ({ type, componentKey: item.promptKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: { template: item.template, revision: item.revision } }));
+  if (type === 'SKILL') {
+    const [skills, tools] = await Promise.all([admin.listSkills(), admin.listTools()]);
+    return [
+      ...skills.map((item) => ({ type, componentKey: item.skillKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: { whenToUse: item.whenToUse, whenNotToUse: item.whenNotToUse, content: item.content, requiredTools: item.requiredToolKeys, revision: item.revision } })),
+      ...tools.map((item) => ({ type: 'TOOL', componentKey: item.toolKey, displayName: item.displayName, description: item.description, version: item.contractVersion, status: 'AVAILABLE', tags: [], config: { risk: item.riskLevel, sideEffect: item.sideEffect, inputSchema: item.inputSchema, outputSchema: item.outputSchema } })),
+    ];
+  }
+  if (type === 'HOOK') return (await admin.listHooks()).map((item) => ({ type, componentKey: item.hookKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: { phase: item.phase, mandatory: item.mandatory, revision: item.revision } }));
+  if (type === 'TOOL') {
+    const [tools, skills] = await Promise.all([admin.listTools(), admin.listSkills()]);
+    return [
+      ...tools.map((item) => ({ type, componentKey: item.toolKey, displayName: item.displayName, description: item.description, version: item.contractVersion, status: 'AVAILABLE', tags: [], config: { runtimeName: item.runtimeName, whenToUse: item.whenToUse, whenNotToUse: item.whenNotToUse, risk: item.riskLevel, sideEffect: item.sideEffect, requiredScopes: item.requiredScopes, inputSchema: item.inputSchema, outputSchema: item.outputSchema, source: 'CODE_REGISTERED' } })),
+      ...skills.map((item) => ({ type: 'SKILL', componentKey: item.skillKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status, tags: [], config: { requiredTools: item.requiredToolKeys } })),
+    ];
+  }
+  return [];
+}
+
 function ComponentIcon({ type }: { type: string }) {
   const Icon = type === 'TOOL' ? Wrench : type === 'SKILL' ? Sparkles : type === 'PROMPT' ? FileText : Code2;
   return <span className={`admin-component-icon admin-component-icon--${type.toLowerCase()}`}><Icon /></span>;
@@ -41,15 +62,16 @@ export function ComponentType({ type, label, readOnly = false }: { type: string;
   const [filter, setFilter] = useState<'all' | 'on' | 'off'>('all');
   const [preview, setPreview] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const requestId = useRef(0);
 
   async function load() {
     const request = ++requestId.current;
     setLoading(true); setCatalog([]); setSelected(undefined); setForm(undefined); setBaseline(undefined); setError(''); setSuccess(''); setQuery(''); setFilter('all');
     try {
-      const snapshot = await admin.snapshot();
+      const resources = await loadResourceCatalog(type);
       if (request !== requestId.current) return;
-      setCatalog(snapshot.components); setLoading(false);
+      setCatalog(resources); setLoading(false);
     } catch (caught) {
       if (request !== requestId.current) return;
       setError(messageOf(caught)); setLoading(false);
@@ -80,31 +102,45 @@ export function ComponentType({ type, label, readOnly = false }: { type: string;
     if (!selected || !form || readOnly) return;
     setPending(true); setError(''); setSuccess('');
     try {
-      const updated = await admin.saveComponent(selected.type, selected.componentKey, form);
+      const revision = Number(selected.config.revision ?? selected.version);
+      const status = form.status === 'AVAILABLE' ? 'ACTIVE' : 'DISABLED';
+      let saved: WorkbenchComponent;
+      if (selected.type === 'PROMPT') {
+        const updated = await admin.updatePrompt(selected.componentKey, { displayName: form.displayName, description: form.description, template: configText(form.config, 'template'), status }, revision);
+        saved = { ...selected, displayName: updated.displayName, description: updated.description, version: updated.revision, status: updated.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', config: { template: updated.template, revision: updated.revision } };
+      } else if (selected.type === 'SKILL') {
+        const updated = await admin.updateSkill(selected.componentKey, { displayName: form.displayName, description: form.description, whenToUse: configText(form.config, 'whenToUse'), whenNotToUse: configText(form.config, 'whenNotToUse'), content: configText(form.config, 'content'), requiredToolKeys: configStrings(form.config, 'requiredTools'), status }, revision);
+        saved = { ...selected, displayName: updated.displayName, description: updated.description, version: updated.revision, status: updated.status === 'ACTIVE' && updated.runtimeReady ? 'AVAILABLE' : 'DISABLED', config: { ...form.config, revision: updated.revision } };
+      } else if (selected.type === 'HOOK') {
+        const updated = await admin.updateHook(selected.componentKey, { displayName: form.displayName, description: form.description, phase: configText(form.config, 'phase'), mandatory: Boolean(form.config.mandatory), status }, revision);
+        saved = { ...selected, displayName: updated.displayName, description: updated.description, version: updated.revision, status: updated.status === 'ACTIVE' && updated.runtimeReady ? 'AVAILABLE' : 'DISABLED', config: { phase: updated.phase, mandatory: updated.mandatory, revision: updated.revision } };
+      } else return;
+      const updated = saved;
       setCatalog((current) => current.map((item) => item.type === updated.type && item.componentKey === updated.componentKey && item.version === updated.version ? updated : item));
-      setSelected(updated); const next = updateOf(updated); setForm(next); setBaseline(next); setSuccess('组件配置已保存');
+      setSelected(updated); const next = updateOf(updated); setForm(next); setBaseline(next); setSuccess(`${TYPE_LABELS[selected.type]}配置已保存`);
     } catch (caught) { setError(messageOf(caught)); }
     finally { setPending(false); }
   }
 
-  if (loading) return <PageHeading eyebrow="加载中" title={label} description="正在拉取组件目录…" />;
-  if (error && !selected) return <><PageHeading eyebrow="组件中心" title={label} description="读取可被 Agent 引用的真实组件。" /><div className="admin-empty"><AlertTriangle /><strong>组件目录加载失败</strong><p>{error}</p><button className="admin-primary" onClick={() => void load()}>重新加载</button></div></>;
+  if (loading) return <PageHeading eyebrow="加载中" title={label} description={`正在读取${label}目录…`} />;
+  if (error && !selected) return <><PageHeading eyebrow={`${label}目录`} title={label} description={`读取可被 Agent 引用的${label}。`} /><div className="admin-empty"><AlertTriangle /><strong>{label}目录加载失败</strong><p>{error}</p><button className="admin-primary" onClick={() => void load()}>重新加载</button></div></>;
 
   if (selected && form) return <ComponentDetail component={selected} form={form} catalog={catalog} readOnly={readOnly} preview={preview} dirty={dirty} pending={pending} error={error} success={success} onBack={() => { setSelected(undefined); setForm(undefined); setBaseline(undefined); }} onPreview={setPreview} onUpdate={update} onUpdateConfig={updateConfig} onSave={save} />;
 
   return <>
-    <PageHeading eyebrow="组件中心" title={label} description={`${type === 'TOOL' ? '代码注册的运行时能力，仅查看其真实元数据。' : '可维护、可被 Agent 引用的真实组件。'} · 共 ${components.length} 个`} />
+    <PageHeading eyebrow={`${label}目录`} title={label} description={`${type === 'TOOL' ? '代码注册的运行时能力，仅查看其真实元数据。' : `可维护、可被 Agent 引用的${label}。`} · 共 ${components.length} 个`} action={(type === 'PROMPT' || type === 'SKILL') && <button className="admin-primary" onClick={() => setCreating(true)}><Plus />新增{label}</button>} />
+    {(type === 'PROMPT' || type === 'SKILL') && <ResourceCreateModal type={type} open={creating} tools={catalog.filter((item) => item.type === 'TOOL' && item.status === 'AVAILABLE')} onClose={() => setCreating(false)} onCreated={(component) => { setCatalog((current) => [...current, component]); setSuccess(`${label}已新增`); }} />}
     <section className="admin-component-toolbar">
       <label><Search /><input aria-label={`搜索${label}`} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称 / 标识…" /></label>
       <div>{([['all', '全部'], ['on', '使用中'], ['off', '已停用']] as const).map(([value, text]) => <button key={value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{text}</button>)}</div>
     </section>
-    <p className="admin-component-selection-hint">选择左侧组件</p>
+    <p className="admin-component-selection-hint">选择左侧{label}</p>
     <section className="admin-component-grid">
       {filtered.map((item) => <button className="admin-component-card" key={`${item.type}-${item.componentKey}-${item.version}`} onClick={() => pick(item)}>
         <div className="admin-component-card__top"><ComponentIcon type={item.type} /><div><strong>{item.displayName}</strong><small>{item.componentKey}</small></div><b className={`admin-status admin-status--${item.status.toLowerCase()}`}>{statusText(item.status)}</b></div>
         <p>{item.description}</p><footer><span>{type === 'PROMPT' ? `${promptVariables(configText(item.config, 'template')).length} 个变量` : type === 'SKILL' ? `依赖 ${configStrings(item.config, 'requiredTools').length} 个工具` : type === 'TOOL' ? `${String(item.config.risk ?? 'LOW')} · ${String(item.config.sideEffect ?? '只读')}` : item.tags.join(' · ') || '未分类'}</span><ChevronRight /></footer>
       </button>)}
-      {!filtered.length && <div className="admin-empty admin-empty--wide"><Search /><strong>没有匹配的组件</strong><p>换一个搜索词或筛选条件试试。</p></div>}
+      {!filtered.length && <div className="admin-empty admin-empty--wide"><Search /><strong>没有匹配的{label}</strong><p>换一个搜索词或筛选条件试试。</p></div>}
     </section>
   </>;
 }

@@ -24,6 +24,7 @@ import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionJobDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
+import happy.jayden.yang.fitness.service.FitnessDtos.SaveTrainingPlanRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.UploadedMedia;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import java.time.Instant;
@@ -48,12 +49,16 @@ public final class FitnessPorts {
 
     BootstrapData loadBootstrap(UUID userId, LocalDate recommendationDate);
 
+    Optional<FitnessDtos.PlanDto> findTrainingPlan(UUID userId, UUID workoutPlanId);
+
     BodyRecordDto createBodyRecord(UUID userId, CreateBodyRecordRequest request);
 
     MealDto createMeal(UUID userId, CreateMealRequest request);
 
     WorkoutCompletionDto completeWorkout(
         UUID userId, UUID workoutId, CompleteWorkoutRequest request);
+
+    java.util.List<UUID> saveTrainingPlan(UUID userId, SaveTrainingPlanRequest request);
 
     GoalState createGoal(UUID userId, CreateGoalRequest request);
 
@@ -202,5 +207,25 @@ public final class FitnessPorts {
 
   public interface AiConversation {
     AiMessageResponse send(UUID userId, String message);
+
+    default AiMessageResponse sendStreaming(
+        UUID userId, UUID runId, String message, AiStreamListener listener) {
+      AiMessageResponse response = send(userId, message);
+      listener.onTextDelta(response.message());
+      listener.onCompleted();
+      return response;
+    }
+  }
+
+  public interface AiStreamListener {
+    default void onStarted(UUID conversationId) {}
+
+    default void onProgress(String message) {}
+
+    default void onTextDelta(String delta) {}
+
+    default void onCompleted() {}
+
+    default void onFailed(String message) {}
   }
 }

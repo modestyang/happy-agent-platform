@@ -11,6 +11,8 @@ happy:
   fitness:
     local-seed:
       enabled: true
+    local-media:
+      enabled: true
   agent:
     workbench:
       local-seed:

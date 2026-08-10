@@ -362,7 +362,16 @@ public final class FitnessDtos {
       String title,
       int estimatedMinutes,
       String status,
+      LocalDate scheduledFor,
       List<PlanExerciseDto> exercises) {}
+
+  public record TrainingPlanDayInput(
+      LocalDate scheduledFor, String title, int estimatedMinutes, List<UUID> exerciseIds) {}
+
+  public record SaveTrainingPlanRequest(
+      UUID approvalId, String scope, List<TrainingPlanDayInput> days) {}
+
+  public record SavedTrainingPlanResult(List<UUID> planIds) {}
 
   public record CompleteWorkoutRequest(BigDecimal completionRatio) {}
 

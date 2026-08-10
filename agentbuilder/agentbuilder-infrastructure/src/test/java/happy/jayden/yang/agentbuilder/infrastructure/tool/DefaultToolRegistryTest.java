@@ -96,6 +96,16 @@ class DefaultToolRegistryTest {
   }
 
   @Test
+  void exposesTheNewestRuntimeDescriptorsForModelAndConsoleDiscovery() {
+    var registry = new DefaultToolRegistry(List.of(scanner().scanRegistration(new QueryTools())));
+
+    assertEquals(
+        List.of("fitness.query"),
+        registry.descriptors().stream().map(item -> item.toolKey()).toList());
+    assertEquals("query_workouts", registry.descriptors().get(0).runtimeName());
+  }
+
+  @Test
   void rejectsDuplicateRuntimeNamesAcrossDifferentRegistrations() {
     var first = scanner().scanRegistration(new QueryTools());
     var second = scanner().scanRegistration(new AlternateQueryTools());

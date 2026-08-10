@@ -76,6 +76,11 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   }
 
   @Override
+  public List<AgentDraftView> agents() {
+    return jdbc.query("SELECT * FROM agent_drafts ORDER BY agent_key", draftMapper());
+  }
+
+  @Override
   public Optional<AgentDraftView> findDraft(String agentKey) {
     return jdbc
         .query("SELECT * FROM agent_drafts WHERE agent_key=?", draftMapper(), agentKey)
@@ -97,7 +102,9 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
                       + "'[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'agent.default.memory',temperature,max_tool_calls "
                       + "FROM agent_drafts "
                       + "ORDER BY CASE WHEN status='PUBLISHED' THEN 0 ELSE 1 END, updated_at DESC LIMIT 1",
-                  request.agentKey(), request.name(), request.description());
+                  request.agentKey(),
+                  request.name(),
+                  request.description());
           if (created == 0) {
             throw new IllegalStateException("请先在工作台登记一套默认 Agent 运行配置");
           }
@@ -225,18 +232,50 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   }
 
   private PublishedComponent publishedComponent(String type, String key) {
-    var values =
-        jdbc.query(
-            "SELECT version,status,config::text FROM agent_component_projection WHERE component_type=?"
-                + " AND component_key=? ORDER BY version DESC LIMIT 1",
-            (rs, row) ->
-                new PublishedComponent(
-                    key,
-                    rs.getInt("version"),
-                    rs.getString("status"),
-                    read(rs.getString("config"), OBJECT_MAP)),
-            type,
-            key);
+    List<PublishedComponent> values =
+        switch (type) {
+          case "PROVIDER" ->
+              jdbc.query(
+                  "SELECT revision,status,endpoint FROM agent_providers WHERE provider_key=?",
+                  (rs, row) ->
+                      new PublishedComponent(
+                          key,
+                          rs.getInt("revision"),
+                          lifecycle(rs.getString("status")),
+                          Map.of("endpoint", rs.getString("endpoint"))),
+                  key);
+          case "MODEL" ->
+              jdbc.query(
+                  "SELECT revision,status,provider_key,model_id,supports_streaming,supports_tool_calling,supports_vision FROM agent_models WHERE model_key=?",
+                  (rs, row) ->
+                      new PublishedComponent(
+                          key,
+                          rs.getInt("revision"),
+                          lifecycle(rs.getString("status")),
+                          Map.of(
+                              "providerKey",
+                              rs.getString("provider_key"),
+                              "model",
+                              rs.getString("model_id"),
+                              "streaming",
+                              rs.getBoolean("supports_streaming"),
+                              "toolCalling",
+                              rs.getBoolean("supports_tool_calling"),
+                              "vision",
+                              rs.getBoolean("supports_vision"))),
+                  key);
+          case "PROMPT" ->
+              jdbc.query(
+                  "SELECT revision,status,template FROM agent_prompts WHERE prompt_key=?",
+                  (rs, row) ->
+                      new PublishedComponent(
+                          key,
+                          rs.getInt("revision"),
+                          lifecycle(rs.getString("status")),
+                          Map.of("template", rs.getString("template"))),
+                  key);
+          default -> List.of();
+        };
     if (values.isEmpty()) throw new NotFound("发布依赖组件不存在");
     if (!"AVAILABLE".equals(values.get(0).status())) {
       throw new IllegalStateException("发布依赖组件不可用");
@@ -279,42 +318,25 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
    */
   public void reconcileRuntimeCapabilities(RuntimeCapabilityRegistry runtimeCapabilities) {
     java.util.Objects.requireNonNull(runtimeCapabilities, "runtimeCapabilities");
-    var capabilities =
-        jdbc.query(
-            "SELECT component_type,component_key,version,config::text FROM agent_component_projection"
-                + " WHERE component_type IN ('SKILL','HOOK')",
-            (rs, row) ->
-                new RuntimeCapabilityRow(
-                    rs.getString("component_type"),
-                    rs.getString("component_key"),
-                    rs.getInt("version"),
-                    safeReadMap(
-                        rs.getString("config"),
-                        rs.getString("component_type"),
-                        rs.getString("component_key"))));
-    for (var capability : capabilities) {
-      boolean ready = runtimeCapabilities.hasHandler(capability.type(), capability.key());
-      var config = new LinkedHashMap<String, Object>(capability.config());
-      config.put("runtimeReady", ready);
-      if (ready) {
-        config.remove("runtimeReason");
-      } else {
-        config.put("runtimeReason", "运行时 handler 未注册");
-      }
-      jdbc.update(
-          "UPDATE agent_component_projection SET status=?,config=?::jsonb,updated_at=CURRENT_TIMESTAMP"
-              + " WHERE component_type=? AND component_key=? AND version=?",
-          ready ? "AVAILABLE" : "UNAVAILABLE",
-          write(config),
-          capability.type(),
-          capability.key(),
-          capability.version());
-    }
+    jdbc.queryForList("SELECT skill_key FROM agent_skills", String.class)
+        .forEach(
+            key ->
+                jdbc.update(
+                    "UPDATE agent_skills SET runtime_ready=? WHERE skill_key=?",
+                    runtimeCapabilities.hasHandler("SKILL", key),
+                    key));
+    jdbc.queryForList("SELECT hook_key FROM agent_hooks", String.class)
+        .forEach(
+            key ->
+                jdbc.update(
+                    "UPDATE agent_hooks SET runtime_ready=? WHERE hook_key=?",
+                    runtimeCapabilities.hasHandler("HOOK", key),
+                    key));
   }
 
   void seedDefaults() {
     jdbc.update(
-        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','瘦瘦健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','bailian','qwen-plus','fitness.coach.prompt','[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,8) ON CONFLICT(agent_key) DO NOTHING");
+        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','瘦瘦健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','minimax','minimax-m3','fitness.coach.prompt','[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,8) ON CONFLICT(agent_key) DO NOTHING");
     seedComponent(
         "FRAMEWORK",
         "agentscope",
@@ -337,6 +359,13 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "AVAILABLE",
         Map.of("endpoint", "https://dashscope.aliyuncs.com/compatible-mode/v1"));
     seedComponent(
+        "PROVIDER",
+        "minimax",
+        "MiniMax",
+        "MiniMax OpenAI 兼容模型服务",
+        "AVAILABLE",
+        Map.of("endpoint", "https://api.minimaxi.com/v1"));
+    seedComponent(
         "MODEL",
         "qwen-plus",
         "通义千问 Plus",
@@ -350,6 +379,25 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "饮食图片识别模型",
         "AVAILABLE",
         Map.of("providerKey", "bailian", "toolCalling", false, "streaming", true, "vision", true));
+    seedComponent(
+        "MODEL",
+        "minimax-m3",
+        "MiniMax M3",
+        "健身 Agent 统一使用的多模态模型",
+        "AVAILABLE",
+        Map.of(
+            "providerKey",
+            "minimax",
+            "model",
+            "MiniMax-M3",
+            "toolCalling",
+            true,
+            "streaming",
+            true,
+            "vision",
+            true,
+            "supportsVision",
+            true));
     seedComponent(
         "PROMPT",
         "fitness.coach.prompt",
@@ -376,8 +424,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
             "variables",
             List.of(),
             "template",
-            "你是一个可靠、清晰的通用 AI 助手。使用用户指定的语言回答；"
-                + "仅根据已提供的上下文和已授权能力作答，不编造事实或执行未授权操作。"));
+            "你是一个可靠、清晰的通用 AI 助手。使用用户指定的语言回答；" + "仅根据已提供的上下文和已授权能力作答，不编造事实或执行未授权操作。"));
     seedComponent(
         "MEMORY",
         "fitness.daily-memory",
@@ -506,19 +553,23 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
 
   private List<ProviderView> providers() {
     return jdbc.query(
-        "SELECT c.component_key,c.display_name,c.config::text,CASE WHEN p.provider_key IS NULL THEN FALSE ELSE TRUE END AS configured FROM agent_component_projection c LEFT JOIN agent_provider_credentials p ON p.provider_key=c.component_key WHERE c.component_type='PROVIDER' ORDER BY c.component_key",
+        "SELECT c.provider_key,c.display_name,c.endpoint,c.status,CASE WHEN p.provider_key IS NULL THEN FALSE ELSE TRUE END AS configured FROM agent_providers c LEFT JOIN agent_provider_credentials p ON p.provider_key=c.provider_key ORDER BY c.provider_key",
         (rs, row) -> {
-          var config =
-              safeReadMap(rs.getString("config"), "provider", rs.getString("component_key"));
           var configured = rs.getBoolean("configured");
           return new ProviderView(
-              rs.getString("component_key"),
+              rs.getString("provider_key"),
               rs.getString("display_name"),
-              String.valueOf(config.getOrDefault("endpoint", "")),
+              rs.getString("endpoint"),
               configured,
               configured ? MASK : "",
-              configured ? "READY" : "NOT_CONFIGURED");
+              "DISABLED".equals(rs.getString("status"))
+                  ? "DISABLED"
+                  : configured ? "READY" : "NOT_CONFIGURED");
         });
+  }
+
+  private static String lifecycle(String status) {
+    return "ACTIVE".equals(status) ? "AVAILABLE" : "DISABLED";
   }
 
   private List<RunView> recentRuns() {

@@ -49,7 +49,9 @@ public final class JdbcAdminAuthStore implements AdminAuthPort {
             "SELECT a.account_id,a.username FROM agent_admin_sessions s JOIN agent_admin_accounts a"
                 + " ON a.account_id=s.account_id WHERE s.session_token_hash=?"
                 + " AND s.expires_at>? AND a.status='ACTIVE'",
-            (rs, row) -> new AdminPrincipal(rs.getObject("account_id", UUID.class), rs.getString("username")),
+            (rs, row) ->
+                new AdminPrincipal(
+                    rs.getObject("account_id", UUID.class), rs.getString("username")),
             tokenHash,
             Timestamp.from(now));
     return principals.stream().findFirst();

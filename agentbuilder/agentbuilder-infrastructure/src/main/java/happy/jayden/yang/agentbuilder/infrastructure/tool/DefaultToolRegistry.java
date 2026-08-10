@@ -15,6 +15,7 @@ import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRiskLevel;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -85,6 +86,14 @@ public final class DefaultToolRegistry implements ToolRegistry {
       }
     }
     return new ResolvedToolSet(resolved);
+  }
+
+  @Override
+  public List<ToolDescriptor> descriptors() {
+    return newestByToolKey.values().stream()
+        .map(ToolRegistration::descriptor)
+        .sorted(Comparator.comparing(ToolDescriptor::toolKey))
+        .toList();
   }
 
   @Override

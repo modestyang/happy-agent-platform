@@ -30,7 +30,7 @@ class AgentFlywayMigrationCompatibilityTest {
             .createSchemas(true)
             .load();
 
-    assertThat(flyway.migrate().targetSchemaVersion).isEqualTo("11");
+    assertThat(flyway.migrate().targetSchemaVersion).isEqualTo("1");
 
     var jdbc =
         new JdbcTemplate(
@@ -38,52 +38,44 @@ class AgentFlywayMigrationCompatibilityTest {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
     assertThat(tableExists(jdbc, "agent_conversations")).isTrue();
     assertThat(tableExists(jdbc, "agent_conversation_messages")).isTrue();
+    assertThat(tableExists(jdbc, "agent_run_stream_events")).isTrue();
+    assertThat(tableExists(jdbc, "agent_run_approvals")).isTrue();
+    assertThat(tableExists(jdbc, "agent_providers")).isTrue();
+    assertThat(tableExists(jdbc, "agent_models")).isTrue();
+    assertThat(tableExists(jdbc, "agent_prompts")).isTrue();
+    assertThat(tableExists(jdbc, "agent_skills")).isTrue();
+    assertThat(tableExists(jdbc, "agent_hooks")).isTrue();
+    assertThat(tableExists(jdbc, "agent_frameworks")).isTrue();
+    assertThat(tableExists(jdbc, "agent_memories")).isTrue();
+    assertThat(tableExists(jdbc, "agent_component_projection")).isFalse();
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
   }
 
   @Test
-  void normalizesAnExistingNonFitnessDraftWithoutViolatingThePublishedVersionConstraint() {
-    Flyway.configure()
-        .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-        .schemas(DEFAULTS_SCHEMA)
-        .defaultSchema(DEFAULTS_SCHEMA)
-        .table("agent_schema_history")
-        .locations("classpath:db/agent")
-        .target("10")
-        .createSchemas(true)
-        .load()
-        .migrate();
+  void cleanBaselineSeedsModelsUnderTheirProvider() {
+    var flyway =
+        Flyway.configure()
+            .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+            .schemas(DEFAULTS_SCHEMA)
+            .defaultSchema(DEFAULTS_SCHEMA)
+            .table("agent_schema_history")
+            .locations("classpath:db/agent")
+            .createSchemas(true)
+            .load();
+    flyway.migrate();
     var jdbc =
         new JdbcTemplate(
             new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
-    jdbc.update(
-        "INSERT INTO "
-            + DEFAULTS_SCHEMA
-            + ".agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls,current_published_version,revision) "
-            + "VALUES ('baby.food','辅食助手','测试','DRAFT','agentscope','bailian','qwen-plus','fitness.coach.prompt','[\"fitness.profile.query\"]'::jsonb,'[]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,8,2,1)");
-
-    Flyway.configure()
-        .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-        .schemas(DEFAULTS_SCHEMA)
-        .defaultSchema(DEFAULTS_SCHEMA)
-        .table("agent_schema_history")
-        .locations("classpath:db/agent")
-        .createSchemas(true)
-        .load()
-        .migrate();
-
-    var row =
-        jdbc.queryForMap(
-            "SELECT prompt_key,memory_key,tool_keys::text,hook_keys::text,current_published_version,status FROM "
-                + DEFAULTS_SCHEMA
-                + ".agent_drafts WHERE agent_key='baby.food'");
-    assertThat(row.get("prompt_key")).isEqualTo("agent.default.prompt");
-    assertThat(row.get("memory_key")).isEqualTo("agent.default.memory");
-    assertThat(row.get("tool_keys")).isEqualTo("[]");
-    assertThat(row.get("hook_keys")).isEqualTo("[]");
-    assertThat(row.get("current_published_version")).isEqualTo(0);
-    assertThat(row.get("status")).isEqualTo("DRAFT");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM "
+                    + DEFAULTS_SCHEMA
+                    + ".agent_models m JOIN "
+                    + DEFAULTS_SCHEMA
+                    + ".agent_providers p ON p.provider_key=m.provider_key",
+                Integer.class))
+        .isEqualTo(3);
   }
 
   private static boolean tableExists(JdbcTemplate jdbc, String table) {

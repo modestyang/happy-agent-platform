@@ -50,8 +50,10 @@ Full rules in `docs/architecture/module-boundaries.md`. The ones easiest to viol
   the `FitnessTools` Spring bean, never a fitness repository or the `fitness` schema.
 - One PostgreSQL database, two owned schemas (`fitness`, `agent`) with separate DataSources and
   separate Flyway runs (`agentFlyway` is `@DependsOn("fitnessFlyway")`). No cross-schema
-  foreign keys, transactions, or queries. Migrations live in each infrastructure module under
-  `src/main/resources/db/fitness/` and `db/agent/` as `V<n>__*.sql`; add new files, never edit applied ones.
+  foreign keys, transactions, or queries. Fitness migrations remain append-only. Before the first
+  production release, the Agent schema keeps one self-contained `V1__agent_baseline.sql`: fold
+  Agent schema corrections into V1 and do not accumulate V2, V3, and later development migrations.
+  Freeze Agent migration history and switch it to append-only only when production starts.
 - Controllers only in `starter`; they do auth mapping, DTO conversion, and HTTP status mapping.
   Transactions begin in service use cases.
 - Two independent bearer boundaries: mobile requires audience `happy-agent-public-v1` + scope

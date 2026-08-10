@@ -26,7 +26,8 @@ public final class AdminAuthService {
     if (request == null || blank(request.username()) || request.password() == null) {
       throw new AdminAuthenticationException();
     }
-    var account = store.findAccount(request.username().trim()).orElseThrow(AdminAuthenticationException::new);
+    var account =
+        store.findAccount(request.username().trim()).orElseThrow(AdminAuthenticationException::new);
     try {
       if (!passwordVerifier.matches(request.password(), account.passwordHash())) {
         throw new AdminAuthenticationException();
@@ -43,7 +44,9 @@ public final class AdminAuthService {
 
   public AdminAuthPort.AdminPrincipal authenticate(String sessionToken) {
     if (blank(sessionToken)) throw new AdminAuthenticationException();
-    return store.findSession(hash(sessionToken), Instant.now()).orElseThrow(AdminAuthenticationException::new);
+    return store
+        .findSession(hash(sessionToken), Instant.now())
+        .orElseThrow(AdminAuthenticationException::new);
   }
 
   public void logout(String sessionToken) {
@@ -56,7 +59,9 @@ public final class AdminAuthService {
 
   private static String hash(String raw) {
     try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8)));
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8)));
     } catch (NoSuchAlgorithmException exception) {
       throw new IllegalStateException("SHA-256 is unavailable", exception);
     }

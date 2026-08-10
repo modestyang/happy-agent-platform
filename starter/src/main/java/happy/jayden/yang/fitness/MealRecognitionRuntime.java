@@ -2,6 +2,7 @@ package happy.jayden.yang.fitness;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.StreamingChatClient;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionCandidate;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
@@ -28,7 +29,7 @@ import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Bailian-compatible, non-streaming visual recognition runtime. */
+/** OpenAI-compatible, non-streaming visual recognition runtime. */
 public final class MealRecognitionRuntime implements MealRecognitionPort {
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(45);
@@ -62,8 +63,16 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
     char[] apiKey = null;
     try {
       RuntimeConfig config = config();
-      apiKey = credentials.readApiKey(config.providerKey()).orElse(null);
-      if (apiKey == null) return failed("DEPENDENCY_NOT_CONFIGURED", "视觉 Provider 凭据未配置");
+      try {
+        apiKey =
+            credentials.decryptPublishedSnapshot(
+                config.providerKey(),
+                config.credentialKeyVersion(),
+                config.credentialCiphertext(),
+                config.credentialIv());
+      } catch (IllegalStateException | IllegalArgumentException | SecurityException exception) {
+        return failed("DEPENDENCY_NOT_CONFIGURED", "已发布视觉凭据快照无法解密");
+      }
       Image image = image(mediaId);
       JsonNode response = post(config, apiKey, image);
       return result(response);
@@ -80,42 +89,19 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
     }
   }
 
-  private RuntimeConfig config() throws IOException, ConfigurationException {
-    var selected =
-        agentJdbc.query(
-            "SELECT provider_key,model_key FROM agent_drafts WHERE agent_key='fitness.coach' AND"
-                + " current_published_version>0 LIMIT 1",
-            (rs, row) -> new String[] {rs.getString("provider_key"), rs.getString("model_key")});
-    if (selected.isEmpty()) throw new ConfigurationException("未发布可用的视觉 Agent");
-    String providerKey = selected.get(0)[0];
-    String modelKey = selected.get(0)[1];
-    var modelConfigs =
-        agentJdbc.query(
-            "SELECT config::text,status FROM agent_component_projection WHERE"
-                + " component_type='MODEL' AND component_key=? ORDER BY version DESC LIMIT 1",
-            (rs, row) -> new String[] {rs.getString("config"), rs.getString("status")},
-            modelKey);
-    var providerConfigs =
-        agentJdbc.query(
-            "SELECT config::text,status FROM agent_component_projection WHERE"
-                + " component_type='PROVIDER' AND component_key=? ORDER BY version DESC LIMIT 1",
-            (rs, row) -> new String[] {rs.getString("config"), rs.getString("status")},
-            providerKey);
-    if (modelConfigs.isEmpty()
-        || providerConfigs.isEmpty()
-        || !"AVAILABLE".equals(modelConfigs.get(0)[1])
-        || !"AVAILABLE".equals(providerConfigs.get(0)[1]))
-      throw new ConfigurationException("视觉模型或 Provider 未启用");
-    JsonNode model = mapper.readTree(modelConfigs.get(0)[0]);
-    JsonNode provider = mapper.readTree(providerConfigs.get(0)[0]);
-    if (!model.path("supportsVision").asBoolean(false) && !model.path("vision").asBoolean(false))
-      throw new ConfigurationException("所选模型不支持视觉输入");
-    String boundProvider = model.path("providerKey").asText(providerKey);
-    if (!providerKey.equals(boundProvider)) throw new ConfigurationException("模型未绑定当前 Provider");
-    String endpoint = provider.path("endpoint").asText();
-    if (endpoint.isBlank()) throw new ConfigurationException("Provider 未配置 endpoint");
-    String apiModel = model.path("model").asText(modelKey);
-    return new RuntimeConfig(providerKey, apiModel, endpoint.replaceAll("/$", ""));
+  RuntimeConfig config() throws IOException, ConfigurationException {
+    try {
+      var published = PublishedFitnessAgentRuntime.load(agentJdbc, mapper, true);
+      return new RuntimeConfig(
+          published.providerKey(),
+          published.model(),
+          published.endpoint(),
+          published.credentialCiphertext(),
+          published.credentialIv(),
+          published.credentialKeyVersion());
+    } catch (PublishedFitnessAgentRuntime.ConfigurationException exception) {
+      throw new ConfigurationException(exception.getMessage());
+    }
   }
 
   private Image image(UUID mediaId) throws IOException, ConfigurationException {
@@ -164,6 +150,8 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
         Map.of(
             "model",
             config.model(),
+            "max_tokens",
+            1000,
             "messages",
             List.of(
                 Map.of(
@@ -171,7 +159,11 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
                     "user",
                     "content",
                     List.of(
-                        Map.of("type", "text", "text", "识别图片中的食物，仅按 schema 输出 JSON"),
+                        Map.of(
+                            "type",
+                            "text",
+                            "text",
+                            "识别图片中的食物。只返回一个 JSON 对象且仅含 items 数组；每个元素仅含 name:string、estimatedKcal:integer、confidence:number(0-1)，不要 Markdown 或其他字段"),
                         Map.of(
                             "type",
                             "image_url",
@@ -203,7 +195,9 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
     int status = connection.getResponseCode();
     if (status < 200 || status >= 300) throw new HttpException(status);
     JsonNode outer = mapper.readTree(connection.getInputStream());
-    String content = outer.path("choices").path(0).path("message").path("content").asText();
+    String content =
+        StreamingChatClient.visibleJsonContent(
+            outer.path("choices").path(0).path("message").path("content").asText());
     if (content.isBlank()) throw new IllegalArgumentException("empty completion");
     return mapper.readTree(content);
   }
@@ -257,7 +251,17 @@ public final class MealRecognitionRuntime implements MealRecognitionPort {
     return new MealRecognitionResult("FAILED", List.of(), code, message);
   }
 
-  record RuntimeConfig(String providerKey, String model, String endpoint) {}
+  record RuntimeConfig(
+      String providerKey,
+      String model,
+      String endpoint,
+      String credentialCiphertext,
+      String credentialIv,
+      int credentialKeyVersion) {
+    RuntimeConfig(String providerKey, String model, String endpoint) {
+      this(providerKey, model, endpoint, "", "", 0);
+    }
+  }
 
   record Image(String contentType, byte[] bytes) {}
 

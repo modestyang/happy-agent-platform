@@ -6,7 +6,7 @@ import {
   Search, Send, Sparkles, Target, Trophy, UserRound, Utensils, WandSparkles, X,
 } from 'lucide-react';
 import { ApiError, api } from './api';
-import { ChatMarkdown } from './components/ChatMarkdown';
+import { AgentRunMessage, consumeAgentRunStream, type AgentRunEvent, type AgentRunUiMessage, type RunApproval } from './components/AgentRunMessage';
 import { CurrentGoalReportCard } from './components/CurrentGoalReport';
 import { useCurrentGoalReportPolling } from './components/CurrentGoalReportPolling';
 import { ExerciseVisual } from './components/ExerciseVisual';
@@ -34,7 +34,7 @@ type Dashboard = {
 };
 
 type RecordTab = 'body' | 'meal';
-type ChatMessage = { role: 'user' | 'assistant'; content: string };
+type ChatMessage = AgentRunUiMessage;
 
 const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
 const tones = ['温暖直接', '轻松逗趣', '冷静专业'];
@@ -188,10 +188,35 @@ function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<voi
   const [selectedKey, setSelectedKey] = useState(dayKey(today));
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const [remotePlan, setRemotePlan] = useState<Dashboard['plan']>();
+  const [planLoading, setPlanLoading] = useState(false);
   const selectedDate = days.find((date) => dayKey(date) === selectedKey) ?? today;
-  const plan = sameDay(selectedDate, today) ? data.plan : undefined;
+  const selectedIsToday = sameDay(selectedDate, today);
+  const plan = selectedIsToday ? data.plan : remotePlan;
   const canGenerate = selectedDate.getTime() >= today.getTime();
   useEffect(() => { setSelectedKey(todayKey); }, [todayKey]);
+  useEffect(() => {
+    if (selectedKey === todayKey) { setRemotePlan(undefined); setPlanLoading(false); return; }
+    let active = true;
+    setPlanLoading(true);
+    setRemotePlan(undefined);
+    api.workoutPlans(selectedKey).then(async (page) => {
+      const summary = page.items[0];
+      if (!summary) return undefined;
+      const detail = await api.workoutPlan(summary.workoutPlanId);
+      return {
+        id: detail.workoutPlanId,
+        title: detail.title,
+        estimatedMinutes: detail.estimatedMinutes,
+        status: detail.state,
+        exercises: detail.exercises.map((exercise) => {
+          const catalog = data.exercises.find((item) => item.id === exercise.exerciseId);
+          return catalog ?? { id: exercise.exerciseId, name: exercise.name, targetArea: '全身', sets: exercise.sets, seconds: exercise.durationSeconds, steps: exercise.voiceCues, errors: [] };
+        }),
+      } satisfies NonNullable<Dashboard['plan']>;
+    }).then((next) => { if (active) setRemotePlan(next); }).catch((err) => { if (active) setError(errorText(err)); }).finally(() => { if (active) setPlanLoading(false); });
+    return () => { active = false; };
+  }, [selectedKey, todayKey, data.exercises]);
   async function complete() { if (!plan) return; setError(''); try { await api.completeWorkout(plan.id, 1); await reload(); setDone(true); navigator.vibrate?.(100); } catch (err) { setError(errorText(err)); } }
   const prompt = `请为我生成${selectedDate.getMonth() + 1}月${selectedDate.getDate()}日的训练计划`;
 
@@ -201,14 +226,14 @@ function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<voi
       const isToday = sameDay(date, today);
       return <button key={dayKey(date)} aria-pressed={selected} aria-label={`周${weekNames[date.getDay()]} ${date.getMonth() + 1}月${date.getDate()}日${isToday ? ' 今天' : ''}`} className={selected ? 'is-active' : ''} onClick={() => setSelectedKey(dayKey(date))}><small>{weekNames[date.getDay()]}</small><strong>{date.getDate()}</strong>{isToday && <i />}</button>;
     })}</section>
-    {plan ? <>
-      <section className="plan-hero"><div><small>{done || plan.status === 'COMPLETED' ? '今天完成啦' : '今天的训练'}</small><h2>{plan.title}</h2><p><Clock3 /> {plan.estimatedMinutes} 分钟 <i /> {plan.exercises.reduce((sum, exercise) => sum + exercise.sets, 0)} 组</p></div><span>{plan.exercises.length}<small>个动作</small></span></section>
+    {planLoading ? <div className="typing" aria-label="正在读取训练计划"><i /><i /><i /></div> : plan ? <>
+      <section className="plan-hero"><div><small>{done || plan.status === 'COMPLETED' ? `${selectedIsToday ? '今天' : '这天'}完成啦` : `${selectedIsToday ? '今天' : '这天'}的训练`}</small><h2>{plan.title}</h2><p><Clock3 /> {plan.estimatedMinutes} 分钟 <i /> {plan.exercises.reduce((sum, exercise) => sum + exercise.sets, 0)} 组</p></div><span>{plan.exercises.length}<small>个动作</small></span></section>
       <div className="plan-exercises">{plan.exercises.map((exercise, index) => {
         const media = data.exercises.find((item) => item.id === exercise.id) ?? exercise;
         return <article className="plan-exercise" key={exercise.id}><ExerciseVisual exercise={media} compact /><div className="plan-exercise__copy"><small>{String(index + 1).padStart(2, '0')} · {exercise.targetArea}</small><h2>{exercise.name}</h2><p>{exercise.sets} 组 × {exercise.seconds} 秒</p><div className="cue"><strong>动作要点</strong>{exercise.steps.map((step) => <span key={step}>{step}</span>)}</div>{exercise.errors.length > 0 && <div className="mistakes"><strong>常见错误</strong>{exercise.errors.map((item) => <span key={item}>{item}</span>)}</div>}</div></article>;
       })}</div>
       {error && <p className="error">{error}</p>}
-      {done || plan.status === 'COMPLETED' ? <p className="success-card"><Check /> 今天的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
+      {done || plan.status === 'COMPLETED' ? <p className="success-card"><Check /> {selectedIsToday ? '今天' : '这天'}的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
     </> : canGenerate ? <section className="ai-plan-empty"><span><WandSparkles /></span><small>这一天还没有安排</small><h2>交给花爷，拼一份刚刚好的训练</h2><p>会结合当前目标和已有记录，不盲目加量。</p><Link to={`/ai?prompt=${encodeURIComponent(prompt)}`} aria-label="AI 生成训练计划">AI 生成训练计划 <ChevronRight /></Link></section> : <Empty icon={CalendarDays} title="无训练计划" text="这一天没有留下训练安排，休息也算计划的一部分。" />}
   </section>;
 }
@@ -220,7 +245,7 @@ const aiFeatures = [
   { title: '看看最近状态', description: '训练、饮食和身体一起看', prompt: '帮我看看最近的训练、饮食和身体变化', icon: Activity, tone: 'sky' },
 ];
 
-function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: RecordTab) => void }) {
+function AiPage({ data, onOpenRecord, onDataChanged }: { data: Dashboard; onOpenRecord: (tab: RecordTab) => void; onDataChanged: () => Promise<void> }) {
   const [searchParams] = useSearchParams();
   const preparedPrompt = searchParams.get('prompt') ?? '';
   const reportRequested = searchParams.get('report') === 'current';
@@ -234,6 +259,7 @@ function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: R
   const [reportError, setReportError] = useState('');
   const [sending, setSending] = useState(false);
   const conversationGeneration = useRef(0);
+  const activeStream = useRef<AbortController | undefined>(undefined);
   useEffect(() => {
     try {
       if (messages.length) window.localStorage.setItem(sessionKey, JSON.stringify({ updatedAt: Date.now(), messages }));
@@ -246,13 +272,47 @@ function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: R
     const generation = conversationGeneration.current;
     setMessages((list) => [...list, { role: 'user', content: message }]); setValue(''); setSending(true); setError('');
     try {
-      const response = await api.aiMessage(message);
+      const response = await api.createAiRun(message.trim(), crypto.randomUUID());
       if (conversationGeneration.current !== generation) return;
-      if (response.message) setMessages((list) => [...list, { role: 'assistant', content: response.message }]);
+      const runId = response.runId;
+      setMessages((list) => [...list, { role: 'assistant', content: '', runId, progress: ['已提交给花爷'] }]);
+      const controller = new AbortController();
+      activeStream.current = controller;
+      await consumeAgentRunStream(response.eventStreamUrl, (event) => applyEvent(runId, event), controller.signal);
     } catch (err) {
       if (conversationGeneration.current !== generation) return;
       setError(err instanceof ApiError && err.status === 503 ? '花爷还没接上大模型，请先在 Agent 工作台配置 Provider。' : errorText(err));
     } finally { if (conversationGeneration.current === generation) setSending(false); }
+  }
+
+  function applyEvent(runId: string, event: AgentRunEvent) {
+    setMessages((list) => list.map((item) => {
+      if (item.runId !== runId) return item;
+      if (event.type === 'TEXT_DELTA') return { ...item, content: item.content + String(event.data.delta ?? '') };
+      if (event.type === 'RUN_STATE' && event.data.summary) {
+        const progress = [...(item.progress ?? [])];
+        const summary = String(event.data.summary);
+        if (!progress.includes(summary)) progress.push(summary);
+        return { ...item, progress };
+      }
+      if (event.type === 'APPROVAL') {
+        const incoming = event.data as unknown as RunApproval;
+        return { ...item, deciding: false, approval: { ...(item.approval ?? incoming), ...incoming } };
+      }
+      return item;
+    }));
+    if (event.type === 'ERROR') setError(String(event.data.message ?? 'AI 运行失败'));
+  }
+
+  async function decide(runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT') {
+    setMessages((list) => list.map((item) => item.runId === runId ? { ...item, deciding: true } : item));
+    try {
+      await api.decideAiRunApproval(runId, approvalId, decision, crypto.randomUUID());
+      if (decision === 'APPROVE') await onDataChanged();
+    } catch (err) {
+      setMessages((list) => list.map((item) => item.runId === runId ? { ...item, deciding: false } : item));
+      setError(errorText(err));
+    }
   }
   useEffect(() => {
     if (!preparedPrompt || preparedSent.current === preparedPrompt) return;
@@ -282,12 +342,12 @@ function AiPage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab: R
   const isWelcome = messages.length === 0;
 
   return <section className="page ai-page">
-    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>花爷</h1></div><button aria-label="新建会话" onClick={() => { conversationGeneration.current += 1; setMessages([]); setError(''); setSending(false); }}><MessageCirclePlus /></button></header>
+    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>花爷</h1></div><button aria-label="新建会话" onClick={() => { activeStream.current?.abort(); conversationGeneration.current += 1; setMessages([]); setError(''); setSending(false); }}><MessageCirclePlus /></button></header>
     <div className="ai-scroll">{report && <CurrentGoalReportCard report={report} onRetry={() => void refreshCurrentGoalReport(report.state === 'FAILED' ? 'RETRY_FAILED' : 'USER_REFRESH')} onGeneratePlan={() => setReportError('训练计划生成能力暂不可用：请先在 Agent 工作台发布计划生成能力。')} onOpenRecord={() => onOpenRecord('body')} />}{reportError && <p className="error">{reportError}</p>}{isWelcome ? <>
       <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
       <section className="ai-capabilities" role="region" aria-label="花爷快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
       {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
-    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={`${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<div className="message-body"><ChatMarkdown text={message.content} /></div></div>)}{sending && <div className="typing" aria-label="花爷正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
+    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={message.runId ?? `${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<div className="message-body">{message.role === 'assistant' ? <AgentRunMessage message={message} onDecision={(approvalId, decision) => message.runId && void decide(message.runId, approvalId, decision)} /> : <span>{message.content}</span>}</div></div>)}{sending && messages.at(-1)?.role !== 'assistant' && <div className="typing" aria-label="花爷正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
     <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input aria-label="问花爷" value={value} onChange={(event) => setValue(event.target.value)} placeholder="告诉花爷你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
   </section>;
 }
@@ -376,7 +436,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
     restoreFocus.current?.focus();
     setRecordTab(undefined);
   }, []);
-  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} onOpenRecord={openRecord} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
+  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} onGenerated={reload} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} onOpenRecord={openRecord} onDataChanged={reload} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
 function MobileApp() {

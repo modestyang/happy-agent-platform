@@ -7,7 +7,10 @@ import happy.jayden.yang.agentbuilder.core.tool.ToolRiskLevel;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
+import happy.jayden.yang.fitness.service.FitnessDtos.SaveTrainingPlanRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingPlanDayInput;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -137,6 +140,47 @@ public final class FitnessTools {
         plan.exercises().stream().map(item -> item.name()).toList());
   }
 
+  @AgentTool(
+      key = "fitness.plan.save",
+      version = 1,
+      runtimeName = "fitness_plan_save",
+      displayName = "保存训练计划",
+      description = "在用户明确确认后，将冻结的当天或未来七天训练计划写入当前用户账户。",
+      whenToUse = "仅在运行时已经取得用户对具体训练计划的明确确认后使用。",
+      whenNotToUse = "不要在只有建议、用户尚未确认或需要修改已完成训练历史时使用。",
+      applicationKey = "fitness",
+      group = "plan",
+      tags = {"健身", "训练计划", "写入"},
+      sideEffect = ToolSideEffect.WRITE,
+      risk = ToolRiskLevel.MEDIUM,
+      idempotent = true,
+      requiredScopes = {"fitness.write"})
+  public SavePlanToolResult savePlan(
+      @AgentToolParam(
+              name = "request",
+              description = "已由服务端冻结并与当前审批绑定的训练计划",
+              example =
+                  "{\"approvalId\":\"00000000-0000-0000-0000-000000000001\",\"scope\":\"DAY\",\"days\":[]}")
+          SavePlanToolRequest request,
+      ToolExecutionContext context) {
+    var saved =
+        fitness.saveTrainingPlan(
+            UUID.fromString(context.userId()),
+            new SaveTrainingPlanRequest(
+                request.approvalId(),
+                request.scope(),
+                request.days().stream()
+                    .map(
+                        day ->
+                            new TrainingPlanDayInput(
+                                day.scheduledFor(),
+                                day.title(),
+                                day.estimatedMinutes(),
+                                day.exerciseIds()))
+                    .toList()));
+    return new SavePlanToolResult(saved.planIds());
+  }
+
   private BootstrapData load(ToolExecutionContext context) {
     return fitness.loadForTool(UUID.fromString(context.userId()));
   }
@@ -167,4 +211,18 @@ public final class FitnessTools {
   public record PlanSuggestionResult(
       @AgentToolParam(description = "训练建议摘要") String summary,
       @AgentToolParam(description = "建议动作名称") List<String> exercises) {}
+
+  public record SavePlanToolRequest(
+      @AgentToolParam(description = "当前确认记录 ID") UUID approvalId,
+      @AgentToolParam(description = "计划范围：DAY 或 WEEK") String scope,
+      @AgentToolParam(description = "需要保存的逐日计划") List<ToolPlanDay> days) {}
+
+  public record ToolPlanDay(
+      @AgentToolParam(description = "训练日期") LocalDate scheduledFor,
+      @AgentToolParam(description = "训练标题") String title,
+      @AgentToolParam(description = "预计时长，分钟") int estimatedMinutes,
+      @AgentToolParam(description = "动作库中的动作 ID") List<UUID> exerciseIds) {}
+
+  public record SavePlanToolResult(
+      @AgentToolParam(description = "已保存的训练计划 ID") List<UUID> planIds) {}
 }

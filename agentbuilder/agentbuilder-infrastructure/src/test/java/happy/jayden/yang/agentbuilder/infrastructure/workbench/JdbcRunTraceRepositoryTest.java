@@ -1,14 +1,16 @@
 package happy.jayden.yang.agentbuilder.infrastructure.workbench;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -22,36 +24,74 @@ class JdbcRunTraceRepositoryTest {
   static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
   private JdbcRunTraceRepository repository;
+  private UUID runId;
+  private UUID userId;
 
   @BeforeEach
   void setUp() throws Exception {
-    DataSource source =
-        new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    try (var connection = source.getConnection()) {
-      ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/agent/V4__agent_workbench.sql"));
-      ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/agent/V5__observability_rollup.sql"));
-      ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/agent/V10__agent_conversations.sql"));
+    DataSource dataSource =
+        new DriverManagerDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+    var jdbc = new JdbcTemplate(dataSource);
+    jdbc.execute("DROP SCHEMA IF EXISTS public CASCADE");
+    jdbc.execute("CREATE SCHEMA public");
+    try (var connection = dataSource.getConnection()) {
+      ScriptUtils.executeSqlScript(
+          connection, new ClassPathResource("db/agent/V1__agent_baseline.sql"));
     }
-    repository = new JdbcRunTraceRepository(source);
+    repository = new JdbcRunTraceRepository(dataSource);
+    userId = UUID.randomUUID();
+    var conversation = repository.resolveConversation(userId, "fitness.coach", Instant.now());
+    runId = UUID.randomUUID();
+    repository.insertRun(
+        runId,
+        userId,
+        conversation.conversationId(),
+        "fitness.coach",
+        1,
+        "agentscope",
+        "MiniMax-M3",
+        "计划");
   }
 
   @Test
-  void reusesRecentConversationAndReturnsChronologicalMessageHistory() {
-    UUID userId = UUID.randomUUID();
-    Instant now = Instant.parse("2026-08-10T08:00:00Z");
+  void replaysStructuredEventsAfterTheLastSequence() {
+    repository.appendStreamEvent(runId, "RUN_STATE", Map.of("status", "RUNNING"));
+    repository.appendStreamEvent(runId, "TEXT_DELTA", Map.of("delta", "你好"));
 
-    var first = repository.resolveConversation(userId, "fitness.coach", now);
-    repository.appendConversationMessage(first.conversationId(), null, "USER", "晚饭吃什么？", now);
-    repository.appendConversationMessage(
-        first.conversationId(), null, "ASSISTANT", "今晚可以吃虾仁蔬菜。", now.plusSeconds(1));
-    var reused =
-        repository.resolveConversation(userId, "fitness.coach", now.plus(Duration.ofHours(23)));
+    var replay = repository.streamEventsAfter(runId, 1);
 
-    assertEquals(first.conversationId(), reused.conversationId());
+    assertEquals(1, replay.size());
+    assertEquals(2, replay.get(0).sequence());
+    assertEquals("TEXT_DELTA", replay.get(0).type());
+    assertEquals("你好", replay.get(0).data().get("delta"));
+  }
+
+  @Test
+  void approvalDecisionIsOwnerBoundAndIdempotent() {
+    var approval =
+        repository.requestApproval(
+            runId, userId, "fitness.plan.save", "保存未来 7 天训练计划", Map.of("scope", "WEEK"));
+
     assertEquals(
-        java.util.List.of("晚饭吃什么？", "今晚可以吃虾仁蔬菜。"),
-        repository.recentConversationMessages(first.conversationId(), 20).stream()
-            .map(WorkspaceDtos.ConversationMessage::content)
-            .toList());
+        "APPROVED",
+        repository
+            .decideApproval(runId, approval.approvalId(), userId, "APPROVE", "decision-1")
+            .status());
+    assertEquals(
+        "APPROVED",
+        repository
+            .decideApproval(runId, approval.approvalId(), userId, "APPROVE", "decision-1")
+            .status());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            repository.decideApproval(
+                runId, approval.approvalId(), UUID.randomUUID(), "APPROVE", "decision-2"));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            repository.decideApproval(
+                runId, approval.approvalId(), userId, "REJECT", "decision-3"));
   }
 }

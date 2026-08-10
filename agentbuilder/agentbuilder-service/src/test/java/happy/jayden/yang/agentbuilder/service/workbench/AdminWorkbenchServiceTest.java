@@ -193,10 +193,7 @@ class AdminWorkbenchServiceTest {
     }
 
     private MemoryPort(
-        AgentDraftView draft,
-        boolean configured,
-        String componentStatus,
-        String modelProviderKey) {
+        AgentDraftView draft, boolean configured, String componentStatus, String modelProviderKey) {
       this.draft = draft;
       this.configured = configured;
       this.componentStatus = componentStatus;
@@ -210,7 +207,8 @@ class AdminWorkbenchServiceTest {
           List.of(draft),
           List.of(
               component("FRAMEWORK", "agentscope", componentStatus),
-              component("MODEL", "qwen-plus", componentStatus, Map.of("providerKey", modelProviderKey)),
+              component(
+                  "MODEL", "qwen-plus", componentStatus, Map.of("providerKey", modelProviderKey)),
               component("PROMPT", "fitness.coach.prompt", componentStatus),
               component("MEMORY", "fitness.daily-memory", componentStatus),
               component("TOOL", "fitness.plan.generate", componentStatus),

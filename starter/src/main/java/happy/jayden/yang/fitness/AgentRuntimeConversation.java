@@ -9,8 +9,10 @@ import happy.jayden.yang.agentbuilder.core.runtime.AgentHook;
 import happy.jayden.yang.agentbuilder.core.runtime.AgentRunResult;
 import happy.jayden.yang.agentbuilder.core.runtime.HookDecision;
 import happy.jayden.yang.agentbuilder.core.runtime.SkillResult;
+import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
+import happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.JdbcRunTraceRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.StreamingChatClient;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationMessage;
@@ -19,12 +21,14 @@ import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
 import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyUnavailableException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
+import happy.jayden.yang.fitness.service.FitnessPorts.AiStreamListener;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -96,8 +100,13 @@ final class AgentRuntimeConversation implements AiConversation {
 
   @Override
   public AiMessageResponse send(UUID userId, String message) {
+    return sendStreaming(userId, UUID.randomUUID(), message, new AiStreamListener() {});
+  }
+
+  @Override
+  public AiMessageResponse sendStreaming(
+      UUID userId, UUID runId, String message, AiStreamListener listener) {
     RuntimeConfig config = loadRuntimeConfig();
-    UUID runId = UUID.randomUUID();
     Instant startedAt = Instant.now();
     UUID conversationId = null;
     long[] sequence = {0};
@@ -115,6 +124,8 @@ final class AgentRuntimeConversation implements AiConversation {
         config.frameworkKey(),
         config.modelKey(),
         truncate(message, 1000));
+    listener.onStarted(conversationId);
+    listener.onProgress("正在读取你的目标和近期记录");
     runTraceRepository.appendConversationMessage(conversationId, runId, "USER", message, startedAt);
     runTraceRepository.appendEvent(
         runId,
@@ -166,7 +177,8 @@ final class AgentRuntimeConversation implements AiConversation {
             config,
             execution,
             hooks,
-            safetyDecision);
+            safetyDecision,
+            listener);
       }
       hooks = resolvedHooks(config, safetyHook);
       for (AgentHook hook : hooks) {
@@ -182,10 +194,12 @@ final class AgentRuntimeConversation implements AiConversation {
               config,
               execution,
               hooks,
-              decision);
+              decision,
+              listener);
         }
       }
       List<SkillResult> skillFacts = executeSkills(config, execution, runId, sequence);
+      listener.onProgress("正在整理可执行的建议");
       apiKey =
           credentials.decryptPublishedSnapshot(
               config.providerKey(),
@@ -219,8 +233,10 @@ final class AgentRuntimeConversation implements AiConversation {
           execution,
           hooks,
           apiKey,
-          messages);
+          messages,
+          listener);
     } catch (HttpClientErrorException exception) {
+      listener.onFailed("请求模型失败");
       recordFailure(
           runId,
           conversationId,
@@ -232,15 +248,18 @@ final class AgentRuntimeConversation implements AiConversation {
           "请求模型失败: " + exception.getStatusCode() + " " + safe(exception.getResponseBodyAsString()),
           exception);
     } catch (ResourceAccessException exception) {
+      listener.onFailed("连接模型服务超时或不可达");
       recordFailure(runId, conversationId, ++sequence[0], "TIMEOUT", exception.getMessage());
       notifyHooks(hooks, execution, new AgentRunResult(AgentRunResult.Status.FAILED, ""));
       throw new DependencyUnavailableException("连接模型服务超时或不可达：" + exception.getMessage(), exception);
     } catch (DependencyUnavailableException exception) {
+      listener.onFailed(exception.getMessage());
       recordFailure(
           runId, conversationId, ++sequence[0], "DEPENDENCY_UNAVAILABLE", exception.getMessage());
       notifyHooks(hooks, execution, new AgentRunResult(AgentRunResult.Status.FAILED, ""));
       throw exception;
     } catch (Exception exception) {
+      listener.onFailed(exception.getMessage());
       recordFailure(runId, conversationId, ++sequence[0], "RUNTIME_ERROR", exception.getMessage());
       notifyHooks(hooks, execution, new AgentRunResult(AgentRunResult.Status.FAILED, ""));
       throw new DependencyUnavailableException("AI 运行时异常：" + exception.getMessage(), exception);
@@ -259,30 +278,98 @@ final class AgentRuntimeConversation implements AiConversation {
       AgentExecutionContext execution,
       List<AgentHook> hooks,
       char[] apiKey,
-      List<Map<String, Object>> messages)
+      List<Map<String, Object>> messages,
+      AiStreamListener listener)
       throws Exception {
     try (StreamingChatClient client =
         new StreamingChatClient(config.providerEndpoint(), config.modelKey(), apiKey)) {
-      StringBuilder answer = new StringBuilder();
-      StreamingChatClient.StreamResult result =
-          client.stream(
-              messages,
-              config.temperature(),
-              1500,
-              chunk -> {
-                if (chunk.delta().isEmpty()) return;
-                answer.append(chunk.delta());
-                runTraceRepository.appendEvent(
-                    runId, ++sequence[0], "TOKEN", "delta", truncate(chunk.delta(), 250));
-              });
-      String cleanedAnswer = answer.toString().trim();
+      ToolRegistry registry = toolRegistrySupplier.get();
+      List<ToolDescriptor> boundTools =
+          registry.descriptors().stream()
+              .filter(item -> config.toolKeys().contains(item.toolKey()))
+              .toList();
+      int executedToolCalls = toolCalls;
+      int promptTokens = 0;
+      int completionTokens = 0;
+      StreamingChatClient.StreamResult result = null;
+      for (int round = 0; round < 4; round++) {
+        result =
+            client.stream(
+                messages,
+                boundTools,
+                config.temperature(),
+                1500,
+                chunk -> {
+                  if (!chunk.delta().isEmpty()) listener.onTextDelta(chunk.delta());
+                });
+        promptTokens += result.usage().promptTokens();
+        completionTokens += result.usage().completionTokens();
+        if (result.toolCalls().isEmpty()) break;
+        var assistantToolCalls = new ArrayList<Map<String, Object>>();
+        var toolMessages = new ArrayList<Map<String, Object>>();
+        for (var call : result.toolCalls()) {
+          ToolDescriptor descriptor =
+              boundTools.stream()
+                  .filter(item -> item.runtimeName().equals(call.name()))
+                  .findFirst()
+                  .orElseThrow(
+                      () -> new DependencyUnavailableException("模型请求了未绑定的 Tool: " + call.name()));
+          String callId = call.id().isBlank() ? UUID.randomUUID().toString() : call.id();
+          Map<String, Object> arguments =
+              call.arguments().isBlank()
+                  ? Map.of()
+                  : mapper.readValue(call.arguments(), STRING_MAP);
+          runTraceRepository.appendEvent(
+              runId, ++sequence[0], "TOOL_REQUESTED", "模型请求 Tool", descriptor.toolKey());
+          Object toolResult;
+          if (descriptor.sideEffect() == ToolSideEffect.WRITE
+              || descriptor.sideEffect() == ToolSideEffect.EXTERNAL_WRITE) {
+            // Write arguments remain unexecuted until the durable approval flow grants
+            // fitness.write.
+            toolResult =
+                Map.of(
+                    "status", "REQUIRES_USER_CONFIRMATION",
+                    "message", "已生成写入请求，必须先向用户展示具体内容并等待确认");
+          } else {
+            toolResult =
+                registry.invoke(descriptor.toolKey(), arguments, execution.toolExecutionContext());
+            executedToolCalls++;
+            runTraceRepository.appendEvent(
+                runId, ++sequence[0], "TOOL_COMPLETED", "Tool 返回", descriptor.toolKey());
+          }
+          assistantToolCalls.add(
+              Map.of(
+                  "id",
+                  callId,
+                  "type",
+                  "function",
+                  "function",
+                  Map.of("name", call.name(), "arguments", call.arguments())));
+          toolMessages.add(
+              Map.of(
+                  "role",
+                  "tool",
+                  "tool_call_id",
+                  callId,
+                  "content",
+                  mapper.writeValueAsString(toolResult)));
+        }
+        Map<String, Object> assistantMessage = new LinkedHashMap<>();
+        assistantMessage.put("role", "assistant");
+        assistantMessage.put("content", result.text());
+        assistantMessage.put("tool_calls", assistantToolCalls);
+        messages.add(assistantMessage);
+        messages.addAll(toolMessages);
+      }
+      if (result == null) throw new DependencyUnavailableException("AI 未产生响应");
+      String cleanedAnswer = result.text().trim();
       if (cleanedAnswer.isEmpty()) {
         throw new DependencyUnavailableException("AI 返回内容为空");
       }
+      runTraceRepository.appendEvent(
+          runId, ++sequence[0], "TOKEN", "model output", truncate(cleanedAnswer, 250));
       Instant completedAt = Instant.now();
       long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-      int promptTokens = result.usage().promptTokens();
-      int completionTokens = result.usage().completionTokens();
       double costUsd = estimateCost(promptTokens, completionTokens);
       runTraceRepository.appendEvent(
           runId,
@@ -295,7 +382,7 @@ final class AgentRuntimeConversation implements AiConversation {
           "SUCCEEDED",
           completedAt,
           durationMs,
-          toolCalls,
+          executedToolCalls,
           promptTokens,
           completionTokens,
           costUsd,
@@ -307,6 +394,7 @@ final class AgentRuntimeConversation implements AiConversation {
           conversationId, runId, "ASSISTANT", cleanedAnswer, completedAt);
       notifyHooks(
           hooks, execution, new AgentRunResult(AgentRunResult.Status.SUCCEEDED, cleanedAnswer));
+      listener.onCompleted();
       return new AiMessageResponse(cleanedAnswer);
     }
   }
@@ -320,7 +408,8 @@ final class AgentRuntimeConversation implements AiConversation {
       RuntimeConfig config,
       AgentExecutionContext execution,
       List<AgentHook> hooks,
-      HookDecision decision) {
+      HookDecision decision,
+      AiStreamListener listener) {
     Instant completedAt = Instant.now();
     long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
     runTraceRepository.appendEvent(
@@ -342,6 +431,8 @@ final class AgentRuntimeConversation implements AiConversation {
         conversationId, runId, "ASSISTANT", decision.message(), completedAt);
     notifyHooks(
         hooks, execution, new AgentRunResult(AgentRunResult.Status.BLOCKED, decision.message()));
+    listener.onTextDelta(decision.message());
+    listener.onCompleted();
     return new AiMessageResponse(decision.message());
   }
 

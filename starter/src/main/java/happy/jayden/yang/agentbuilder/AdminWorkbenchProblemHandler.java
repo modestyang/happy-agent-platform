@@ -1,10 +1,10 @@
 package happy.jayden.yang.agentbuilder;
 
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.PublishedAgentPlaygroundRuntime.PlaygroundRuntimeUnavailableException;
+import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService.AdminAuthenticationException;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort.Conflict;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort.NotFound;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort.ValidationFailure;
-import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService.AdminAuthenticationException;
-import happy.jayden.yang.agentbuilder.infrastructure.workbench.PublishedAgentPlaygroundRuntime.PlaygroundRuntimeUnavailableException;
 import java.net.URI;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -45,7 +45,8 @@ public class AdminWorkbenchProblemHandler {
 
   @ExceptionHandler(PlaygroundRuntimeUnavailableException.class)
   ProblemDetail runtimeUnavailable(PlaygroundRuntimeUnavailableException exception) {
-    return problem(HttpStatus.SERVICE_UNAVAILABLE, "DEPENDENCY_UNAVAILABLE", exception.getMessage());
+    return problem(
+        HttpStatus.SERVICE_UNAVAILABLE, "DEPENDENCY_UNAVAILABLE", exception.getMessage());
   }
 
   private static ProblemDetail problem(HttpStatus status, String code, String message) {

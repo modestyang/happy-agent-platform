@@ -1,5 +1,4 @@
-import type { AgentDraft, AgentDraftUpdate, AgentRun, Provider, Publication, ValidationResult, WorkbenchComponent, WorkbenchComponentUpdate, WorkbenchSnapshot } from './admin/types';
-import type { CreateMealRecommendationFeedbackRequest, CurrentGoalReport, MealFeedback } from './api/generated/public';
+import type { AiRun, CreateMealRecommendationFeedbackRequest, CurrentGoalReport, DailyMealPlan, MealFeedback, WorkoutPlanDetail, WorkoutPlanPage } from './api/generated/public';
 
 export class ApiError extends Error {
   constructor(
@@ -60,19 +59,16 @@ export const api = {
   getMealRecognitionJob: (jobId: string) => request<{ jobId: string; status: string; candidates: { name: string; estimatedKcal: number; confidence: number }[]; failure?: { message: string } }>(`/api/v1/app/meal-recognition-jobs/${jobId}`),
   createMealRecord: (body: unknown, idempotencyKey: string) => request<unknown>('/api/v1/app/meal-records', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body) }),
   upsertMealRecommendationFeedback: (recommendationId: string, body: CreateMealRecommendationFeedbackRequest, idempotencyKey: string) => request<MealFeedback>(`/api/v1/app/meal-recommendations/${recommendationId}/feedback`, { method: 'PUT', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body) }),
+  generateDailyMealPlan: (date: string, idempotencyKey: string) => request<DailyMealPlan>('/api/v1/app/meal-plans/daily/generate', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ date }) }),
+  dailyMealPlan: (date: string) => request<DailyMealPlan>(`/api/v1/app/meal-plans/daily?date=${encodeURIComponent(date)}`),
   currentGoalReport: () => request<CurrentGoalReport>('/api/v1/app/reports/current-goal'),
   refreshCurrentGoalReport: (reason: 'USER_REFRESH' | 'RETRY_FAILED', idempotencyKey: string) => request<CurrentGoalReport>('/api/v1/app/reports/current-goal', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ reason }) }),
   completeWorkout: (id: string, completionRatio: number) => request<unknown>(`/api/app/workouts/${id}/complete`, { method: 'POST', body: JSON.stringify({ completionRatio }) }),
+  workoutPlans: (date: string) => request<WorkoutPlanPage>(`/api/v1/app/workout-plans?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`),
+  workoutPlan: (id: string) => request<WorkoutPlanDetail>(`/api/v1/app/workout-plans/${encodeURIComponent(id)}`),
   goal: (body: unknown) => request<unknown>('/api/app/goals', { method: 'POST', body: JSON.stringify(body) }),
   aiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
-  admin: {
-    snapshot: () => request<WorkbenchSnapshot>('/api/admin/workbench'),
-    updateDraft: (agentKey: string, update: AgentDraftUpdate, revision: number) => request<AgentDraft>(`/api/admin/agents/${agentKey}/draft`, { method: 'PATCH', headers: { 'If-Match': String(revision) }, body: JSON.stringify(update) }),
-    validate: (agentKey: string) => request<ValidationResult>(`/api/admin/agents/${agentKey}/validate`, { method: 'POST' }),
-    publish: (agentKey: string) => request<Publication>(`/api/admin/agents/${agentKey}/publish`, { method: 'POST' }),
-    saveProviderCredential: (providerKey: string, apiKey: string) => request<Provider>(`/api/admin/providers/${providerKey}/credential`, { method: 'PUT', body: JSON.stringify({ apiKey }) }),
-    run: (runId: string) => request<AgentRun>(`/api/admin/runs/${runId}`),
-    saveComponent: (type: string, key: string, update: WorkbenchComponentUpdate) => request<WorkbenchComponent>(`/api/admin/components/${type}/${key}`, { method: 'PATCH', body: JSON.stringify(update) }),
-  },
+  createAiRun: (text: string, idempotencyKey: string) => request<AiRun>('/api/v1/app/ai/runs', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ text, clientMessageId: crypto.randomUUID() }) }),
+  decideAiRunApproval: (runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT', idempotencyKey: string) => request<AiRun>(`/api/v1/app/ai/runs/${runId}/approvals/${approvalId}`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ decision }) }),
   appAiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
 };

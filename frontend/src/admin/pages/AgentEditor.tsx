@@ -41,17 +41,28 @@ export function AgentEditor() {
   useEffect(() => {
     if (!agentKey) return;
     let mounted = true;
-    admin.snapshot().then((snapshot) => {
+    Promise.all([
+      admin.listAgents(), admin.listProviders(), admin.listModels(), admin.listPrompts(),
+      admin.listTools(), admin.listSkills(), admin.listHooks(), admin.listFrameworks(), admin.listMemories(),
+    ]).then(([agents, nextProviders, models, prompts, tools, skills, hooks, frameworks, memories]) => {
       if (!mounted) return;
-      const found = snapshot.agents.find((item) => item.agentKey === agentKey);
+      const found = agents.find((item) => item.agentKey === agentKey);
       if (!found) {
         setError(`未找到 Agent ${agentKey}`);
         setLoading(false);
         return;
       }
       setAgent(found);
-      setComponents(snapshot.components);
-      setProviders(snapshot.providers);
+      setProviders(nextProviders.filter((item) => item.status === 'ACTIVE'));
+      setComponents([
+        ...models.map((item) => ({ type: 'MODEL', componentKey: item.modelKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: { providerKey: item.providerKey } })),
+        ...prompts.map((item) => ({ type: 'PROMPT', componentKey: item.promptKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: { template: item.template } })),
+        ...tools.map((item) => ({ type: 'TOOL', componentKey: item.toolKey, displayName: item.displayName, description: item.description, version: item.contractVersion, status: 'AVAILABLE', tags: [], config: { risk: item.riskLevel } })),
+        ...skills.map((item) => ({ type: 'SKILL', componentKey: item.skillKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+        ...hooks.map((item) => ({ type: 'HOOK', componentKey: item.hookKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' && item.runtimeReady ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+        ...frameworks.map((item) => ({ type: 'FRAMEWORK', componentKey: item.frameworkKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: item.capabilities })),
+        ...memories.map((item) => ({ type: 'MEMORY', componentKey: item.memoryKey, displayName: item.displayName, description: item.description, version: item.revision, status: item.status === 'ACTIVE' ? 'AVAILABLE' : 'DISABLED', tags: [], config: {} })),
+      ]);
       setDraft({
         name: found.name, description: found.description, frameworkKey: found.frameworkKey,
         providerKey: found.providerKey, modelKey: found.modelKey, promptKey: found.promptKey,

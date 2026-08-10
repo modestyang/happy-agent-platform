@@ -22,7 +22,7 @@ class MealRecognitionRuntimeTest {
         exchange -> {
           body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
           byte[] response =
-              "{\"choices\":[{\"message\":{\"content\":\"{\\\"items\\\":[{\\\"name\\\":\\\"rice\\\",\\\"estimatedKcal\\\":200,\\\"confidence\\\":0.8}]}\"}}]}"
+              "{\"choices\":[{\"message\":{\"content\":\"<think>inspect the image</think>\\n```json\\n{\\\"items\\\":[{\\\"name\\\":\\\"rice\\\",\\\"estimatedKcal\\\":200,\\\"confidence\\\":0.8}]}\\n```\"}}]}"
                   .getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().add("Content-Type", "application/json");
           exchange.sendResponseHeaders(200, response.length);
@@ -43,6 +43,9 @@ class MealRecognitionRuntimeTest {
 
       JsonNode request = mapper.readTree(body.get());
       assertThat(request.path("model").asText()).isEqualTo("qwen-vl");
+      assertThat(request.path("max_tokens").asInt()).isEqualTo(1000);
+      assertThat(request.path("messages").get(0).path("content").get(0).path("text").asText())
+          .contains("items", "name", "estimatedKcal", "confidence");
       assertThat(
               request
                   .path("messages")

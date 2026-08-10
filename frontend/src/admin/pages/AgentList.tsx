@@ -12,9 +12,9 @@ export function AgentList() {
 
   useEffect(() => {
     let mounted = true;
-    admin.snapshot().then((snapshot) => {
+    admin.listAgents().then((items) => {
       if (mounted) {
-        setAgents(snapshot.agents);
+        setAgents(items);
         setLoading(false);
       }
     }).catch((caught) => {

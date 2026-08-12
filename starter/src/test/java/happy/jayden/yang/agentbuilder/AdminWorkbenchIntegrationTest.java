@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -121,6 +123,15 @@ class AdminWorkbenchIntegrationTest {
                 .content("{\"username\":\"user\",\"password\":\"demo123\"}"))
         .andExpect(status().isOk());
     mvc.perform(get("/api/admin/agents").cookie(adminSession)).andExpect(status().isOk());
+
+    mvc.perform(post("/api/admin/auth/logout").cookie(adminSession))
+        .andExpect(status().isNoContent())
+        .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("HttpOnly")))
+        .andExpect(
+            header().string("Set-Cookie", org.hamcrest.Matchers.containsString("SameSite=Lax")))
+        .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Path=/")))
+        .andExpect(
+            header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
   }
 
   @Test
@@ -417,6 +428,7 @@ class AdminWorkbenchIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"username\":\"user\",\"password\":\"demo123\"}"))
             .andExpect(status().isOk())
+            .andExpect(cookie().secure("FITNESS_SESSION", false))
             .andReturn();
     var cookie = result.getResponse().getCookie("FITNESS_SESSION");
     assertThat(cookie).isNotNull();
@@ -431,6 +443,7 @@ class AdminWorkbenchIntegrationTest {
                     .content(
                         "{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
             .andExpect(status().isOk())
+            .andExpect(cookie().secure("AGENT_ADMIN_SESSION", false))
             .andReturn();
     var cookie = result.getResponse().getCookie("AGENT_ADMIN_SESSION");
     assertThat(cookie).isNotNull();

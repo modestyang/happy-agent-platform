@@ -1,5 +1,6 @@
 package happy.jayden.yang.agentbuilder.service.workbench;
 
+import static happy.jayden.yang.agentbuilder.service.workbench.AdminResourceDtos.*;
 import static happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -7,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
+import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +28,7 @@ class AdminWorkbenchServiceTest {
 
     assertFalse(validation.valid());
     assertTrue(validation.errors().contains("Provider 尚未配置 API Key"));
-    assertTrue(validation.errors().contains("组件 fitness.plan.generate 当前不可用"));
+    assertTrue(validation.errors().contains("组件 fitness.exercise.search 当前不可用"));
   }
 
   @Test
@@ -59,13 +61,13 @@ class AdminWorkbenchServiceTest {
     var service = new AdminWorkbenchService(port, allRuntimeCapabilities());
     var update =
         new DraftUpdate(
-            "更温柔的瘦瘦",
+            "更温柔的花爷",
             "陪用户完成日常训练",
             "agentscope",
             "bailian",
             "qwen-plus",
             "fitness.coach.prompt",
-            List.of("fitness.plan.generate"),
+            List.of("fitness.exercise.search"),
             List.of("fitness.plan.skill"),
             List.of("fitness.safety"),
             "fitness.daily-memory",
@@ -74,7 +76,7 @@ class AdminWorkbenchServiceTest {
 
     var updated = service.updateDraft("fitness.coach", update, 1);
 
-    assertEquals("更温柔的瘦瘦", updated.name());
+    assertEquals("更温柔的花爷", updated.name());
     assertEquals(2, updated.revision());
   }
 
@@ -98,14 +100,14 @@ class AdminWorkbenchServiceTest {
     var withoutSafety =
         new AgentDraftView(
             "fitness.coach",
-            "瘦瘦健身教练",
+            "花爷健身教练",
             "根据真实健身数据提供陪伴与建议",
             "DRAFT",
             "agentscope",
             "bailian",
             "qwen-plus",
             "fitness.coach.prompt",
-            List.of("fitness.plan.generate"),
+            List.of("fitness.exercise.search"),
             List.of("fitness.plan.skill"),
             List.of(),
             "fitness.daily-memory",
@@ -139,6 +141,54 @@ class AdminWorkbenchServiceTest {
   }
 
   @Test
+  void validationBlocksASkillWhoseRequiredToolIsNotBoundToTheAgent() {
+    var draftWithoutTools =
+        new AgentDraftView(
+            "fitness.coach",
+            "花爷健身教练",
+            "根据真实健身数据提供陪伴与建议",
+            "DRAFT",
+            "agentscope",
+            "bailian",
+            "qwen-plus",
+            "fitness.coach.prompt",
+            List.of(),
+            List.of("fitness.plan.skill"),
+            List.of(),
+            "fitness.daily-memory",
+            0.5,
+            8,
+            0,
+            1,
+            Instant.parse("2026-08-06T00:00:00Z"));
+    var planSkill =
+        new SkillDefinition(
+            "fitness.plan.skill",
+            "训练计划编排",
+            "使用用户资料编排训练计划",
+            "用户要求训练计划时",
+            "",
+            "先读取动作库。",
+            List.of("fitness.exercise.search"),
+            true,
+            "ACTIVE",
+            1,
+            Instant.parse("2026-08-06T00:00:00Z"));
+    var service =
+        new AdminWorkbenchService(
+            new MemoryPort(draftWithoutTools, true, "AVAILABLE"),
+            allRuntimeCapabilities(),
+            activeResources(planSkill),
+            bindings -> null);
+
+    var validation = service.validate("fitness.coach");
+
+    assertFalse(validation.valid());
+    assertTrue(
+        validation.errors().contains("Skill fitness.plan.skill 缺少所需 Tool fitness.exercise.search"));
+  }
+
+  @Test
   void toolsAreReadOnlyFromTheWorkbenchEvenWhenTheirCatalogRowExists() {
     var service =
         new AdminWorkbenchService(
@@ -150,7 +200,7 @@ class AdminWorkbenchServiceTest {
             () ->
                 service.updateComponent(
                     "TOOL",
-                    "fitness.plan.generate",
+                    "fitness.exercise.search",
                     new ComponentUpdate("x", "x", "AVAILABLE", List.of(), Map.of())));
 
     assertEquals("Tool 仅可由应用代码登记，工作台只读", failure.getMessage());
@@ -160,17 +210,69 @@ class AdminWorkbenchServiceTest {
     return (type, key) -> true;
   }
 
+  private static AdminResourcePort activeResources(SkillDefinition skill) {
+    var at = Instant.parse("2026-08-06T00:00:00Z");
+    var provider =
+        new ProviderDefinition(
+            "bailian",
+            "阿里云百炼",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "OPENAI_COMPATIBLE",
+            "ACTIVE",
+            true,
+            "••••",
+            1,
+            at);
+    return (AdminResourcePort)
+        Proxy.newProxyInstance(
+            AdminWorkbenchServiceTest.class.getClassLoader(),
+            new Class<?>[] {AdminResourcePort.class},
+            (proxy, method, arguments) ->
+                switch (method.getName()) {
+                  case "findProvider" -> Optional.of(provider);
+                  case "listModels" ->
+                      List.of(
+                          new ModelDefinition(
+                              "qwen-plus",
+                              "bailian",
+                              "qwen-plus",
+                              "通义千问 Plus",
+                              "",
+                              true,
+                              true,
+                              false,
+                              "ACTIVE",
+                              1,
+                              at));
+                  case "listFrameworks" ->
+                      List.of(
+                          new FrameworkDefinition(
+                              "agentscope", "AgentScope", "", Map.of(), "ACTIVE", 1, at));
+                  case "listPrompts" ->
+                      List.of(
+                          new PromptDefinition(
+                              "fitness.coach.prompt", "花爷系统提示词", "", "", "ACTIVE", 1, at));
+                  case "listMemories" ->
+                      List.of(
+                          new MemoryDefinition(
+                              "fitness.daily-memory", "当日会话记忆", "", 24, 12000, "ACTIVE", 1, at));
+                  case "listSkills" -> List.of(skill);
+                  case "listHooks" -> List.of();
+                  default -> throw new UnsupportedOperationException(method.getName());
+                });
+  }
+
   private static AgentDraftView draft() {
     return new AgentDraftView(
         "fitness.coach",
-        "瘦瘦健身教练",
+        "花爷健身教练",
         "根据真实健身数据提供陪伴与建议",
         "DRAFT",
         "agentscope",
         "bailian",
         "qwen-plus",
         "fitness.coach.prompt",
-        List.of("fitness.plan.generate"),
+        List.of("fitness.exercise.search"),
         List.of("fitness.plan.skill"),
         List.of("fitness.safety"),
         "fitness.daily-memory",
@@ -211,7 +313,7 @@ class AdminWorkbenchServiceTest {
                   "MODEL", "qwen-plus", componentStatus, Map.of("providerKey", modelProviderKey)),
               component("PROMPT", "fitness.coach.prompt", componentStatus),
               component("MEMORY", "fitness.daily-memory", componentStatus),
-              component("TOOL", "fitness.plan.generate", componentStatus),
+              component("TOOL", "fitness.exercise.search", componentStatus),
               component("SKILL", "fitness.plan.skill", componentStatus),
               component("HOOK", "fitness.safety", componentStatus)),
           List.of(

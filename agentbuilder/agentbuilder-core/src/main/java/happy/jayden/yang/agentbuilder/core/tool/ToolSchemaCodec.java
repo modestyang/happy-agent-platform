@@ -1,5 +1,6 @@
 package happy.jayden.yang.agentbuilder.core.tool;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +15,7 @@ import java.util.regex.Pattern;
 public final class ToolSchemaCodec {
   private static final ObjectMapper MAPPER =
       new ObjectMapper()
+          .setSerializationInclusion(JsonInclude.Include.NON_NULL)
           .registerModule(new JavaTimeModule())
           .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 

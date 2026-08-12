@@ -83,6 +83,10 @@ describe('MealRecordForm', () => {
     await user.upload(screen.getByLabelText('拍照识别'), new File(['image'], 'lunch.png', { type: 'image/png' }));
     expect(await screen.findByText('视觉模型未配置')).toBeInTheDocument();
     expect(screen.getByAltText('已选择的饮食照片')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '放大查看饮食照片' })).toHaveClass('expandable-surface__media-trigger');
+    fireEvent.error(screen.getByAltText('已选择的饮食照片'));
+    expect(screen.getByRole('status')).toHaveTextContent('照片预览加载失败，请重新选择');
+    expect(screen.queryByRole('button', { name: '放大查看饮食照片' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '改为手动填写' }));
     expect(screen.getByLabelText('食物名称 1')).toBeEnabled();
   });

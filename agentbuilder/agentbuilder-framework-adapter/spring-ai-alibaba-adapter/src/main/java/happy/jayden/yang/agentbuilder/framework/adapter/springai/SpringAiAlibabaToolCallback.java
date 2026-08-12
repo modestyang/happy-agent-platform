@@ -1,6 +1,7 @@
 package happy.jayden.yang.agentbuilder.framework.adapter.springai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import happy.jayden.yang.agentbuilder.core.component.ApprovalPolicy;
 import happy.jayden.yang.agentbuilder.core.component.hook.HookDefinition;
 import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
@@ -9,6 +10,7 @@ import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchemaCodec;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -70,16 +72,15 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
       Invocation invocation;
       try {
         invocation = prepare(toolInput, context);
+      } catch (ApprovalRequired confirmation) {
+        throw confirmation;
       } catch (SpringAiAlibabaAdapter.ToolFailure | SpringAiAlibabaAdapter.HookFailure error) {
         throw error;
       } catch (RuntimeException error) {
         throw new SpringAiAlibabaAdapter.ToolFailure(tool.descriptor().runtimeName(), error);
       }
       var attempt =
-          Mono.fromCallable(
-                  () ->
-                      invokeAttempt(
-                          invocation.arguments(), invocation.context(), invocation.result()))
+          Mono.fromCallable(() -> invokeAttempt(invocation.arguments(), invocation.context()))
               .subscribeOn(Schedulers.boundedElastic())
               .timeout(Duration.ofMillis(tool.timeoutMs()));
       if (safeRetryCount() > 0) {
@@ -91,7 +92,7 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
                             !(error instanceof ToolSchemaCodec.InvalidToolValueException)
                                 && !(error instanceof SpringAiAlibabaAdapter.HookFailure)));
       }
-      var encoded =
+      var output =
           attempt
               .onErrorMap(
                   error ->
@@ -102,10 +103,12 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
                               tool.descriptor().runtimeName(), error))
               .block();
       runHooks(HookDefinition.Phase.POST_TOOL);
-      emitter.accept(
-          RunEvent.Type.TOOL_RESULT,
-          Map.of("toolName", tool.descriptor().runtimeName(), "result", invocation.result().value));
-      return encoded;
+      var resultData = new LinkedHashMap<String, Object>();
+      resultData.put("toolName", tool.descriptor().runtimeName());
+      resultData.put("result", output.value());
+      resultData.put("encodedResult", output.encoded());
+      emitter.accept(RunEvent.Type.TOOL_RESULT, Collections.unmodifiableMap(resultData));
+      return output.encoded();
     } catch (RuntimeException error) {
       failure.accept(error);
       throw error;
@@ -127,21 +130,30 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
     emitter.accept(
         RunEvent.Type.TOOL_STARTED,
         Map.of("toolName", tool.descriptor().runtimeName(), "arguments", arguments));
+    if (tool.approvalPolicy() != ApprovalPolicy.NEVER) {
+      emitter.accept(
+          RunEvent.Type.CONFIRMATION_REQUIRED,
+          Map.of(
+              "toolName", tool.descriptor().runtimeName(),
+              "arguments", arguments,
+              "approvalPolicy", tool.approvalPolicy().name()));
+      emitter.accept(
+          RunEvent.Type.RUN_WAITING_APPROVAL, Map.of("toolName", tool.descriptor().runtimeName()));
+      throw new ApprovalRequired(tool.descriptor().runtimeName());
+    }
     try {
       runHooks(HookDefinition.Phase.PRE_TOOL);
-      return new Invocation(arguments, toolExecutionContext, new ResultHolder());
+      return new Invocation(arguments, toolExecutionContext);
     } catch (RuntimeException error) {
       throw error;
     }
   }
 
-  private String invokeAttempt(
-      Map<String, Object> arguments, ToolExecutionContext context, ResultHolder result)
+  private ToolOutput invokeAttempt(Map<String, Object> arguments, ToolExecutionContext context)
       throws Exception {
-    var output = tool.handler().invoke(arguments, context);
-    var encoded = ToolSchemaCodec.encode(output, tool.descriptor().outputSchema().document());
-    result.value = output;
-    return encoded;
+    var value = tool.handler().invoke(arguments, context);
+    return new ToolOutput(
+        value, ToolSchemaCodec.encode(value, tool.descriptor().outputSchema().document()));
   }
 
   private void runHooks(HookDefinition.Phase phase) {
@@ -174,6 +186,12 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
     }
   }
 
+  static final class ApprovalRequired extends RuntimeException {
+    ApprovalRequired(String toolName) {
+      super("Tool requires user confirmation: " + toolName);
+    }
+  }
+
   private static String json(Object value) {
     try {
       return JSON.writeValueAsString(value);
@@ -199,10 +217,7 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
     };
   }
 
-  private record Invocation(
-      Map<String, Object> arguments, ToolExecutionContext context, ResultHolder result) {}
+  private record Invocation(Map<String, Object> arguments, ToolExecutionContext context) {}
 
-  private static final class ResultHolder {
-    private Object value;
-  }
+  private record ToolOutput(Object value, String encoded) {}
 }

@@ -21,8 +21,8 @@
       "path": "/api/admin/traces/conversations",
       "operationId": "adminListRecentConversations",
       "success": "200",
-      "schema": "WorkbenchConversationSummaryList",
-      "queryParameters": ["page", "size"],
+      "schema": "WorkbenchConversationPage",
+      "queryParameters": ["page", "query", "size"],
       "exactQueryParameters": true
     },
     {

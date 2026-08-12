@@ -1,7 +1,6 @@
 package happy.jayden.yang.agentbuilder;
 
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
-import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunPage;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunQuery;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunTrace;
@@ -41,12 +40,17 @@ public class AdminWorkbenchController {
   private final AdminWorkbenchService workbench;
   private final AdminAuthService auth;
   private final JdbcRunTraceRepository runTraces;
+  private final AdminConversationTraceService conversationTraces;
 
   public AdminWorkbenchController(
-      AdminWorkbenchService workbench, AdminAuthService auth, JdbcRunTraceRepository runTraces) {
+      AdminWorkbenchService workbench,
+      AdminAuthService auth,
+      JdbcRunTraceRepository runTraces,
+      AdminConversationTraceService conversationTraces) {
     this.workbench = workbench;
     this.auth = auth;
     this.runTraces = runTraces;
+    this.conversationTraces = conversationTraces;
   }
 
   @PatchMapping("/agents/{agentKey}/draft")
@@ -136,12 +140,13 @@ public class AdminWorkbenchController {
 
   /** Developer-only conversation explorer ordered by recent activity. */
   @GetMapping("/traces/conversations")
-  List<ConversationSummary> conversations(
+  AdminConversationTraceService.ConversationPageView conversations(
       @CookieValue(name = AdminAuthController.SESSION_COOKIE, required = false) String sessionToken,
+      @RequestParam(value = "query", required = false) String query,
       @RequestParam(value = "page", defaultValue = "0") int page,
-      @RequestParam(value = "size", defaultValue = "30") int size) {
+      @RequestParam(value = "size", defaultValue = "10") int size) {
     authenticate(sessionToken);
-    return runTraces.listRecentConversationSummaries(page, size);
+    return conversationTraces.conversations(query, page, size);
   }
 
   @GetMapping("/traces/conversations/{conversationId}")

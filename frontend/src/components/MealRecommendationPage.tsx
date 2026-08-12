@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChefHat, Flame, Sparkles, ThumbsDown, ThumbsUp, Utensils } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -54,11 +54,18 @@ export function recommendationKcal(recommendation?: MealRecommendation) {
   return recommendation?.items.reduce((total, item) => total + item.estimatedKcal, 0) ?? 0;
 }
 
+function usesChineseUserFacingCopy(recommendation: MealRecommendation) {
+  return /\p{Script=Han}/u.test(recommendation.reason)
+    && recommendation.items.every((item) => /\p{Script=Han}/u.test(item.name));
+}
+
 export function MealRecommendationPage({ recommendations, now = new Date(), onGenerated }: { recommendations: MealRecommendation[]; now?: Date; onGenerated?: () => Promise<void> }) {
   const navigate = useNavigate();
   const nextType = nextMealType(now);
   const mealTypes: MealRecommendation['mealType'][] = ['BREAKFAST', 'LUNCH', 'DINNER'];
   const hasReadyMeal = recommendations.some((meal) => meal.status === 'READY' && meal.items.length > 0);
+  const needsChineseRegeneration = recommendations.some((meal) => meal.status === 'READY' && !usesChineseUserFacingCopy(meal));
+  const generationDate = localDate(now);
   const [feedback, setFeedback] = useState<Record<string, MealRecommendationFeedback | undefined>>(() => feedbackFrom(recommendations));
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [feedbackError, setFeedbackError] = useState<{ recommendationId: string; message: string }>();
@@ -68,6 +75,7 @@ export function MealRecommendationPage({ recommendations, now = new Date(), onGe
   const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'failed'>('idle');
   const [generationError, setGenerationError] = useState('');
   const requestSequence = useRef<Record<string, number>>({});
+  const automaticRegenerationDate = useRef('');
   const dislikeButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<HTMLButtonElement | null>(null);
   const feedbackDialog = useRef<HTMLElement>(null);
@@ -142,12 +150,11 @@ export function MealRecommendationPage({ recommendations, now = new Date(), onGe
   };
   const selectedDislike = recommendations.find((item) => item.id === dislikeId);
 
-  const generate = async () => {
+  const generate = useCallback(async () => {
     setGenerationState('generating');
     setGenerationError('');
-    const date = localDate(now);
     try {
-      const plan = await api.generateDailyMealPlan(date, idempotencyKey());
+      const plan = await api.generateDailyMealPlan(generationDate, idempotencyKey());
       if (plan.status === 'READY') {
         await onGenerated?.();
         setGenerationState('idle');
@@ -159,13 +166,19 @@ export function MealRecommendationPage({ recommendations, now = new Date(), onGe
         return;
       }
       if (plan.status === 'GENERATING') {
-        void pollGenerated(date, onGenerated, setGenerationState, setGenerationError);
+        void pollGenerated(generationDate, onGenerated, setGenerationState, setGenerationError);
       }
     } catch (cause) {
       setGenerationState('failed');
       setGenerationError(feedbackMessage(cause));
     }
-  };
+  }, [generationDate, onGenerated]);
+
+  useEffect(() => {
+    if (!needsChineseRegeneration || automaticRegenerationDate.current === generationDate) return;
+    automaticRegenerationDate.current = generationDate;
+    void generate();
+  }, [generate, generationDate, needsChineseRegeneration]);
 
   return <section className="page meal-page">
     <header className="subpage-head">
@@ -176,6 +189,7 @@ export function MealRecommendationPage({ recommendations, now = new Date(), onGe
 
     {recommendations.length ? <>
       <section className="meal-intro"><Sparkles /><div><strong>下一餐不纠结</strong><p>吃得满足，也给身体留一点轻盈。</p></div></section>
+      {needsChineseRegeneration && <p className="meal-generation-status"><Sparkles /> {generationState === 'failed' ? '中文推荐生成失败，请重试。' : '正在重新生成中文推荐…'}{generationState === 'failed' && <button type="button" onClick={() => void generate()}>重试</button>}</p>}
       <div className="meal-recommendations">{mealTypes.map((mealType) => {
         const meal = recommendations.find((item) => item.mealType === mealType);
         const isNext = mealType === nextType;

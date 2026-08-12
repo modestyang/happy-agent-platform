@@ -1,4 +1,5 @@
 import type { CurrentGoalReport } from '../api/generated/public';
+import { ExpandableSurface } from './ContentSurface';
 
 type CompleteReport = Extract<CurrentGoalReport, { state: 'READY' | 'STALE' }>;
 
@@ -27,12 +28,14 @@ function WeightTrend({ report }: { report: CompleteReport }) {
   });
   const path = points.filter((point) => point.y !== null).map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' ');
 
-  return <article className="goal-report-chart"><div><strong>体重趋势</strong><small>至少四周</small></div><div className="goal-report-svg" role="img" aria-label="四周体重趋势"><svg viewBox="0 0 300 94" aria-hidden="true"><path className="goal-report-grid" d="M12 76H288M12 48H288M12 20H288" />{path && <path className="goal-report-weight-line" d={path} />}{points.map((point) => point.y === null ? <circle key={point.weekStart} className="goal-report-empty-dot" cx={point.x} cy="76" r="3" /> : <circle key={point.weekStart} className="goal-report-weight-dot" cx={point.x} cy={point.y} r="3.5" />)}</svg><div className="goal-report-axis">{report.weightTrend.map((point) => <span key={point.weekStart}>{weekLabel(point.weekStart)}</span>)}</div></div></article>;
+  const chart = <article className="goal-report-chart"><div><strong>体重趋势</strong><small>至少四周</small></div><div className="goal-report-svg" role="img" aria-label="四周体重趋势"><svg viewBox="0 0 300 94" aria-hidden="true"><path className="goal-report-grid" d="M12 76H288M12 48H288M12 20H288" />{path && <path className="goal-report-weight-line" d={path} />}{points.map((point) => point.y === null ? <circle key={point.weekStart} className="goal-report-empty-dot" cx={point.x} cy="76" r="3" /> : <circle key={point.weekStart} className="goal-report-weight-dot" cx={point.x} cy={point.y} r="3.5" />)}</svg><div className="goal-report-axis">{report.weightTrend.map((point) => <span key={point.weekStart}>{weekLabel(point.weekStart)}</span>)}</div></div></article>;
+  return <ExpandableSurface variant="media" label="四周体重趋势" title="四周体重趋势详情" expandedChildren={chart}>{chart}</ExpandableSurface>;
 }
 
 function TrainingTrend({ report }: { report: CompleteReport }) {
   const top = Math.max(...report.trainingVolume.map((point) => point.minutes), 1);
-  return <article className="goal-report-chart"><div><strong>训练量</strong><small>分钟 / 次数</small></div><div className="goal-report-svg" role="img" aria-label="四周训练量趋势"><div className="goal-report-bars">{report.trainingVolume.map((point) => <div key={point.weekStart}><i style={{ height: `${Math.max(4, (point.minutes / top) * 100)}%` }} /><small>{point.sessions}次</small><span>{weekLabel(point.weekStart)}</span></div>)}</div></div></article>;
+  const chart = <article className="goal-report-chart"><div><strong>训练量</strong><small>分钟 / 次数</small></div><div className="goal-report-svg" role="img" aria-label="四周训练量趋势"><div className="goal-report-bars">{report.trainingVolume.map((point) => <div key={point.weekStart}><i style={{ height: `${Math.max(4, (point.minutes / top) * 100)}%` }} /><small>{point.sessions}次</small><span>{weekLabel(point.weekStart)}</span></div>)}</div></div></article>;
+  return <ExpandableSurface variant="media" label="四周训练量趋势" title="四周训练量趋势详情" expandedChildren={chart}>{chart}</ExpandableSurface>;
 }
 
 function actionFor(action: CompleteReport['nextActions'][number], handlers: Props) {
@@ -58,7 +61,7 @@ function ReadyCard({ report, onRetry, onGeneratePlan, onOpenRecord }: Props & { 
 export function CurrentGoalReportCard(props: Props) {
   const { report, onRetry } = props;
   if (report.state === 'QUEUED' || report.state === 'GENERATING') {
-    return <section className="current-goal-report goal-report-holding" aria-label="当前目标累计报告"><div aria-label="报告生成中" className="goal-report-loader"><i /><i /><i /></div><strong>瘦瘦正在整理你的当前目标</strong><p>先计算客观记录，再补充结论与下周行动。</p></section>;
+    return <section className="current-goal-report goal-report-holding" aria-label="当前目标累计报告"><div aria-label="报告生成中" className="goal-report-loader"><i /><i /><i /></div><strong>花爷正在整理你的当前目标</strong><p>先计算客观记录，再补充结论与下周行动。</p></section>;
   }
   if (report.state === 'FAILED') {
     return <section className="current-goal-report goal-report-failed" aria-label="当前目标累计报告"><strong>这次报告没有生成</strong><p role="alert">{report.failure.message}</p><button onClick={onRetry}>{report.failure.retryable ? '重试生成报告' : '配置后重试生成报告'}</button></section>;

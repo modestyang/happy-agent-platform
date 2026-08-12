@@ -6,15 +6,14 @@ import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
 import happy.jayden.yang.agentbuilder.core.runtime.RunResult;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchemaCodec;
-import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
-import io.agentscope.core.agent.StreamOptions;
+import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.AgentResultEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.hook.HookEvent;
 import io.agentscope.core.hook.HookEventType;
 import io.agentscope.core.hook.PreActingEvent;
-import io.agentscope.core.memory.InMemoryMemory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.ToolResultBlock;
@@ -22,11 +21,19 @@ import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
+import io.agentscope.core.permission.PermissionBehavior;
+import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.permission.PermissionMode;
+import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.skill.AgentSkill;
-import io.agentscope.core.skill.SkillBox;
-import io.agentscope.core.tool.AgentTool;
+import io.agentscope.core.skill.repository.AgentSkillRepository;
+import io.agentscope.core.skill.repository.AgentSkillRepositoryInfo;
+import io.agentscope.core.state.InMemoryAgentStateStore;
+import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.HarnessAgent;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -54,8 +61,9 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
   private final AtomicBoolean interrupted = new AtomicBoolean();
   private final AtomicBoolean started = new AtomicBoolean();
   private final RunBudget budget;
-  private ReActAgent agent;
+  private HarnessAgent agent;
   private Disposable subscription;
+  private volatile String completedText = "";
 
   AgentScopeRuntimeBridge(RunRequest request, AgentScopeModelTransport model) {
     this.request = Objects.requireNonNull(request, "request");
@@ -68,9 +76,27 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
       return;
     }
     var toolkit = toolkit();
-    var memory = memory();
-    var skillBox = skills(toolkit);
-    var hook = new DeterministicHook(request, budget);
+    emit(
+        RunEvent.Type.CONTEXT_ASSEMBLED,
+        Map.of("runId", request.runId(), "memoryEntries", request.memory().entries().size()));
+    if (!request.memory().entries().isEmpty()) {
+      emit(
+          RunEvent.Type.MEMORY_LOADED,
+          Map.of("runId", request.runId(), "entryCount", request.memory().entries().size()));
+    }
+    for (var skill : request.skills()) {
+      emit(
+          RunEvent.Type.SKILL_DISCOVERED,
+          Map.of(
+              "runId",
+              request.runId(),
+              "skillKey",
+              skill.key(),
+              "description",
+              skill.description()));
+      emit(RunEvent.Type.SKILL_LOADED, Map.of("runId", request.runId(), "skillKey", skill.key()));
+    }
+    var hook = new DeterministicHook(request, budget, this::emit);
     var generateOptions =
         GenerateOptions.builder()
             .temperature(request.resolvedConfig().modelParameters().temperature().doubleValue())
@@ -85,33 +111,55 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
                 request.toolExecutionContext())
             .build();
     agent =
-        ReActAgent.builder()
+        HarnessAgent.builder()
             .name("run-" + request.runId())
             .sysPrompt(systemPrompt())
             .model(strictSchemaModel())
             .generateOptions(generateOptions)
             .toolkit(toolkit)
-            .skillBox(skillBox)
-            .memory(memory)
+            .skillRepository(new PublishedSkillRepository(request.skills()))
+            .enableSkills(
+                request.skills().stream().map(RunRequest.Skill::key).toArray(String[]::new))
             .hooks(List.of(hook))
             .toolExecutionContext(trustedContext)
+            .permissionContext(permissionContext())
+            .stateStore(new InMemoryAgentStateStore())
+            .workspace(
+                Path.of(
+                    System.getProperty("java.io.tmpdir"),
+                    "happy-agent-platform",
+                    "agentscope",
+                    request.runId()))
             .maxIters(Math.max(1, request.resolvedConfig().runtimeLimits().maxToolCalls() + 1))
+            .disableFilesystemTools()
+            .disableShellTool()
+            .disableSubagents()
+            .disableMemoryTools()
+            .disableMemoryHooks()
+            .disableWorkspaceContext()
+            .disableAtPathExpansion()
+            .disableToolResultEviction()
+            .disableToolsConfig()
+            .disableDefaultWorkspaceSkills()
             .build();
+    // Async tools and subagents are disabled above, so this Harness helper cannot be used here.
+    agent.getToolkit().removeTool("wait_async_results");
     var input =
         Msg.builder()
             .name(request.userId())
             .role(MsgRole.USER)
             .textContent(request.input())
             .build();
-    var options =
-        StreamOptions.builder()
-            .eventTypes(EventType.REASONING, EventType.AGENT_RESULT)
-            .incremental(true)
-            .includeReasoningChunk(true)
-            .includeReasoningResult(false)
+    var runtimeContext =
+        RuntimeContext.builder()
+            .userId(request.userId())
+            .sessionId(request.runId())
+            .toolExecutionContext(trustedContext)
             .build();
     subscription =
-        agent.stream(List.of(input), options).subscribe(this::accept, this::fail, this::complete);
+        agent
+            .streamEvents(List.of(input), runtimeContext)
+            .subscribe(this::accept, this::fail, this::complete);
   }
 
   Flux<AgentScopeAdapter.Signal> events() {
@@ -174,35 +222,17 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
     return response;
   }
 
-  private InMemoryMemory memory() {
-    var memory = new InMemoryMemory();
-    for (var entry : request.memory().entries()) {
-      memory.addMessage(Msg.builder().name("memory").role(MsgRole.USER).textContent(entry).build());
-    }
-    return memory;
-  }
-
-  private SkillBox skills(Toolkit toolkit) {
-    var skillBox = new SkillBox(toolkit);
-    skillBox.setExposeAllSkillMetadata(true);
-    for (var skill : request.skills()) {
-      skillBox.registerSkill(
-          AgentSkill.builder()
-              .name(skill.key())
-              .description(skill.description())
-              .skillContent(skill.markdown())
-              .resources(skill.resources())
-              .source("published-agent-skill")
-              .build());
-    }
-    if (!request.skills().isEmpty()) {
-      skillBox.registerSkillLoadTool();
-    }
-    return skillBox;
-  }
-
   private String systemPrompt() {
-    var prompt = new StringBuilder("You are a helpful assistant.");
+    var prompt =
+        new StringBuilder(
+            request.systemPrompt().isBlank()
+                ? "You are a helpful assistant."
+                : request.systemPrompt());
+    if (!request.skills().isEmpty()) {
+      prompt.append(
+          "\n\nWhen the user's request matches a supplied Skill, load that Skill before answering "
+              + "and treat its instructions as binding for this turn.");
+    }
     for (var skill : request.skills()) {
       prompt.append("\n\nSkill ").append(skill.key()).append(":\n").append(skill.description());
       for (var resource : skill.alwaysIncludedResources()) {
@@ -210,29 +240,57 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
       }
     }
     if (!request.memory().entries().isEmpty()) {
-      prompt.append("\n\nUse the supplied conversation memory when relevant.");
+      prompt.append("\n\n<conversation_memory>");
+      for (var entry : request.memory().entries()) {
+        prompt.append("\n").append(entry);
+      }
+      prompt.append("\n</conversation_memory>");
     }
     return prompt.toString();
   }
 
-  private void accept(Event event) {
-    if (event.getType() == EventType.REASONING) {
-      var text = event.getMessage() == null ? "" : event.getMessage().getTextContent();
-      if (text != null && !text.isBlank()) {
-        emit(RunEvent.Type.MODEL_DELTA, Map.of("text", text));
+  private PermissionContextState permissionContext() {
+    var permissions = PermissionContextState.builder().mode(PermissionMode.DEFAULT);
+    for (var tool : request.tools()) {
+      var behavior =
+          switch (tool.approvalPolicy()) {
+            case ALWAYS -> PermissionBehavior.ASK;
+            case RISK_BASED ->
+                switch (tool.descriptor().riskLevel()) {
+                  case HIGH, CRITICAL -> PermissionBehavior.ASK;
+                  case LOW, MEDIUM -> PermissionBehavior.ALLOW;
+                };
+            case NEVER -> PermissionBehavior.ALLOW;
+          };
+      var rule =
+          new PermissionRule(
+              tool.descriptor().runtimeName(), "", behavior, "published-tool-approval-policy");
+      if (behavior == PermissionBehavior.ASK) {
+        permissions.addAskRule(tool.descriptor().runtimeName(), rule);
+      } else {
+        permissions.addAllowRule(tool.descriptor().runtimeName(), rule);
       }
-      return;
     }
-    if (event.getType() == EventType.AGENT_RESULT) {
-      var text = event.getMessage() == null ? "" : event.getMessage().getTextContent();
-      emit(RunEvent.Type.RUN_COMPLETED, Map.of("result", RunResult.completed(text)));
+    return permissions.build();
+  }
+
+  private void accept(AgentEvent event) {
+    if (event instanceof AgentResultEvent result) {
+      completedText = result.getResult() == null ? "" : result.getResult().getTextContent();
     }
+    if (event instanceof TextBlockDeltaEvent delta && !delta.getDelta().isBlank()) {
+      emit(RunEvent.Type.MODEL_DELTA, Map.of("text", delta.getDelta()));
+    }
+    AgentScopeEventMapper.map(event).forEach(this::emit);
   }
 
   private void emit(RunEvent.Type type, Map<String, Object> data) {
+    emit(new AgentScopeAdapter.Signal(type, data));
+  }
+
+  private void emit(AgentScopeAdapter.Signal signal) {
     synchronized (signals) {
-      signals.emitNext(
-          new AgentScopeAdapter.Signal(type, data), Sinks.EmitFailureHandler.FAIL_FAST);
+      signals.emitNext(signal, Sinks.EmitFailureHandler.FAIL_FAST);
     }
   }
 
@@ -243,8 +301,84 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
   }
 
   private void complete() {
+    emit(RunEvent.Type.RUN_COMPLETED, Map.of("result", RunResult.completed(completedText)));
     synchronized (signals) {
       signals.emitComplete(Sinks.EmitFailureHandler.FAIL_FAST);
+    }
+  }
+
+  private static final class PublishedSkillRepository implements AgentSkillRepository {
+    private static final String SOURCE = "published-agent-skill";
+    private final Map<String, AgentSkill> skills;
+
+    private PublishedSkillRepository(List<RunRequest.Skill> published) {
+      var resolved = new LinkedHashMap<String, AgentSkill>();
+      for (var skill : published) {
+        var resources = new LinkedHashMap<>(skill.resources());
+        resources.putIfAbsent("SKILL.md", skill.markdown());
+        resolved.put(
+            skill.key(),
+            AgentSkill.builder()
+                .name(skill.key())
+                .description(skill.description())
+                .skillContent(skill.markdown())
+                .resources(resources)
+                .source(SOURCE)
+                .build());
+      }
+      skills = Map.copyOf(resolved);
+    }
+
+    @Override
+    public AgentSkill getSkill(String name) {
+      return skills.get(name);
+    }
+
+    @Override
+    public List<String> getAllSkillNames() {
+      return List.copyOf(skills.keySet());
+    }
+
+    @Override
+    public List<AgentSkill> getAllSkills() {
+      return List.copyOf(skills.values());
+    }
+
+    @Override
+    public boolean save(List<AgentSkill> values, boolean overwrite) {
+      return false;
+    }
+
+    @Override
+    public boolean delete(String name) {
+      return false;
+    }
+
+    @Override
+    public boolean skillExists(String name) {
+      return skills.containsKey(name);
+    }
+
+    @Override
+    public AgentSkillRepositoryInfo getRepositoryInfo() {
+      return new AgentSkillRepositoryInfo("published", SOURCE, false);
+    }
+
+    @Override
+    public String getSource() {
+      return SOURCE;
+    }
+
+    @Override
+    public void setWriteable(boolean writeable) {
+      if (writeable) {
+        throw new UnsupportedOperationException("published skills are read-only");
+      }
+    }
+
+    @Override
+    public boolean isWriteable() {
+      return false;
     }
   }
 
@@ -274,6 +408,18 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
     ToolFailure(String toolName, Throwable cause) {
       super("Tool " + toolName + " failed", cause);
     }
+
+    String safeRunMessage() {
+      return getCause() instanceof ToolCallLimitExceeded
+          ? getMessage() + ": " + getCause().getMessage()
+          : getMessage();
+    }
+  }
+
+  static final class ToolCallLimitExceeded extends RuntimeException {
+    ToolCallLimitExceeded(String message) {
+      super(message);
+    }
   }
 
   static final class HookFailure extends RuntimeException {
@@ -282,7 +428,7 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
     }
   }
 
-  private static final class StrictAgentTool implements AgentTool {
+  private static final class StrictAgentTool extends ToolBase {
     private static final Set<String> TRUSTED_ARGUMENT_NAMES =
         Set.of("userId", "runId", "permissions", "operationId");
     private final ResolvedTool tool;
@@ -291,26 +437,32 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
 
     private StrictAgentTool(
         ResolvedTool tool, Sinks.Many<AgentScopeAdapter.Signal> signals, RunBudget budget) {
+      super(
+          tool.descriptor().runtimeName(),
+          description(tool),
+          tool.descriptor().inputSchema().document(),
+          isReadOnly(tool),
+          false,
+          false,
+          null,
+          false,
+          false);
       this.tool = tool;
       this.signals = signals;
       this.budget = budget;
     }
 
-    @Override
-    public String getName() {
-      return tool.descriptor().runtimeName();
-    }
-
-    @Override
-    public String getDescription() {
+    private static String description(ResolvedTool tool) {
       return tool.usageGuidance().isBlank()
           ? tool.descriptor().description()
           : tool.descriptor().description() + "\n" + tool.usageGuidance();
     }
 
-    @Override
-    public Map<String, Object> getParameters() {
-      return tool.descriptor().inputSchema().document();
+    private static boolean isReadOnly(ResolvedTool tool) {
+      return tool.descriptor().sideEffect()
+              == happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect.NONE
+          || tool.descriptor().sideEffect()
+              == happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect.READ;
     }
 
     @Override
@@ -331,7 +483,13 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
               })
           .onErrorMap(
               error -> error instanceof ToolFailure ? error : new ToolFailure(getName(), error))
-          .doOnError(this::fail);
+          .doOnError(
+              error -> {
+                emit(
+                    RunEvent.Type.TOOL_FAILED,
+                    Map.of("toolName", getName(), "errorMessage", errorMessage(error)));
+                fail(error);
+              });
     }
 
     private Mono<ToolResultBlock> invoke(ToolCallParam param, Map<String, Object> arguments) {
@@ -400,15 +558,28 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
         signals.emitError(error, Sinks.EmitFailureHandler.FAIL_FAST);
       }
     }
+
+    private static String errorMessage(Throwable error) {
+      var cause =
+          error instanceof ToolFailure && error.getCause() != null ? error.getCause() : error;
+      return cause.getMessage() == null || cause.getMessage().isBlank()
+          ? "Tool execution failed"
+          : cause.getMessage();
+    }
   }
 
   private static final class DeterministicHook implements Hook {
     private final RunRequest request;
     private final RunBudget budget;
+    private final java.util.function.Consumer<AgentScopeAdapter.Signal> signalConsumer;
 
-    private DeterministicHook(RunRequest request, RunBudget budget) {
+    private DeterministicHook(
+        RunRequest request,
+        RunBudget budget,
+        java.util.function.Consumer<AgentScopeAdapter.Signal> signalConsumer) {
       this.request = request;
       this.budget = budget;
+      this.signalConsumer = signalConsumer;
     }
 
     @Override
@@ -425,11 +596,30 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
             for (var hook : request.hooks()) {
               if (hook.phase() == phase) {
                 try {
+                  emit(
+                      RunEvent.Type.HOOK_STARTED,
+                      Map.of(
+                          "runId", request.runId(), "hookKey", hook.key(), "phase", phase.name()));
                   hook.action()
                       .execute(
                           new RunRequest.HookContext(
                               request.runId(), request.userId(), request.input(), phase));
+                  emit(
+                      RunEvent.Type.HOOK_COMPLETED,
+                      Map.of(
+                          "runId", request.runId(), "hookKey", hook.key(), "phase", phase.name()));
                 } catch (Exception error) {
+                  emit(
+                      RunEvent.Type.HOOK_FAILED,
+                      Map.of(
+                          "runId",
+                          request.runId(),
+                          "hookKey",
+                          hook.key(),
+                          "phase",
+                          phase.name(),
+                          "errorMessage",
+                          error.getMessage() == null ? "Hook failed" : error.getMessage()));
                   if (hook.failurePolicy() == HookDefinition.FailurePolicy.FAIL_CLOSED) {
                     throw new HookFailure(hook.key(), error);
                   }
@@ -438,6 +628,10 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
             }
             return event;
           });
+    }
+
+    private void emit(RunEvent.Type type, Map<String, Object> data) {
+      signalConsumer.accept(AgentScopeAdapter.Signal.generic(type, data));
     }
 
     private HookDefinition.Phase phase(HookEvent event) {
@@ -467,16 +661,21 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
     private final int maxToolCalls;
     private final AtomicInteger globalCalls = new AtomicInteger();
     private final Map<String, AtomicInteger> toolCalls = new ConcurrentHashMap<>();
+    private final Set<String> toolCallIds = ConcurrentHashMap.newKeySet();
 
     private RunBudget(int maxToolCalls) {
       this.maxToolCalls = maxToolCalls;
     }
 
     private void reserveGlobal(ToolUseBlock toolUse) {
+      if (!toolCallIds.add(toolUse.getId())) {
+        throw new ToolFailure(
+            toolUse.getName(), new IllegalArgumentException("duplicate tool call id"));
+      }
       var used = globalCalls.incrementAndGet();
       if (used > maxToolCalls) {
         throw new ToolFailure(
-            toolUse.getName(), new IllegalStateException("global tool call limit exceeded"));
+            toolUse.getName(), new ToolCallLimitExceeded("global tool call limit exceeded"));
       }
     }
 
@@ -484,7 +683,7 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
       var used =
           toolCalls.computeIfAbsent(toolName, ignored -> new AtomicInteger()).incrementAndGet();
       if (used > maxCalls) {
-        throw new ToolFailure(toolName, new IllegalStateException("per-tool call limit exceeded"));
+        throw new ToolFailure(toolName, new ToolCallLimitExceeded("per-tool call limit exceeded"));
       }
     }
   }

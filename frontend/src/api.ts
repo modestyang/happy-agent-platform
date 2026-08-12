@@ -1,4 +1,5 @@
-import type { AiRun, CreateMealRecommendationFeedbackRequest, CurrentGoalReport, DailyMealPlan, MealFeedback, WorkoutPlanDetail, WorkoutPlanPage } from './api/generated/public';
+import type { AiRun, AiSession, CreateMealRecommendationFeedbackRequest, CurrentGoalReport, DailyMealPlan, MealFeedback, WorkoutPlanDetail, WorkoutPlanPage } from './api/generated/public';
+import { newClientId } from './clientId';
 
 export class ApiError extends Error {
   constructor(
@@ -49,7 +50,8 @@ export const api = {
   login: (username: string, password: string) => request<unknown>('/api/local/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   register: (username: string, password: string, nickname: string) => request<unknown>('/api/local/register', { method: 'POST', body: JSON.stringify({ username, password, nickname }) }),
   logout: () => request<unknown>('/api/local/logout', { method: 'POST' }),
-  firstSetup: (weightJin: number, waistCm: number | undefined, targetWeightJin: number, targetDate: string) => request<unknown>('/api/app/first-setup', { method: 'POST', body: JSON.stringify({ weightJin, waistCm, targetWeightJin, targetDate }) }),
+  firstSetup: (body: { weightJin: number; waistCm?: number; targetWeightJin: number; targetDate: string; trainingProfile: TrainingProfileInput }) => request<unknown>('/api/app/first-setup', { method: 'POST', body: JSON.stringify(body) }),
+  updateTrainingProfile: (body: TrainingProfileInput) => request<TrainingProfile>('/api/app/training-profile', { method: 'PUT', body: JSON.stringify(body) }),
   bodyRecord: (record: { weightJin?: number; waistCm?: number }) => request<unknown>('/api/app/body-records', { method: 'POST', body: JSON.stringify(record) }),
   meal: (mealType: string, items: { name: string; estimatedKcal: number }[]) => request<unknown>('/api/app/meals', { method: 'POST', body: JSON.stringify({ mealType, items }) }),
   createMediaUploadTicket: (contentType: string, contentLength: number, sha256: string, idempotencyKey: string) => request<{ mediaId: string; uploadUrl: string; headers: { name: string; value: string }[] }>('/api/v1/app/media-upload-tickets', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ purpose: 'MEAL_RECOGNITION', contentType, contentLength, sha256 }) }),
@@ -67,8 +69,23 @@ export const api = {
   workoutPlans: (date: string) => request<WorkoutPlanPage>(`/api/v1/app/workout-plans?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`),
   workoutPlan: (id: string) => request<WorkoutPlanDetail>(`/api/v1/app/workout-plans/${encodeURIComponent(id)}`),
   goal: (body: unknown) => request<unknown>('/api/app/goals', { method: 'POST', body: JSON.stringify(body) }),
-  aiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
-  createAiRun: (text: string, idempotencyKey: string) => request<AiRun>('/api/v1/app/ai/runs', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ text, clientMessageId: crypto.randomUUID() }) }),
+  createAiSession: (idempotencyKey: string) => request<AiSession>('/api/v1/app/ai/sessions', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ topic: 'GENERAL' }) }),
+  createAiMessage: (sessionId: string, text: string, idempotencyKey: string) => request<AiRun>(`/api/v1/app/ai/sessions/${encodeURIComponent(sessionId)}/messages`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ text, clientMessageId: newClientId() }) }),
   decideAiRunApproval: (runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT', idempotencyKey: string) => request<AiRun>(`/api/v1/app/ai/runs/${runId}/approvals/${approvalId}`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ decision }) }),
-  appAiMessage: (message: string) => request<{ message: string }>('/api/app/ai/messages', { method: 'POST', body: JSON.stringify({ message }) }),
 };
+
+export type TrainingProfile = {
+  biologicalSex: 'FEMALE' | 'MALE' | 'NOT_DISCLOSED';
+  birthYear?: number;
+  heightCm?: number;
+  experienceLevel: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+  trainingVenues: ('HOME' | 'GYM' | 'OUTDOOR' | 'OTHER')[];
+  availableEquipment: string[];
+  trainingWeekdays: number[];
+  sessionMinutes: number;
+  trainingRestrictions: string[];
+  coachingTone: 'WARM_DIRECT' | 'LIGHT_HEARTED' | 'CALM_PROFESSIONAL';
+  nutritionPreferences: string[];
+};
+
+export type TrainingProfileInput = TrainingProfile;

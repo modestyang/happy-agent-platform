@@ -4575,15 +4575,17 @@
       "get": {
         "tags": ["Observability"],
         "operationId": "adminListRecentConversations",
-        "summary": "List recent conversations without exposing user UUID search",
-        "description": "Returns the most recently active conversations across users for the personal administrator.",
-        "x-error-codes": ["UNAUTHORIZED", "FORBIDDEN"],
+        "summary": "Search and page recent conversations",
+        "description": "Searches conversations by username, user ID or conversation ID without crossing schema ownership boundaries.",
+        "x-error-codes": ["VALIDATION_FAILED", "UNAUTHORIZED", "FORBIDDEN"],
         "parameters": [
+          {"name": "query", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 160}},
           {"name": "page", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}},
-          {"name": "size", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 30}}
+          {"name": "size", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10}}
         ],
         "responses": {
-          "200": {"description": "Recent conversations", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkbenchConversationSummaryList"}}}},
+          "200": {"description": "Conversation page", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkbenchConversationPage"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "default": {"$ref": "#/components/responses/Problem"}
@@ -10952,10 +10954,11 @@
       "WorkbenchConversationSummary": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["conversationId", "userId", "agentKey", "title", "status", "startedAt", "lastMessageAt", "messageCount", "runCount"],
+        "required": ["conversationId", "userId", "username", "agentKey", "title", "status", "startedAt", "lastMessageAt", "messageCount", "runCount"],
         "properties": {
           "conversationId": {"type": "string", "format": "uuid"},
           "userId": {"type": "string", "format": "uuid"},
+          "username": {"type": "string", "minLength": 1},
           "agentKey": {"type": "string"},
           "title": {"type": "string"},
           "status": {"type": "string"},
@@ -10965,9 +10968,16 @@
           "runCount": {"type": "integer", "minimum": 0}
         }
       },
-      "WorkbenchConversationSummaryList": {
-        "type": "array",
-        "items": {"$ref": "#/components/schemas/WorkbenchConversationSummary"}
+      "WorkbenchConversationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "page", "size", "hasNext"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/WorkbenchConversationSummary"}},
+          "page": {"type": "integer", "minimum": 0},
+          "size": {"type": "integer", "minimum": 1, "maximum": 100},
+          "hasNext": {"type": "boolean"}
+        }
       },
       "ApprovalDecisionRequest": {
         "type": "object",

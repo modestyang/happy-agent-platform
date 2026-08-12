@@ -1,6 +1,5 @@
 package happy.jayden.yang.fitness.service;
 
-import happy.jayden.yang.fitness.service.FitnessDtos.AiMessageResponse;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
 import happy.jayden.yang.fitness.service.FitnessDtos.ClaimedCurrentGoalReportRunDto;
@@ -25,6 +24,8 @@ import happy.jayden.yang.fitness.service.FitnessDtos.MealRecognitionResult;
 import happy.jayden.yang.fitness.service.FitnessDtos.MealType;
 import happy.jayden.yang.fitness.service.FitnessDtos.MediaUploadTicket;
 import happy.jayden.yang.fitness.service.FitnessDtos.SaveTrainingPlanRequest;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingProfileDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingProfileInput;
 import happy.jayden.yang.fitness.service.FitnessDtos.UploadedMedia;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import java.time.Instant;
@@ -63,6 +64,8 @@ public final class FitnessPorts {
     GoalState createGoal(UUID userId, CreateGoalRequest request);
 
     void completeFirstSetup(UUID userId, FirstSetupRequest request);
+
+    TrainingProfileDto updateTrainingProfile(UUID userId, TrainingProfileInput request);
 
     BootstrapData loadForAi(UUID userId);
 
@@ -139,6 +142,10 @@ public final class FitnessPorts {
 
     java.util.List<UUID> activeUserIds();
 
+    void recordUserActivity(UUID userId, Instant occurredAt);
+
+    java.util.List<UUID> dailyMealPlanEligibleUserIds(Instant activeSince, LocalDate planDate);
+
     Optional<FitnessDtos.IdempotencyEntry> findIdempotency(
         UUID userId, String operation, String key);
 
@@ -149,6 +156,39 @@ public final class FitnessPorts {
         String requestHash,
         UUID resourceId,
         String responseJson);
+  }
+
+  /** Bounded, read-only facts exposed exclusively to Fitness Agent tools. */
+  public interface FitnessAgentReadStore {
+    Optional<FitnessAgentDtos.UserProfileFact> findUserProfile(UUID userId);
+
+    Optional<FitnessAgentDtos.GoalFact> findCurrentGoal(UUID userId);
+
+    Optional<FitnessAgentDtos.BodyMetricFact> findLatestWeight(UUID userId);
+
+    Optional<FitnessAgentDtos.BodyMetricFact> findLatestWaist(UUID userId);
+
+    FitnessAgentDtos.RecordPage<FitnessAgentDtos.BodyRecordFact> findBodyRecords(
+        UUID userId, Instant fromInclusive, Instant toExclusive, int limit);
+
+    FitnessAgentDtos.RecordPage<FitnessAgentDtos.WorkoutFact> findWorkouts(
+        UUID userId, LocalDate fromInclusive, LocalDate toInclusive, int limit);
+
+    FitnessAgentDtos.RecordPage<FitnessAgentDtos.MealFact> findMeals(
+        UUID userId, Instant fromInclusive, Instant toExclusive, int limit);
+
+    FitnessAgentDtos.RecordPage<FitnessAgentDtos.ExerciseFact> searchExercises(
+        String keyword, String targetArea, int limit);
+
+    FitnessAgentDtos.ExerciseCandidatePage findExerciseCandidates(
+        FitnessAgentDtos.ExerciseCandidateFilter filter);
+
+    java.util.List<FitnessAgentDtos.ExerciseFact> findExercises(java.util.List<UUID> exerciseIds);
+
+    FitnessAgentDtos.MealRecommendationStateFact findMealRecommendations(
+        UUID userId, LocalDate date);
+
+    FitnessAgentDtos.MealFeedbackFact findMealFeedback(UUID userId, Instant since);
   }
 
   public interface MediaUploadPort {
@@ -181,13 +221,9 @@ public final class FitnessPorts {
         UUID userId, UUID mediaId, MealType mealType, Instant occurredAt);
   }
 
-  /**
-   * Isolated adapter boundary for daily meal generation. The feedback context is passed as bounded
-   * reference data; it is never treated as an executable user instruction.
-   */
+  /** Isolated adapter boundary for a Skill-selected daily meal background Agent task. */
   public interface DailyMealPlanGenerationPort {
-    DailyMealPlanGenerationResult generate(
-        UUID userId, LocalDate date, FitnessDtos.MealRecommendationFeedbackContext feedbackContext);
+    DailyMealPlanGenerationResult generate(UUID userId, LocalDate date);
   }
 
   /** Isolated, non-conversational Agent boundary for the report's narrative-only JSON result. */
@@ -203,29 +239,5 @@ public final class FitnessPorts {
 
   public interface AgentProviderStatus {
     boolean configured();
-  }
-
-  public interface AiConversation {
-    AiMessageResponse send(UUID userId, String message);
-
-    default AiMessageResponse sendStreaming(
-        UUID userId, UUID runId, String message, AiStreamListener listener) {
-      AiMessageResponse response = send(userId, message);
-      listener.onTextDelta(response.message());
-      listener.onCompleted();
-      return response;
-    }
-  }
-
-  public interface AiStreamListener {
-    default void onStarted(UUID conversationId) {}
-
-    default void onProgress(String message) {}
-
-    default void onTextDelta(String delta) {}
-
-    default void onCompleted() {}
-
-    default void onFailed(String message) {}
   }
 }

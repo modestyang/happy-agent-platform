@@ -1,32 +1,46 @@
+import { useId } from 'react';
+
 type BodyRecord = { recordedAt: string; weightJin?: number };
+
+export type TrendChartPoint = { key: string; value: number };
+
+export function TrendChart({ emptyText, label, points, unit }: { emptyText: string; label: string; points: TrendChartPoint[]; unit: string }) {
+  const gradientId = `trend-fill-${useId().replaceAll(':', '')}`;
+  if (!points.length) return <div className="chart-empty">{emptyText}</div>;
+
+  const values = points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(max - min, 1);
+  const plotted = points.map((point, index) => ({
+    x: points.length === 1 ? 150 : 16 + (index / (points.length - 1)) * 268,
+    y: 80 - ((point.value - min) / spread) * 56,
+    ...point,
+  }));
+  const path = plotted.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ');
+
+  return <div className="weight-chart" role="img" aria-label={`${label}，共 ${points.length} 条记录`}>
+    <svg viewBox="0 0 300 102" aria-hidden="true">
+      <defs><linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1"><stop stopColor="#ff8d67" stopOpacity=".34" /><stop offset="1" stopColor="#ff8d67" stopOpacity="0" /></linearGradient></defs>
+      <path className="weight-chart__area" style={{ fill: `url(#${gradientId})` }} d={`${path} L${plotted.at(-1)?.x},96 L${plotted[0].x},96 Z`} />
+      <path className="weight-chart__line" d={path} />
+      {plotted.map((point) => <circle key={point.key} cx={point.x} cy={point.y} r="4" />)}
+    </svg>
+    <div><span>{points[0].value} {unit}</span><strong>{points.at(-1)?.value} {unit}</strong></div>
+  </div>;
+}
 
 export function WeightSparkline({ records }: { records: BodyRecord[] }) {
   const points = [...records]
     .filter((record): record is BodyRecord & { weightJin: number } => typeof record.weightJin === 'number')
     .sort((left, right) => new Date(left.recordedAt).getTime() - new Date(right.recordedAt).getTime());
 
-  if (!points.length) return <div className="chart-empty">记录体重后，这里会长出一条属于你的曲线。</div>;
-
-  const values = points.map((point) => point.weightJin);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = Math.max(max - min, 1);
-  const plotted = points.map((point, index) => {
-    const x = points.length === 1 ? 150 : 16 + (index / (points.length - 1)) * 268;
-    const y = 80 - ((point.weightJin - min) / spread) * 56;
-    return { x, y, value: point.weightJin };
-  });
-  const path = plotted.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ');
-
-  return <div className="weight-chart" role="img" aria-label={`体重趋势，共 ${points.length} 条记录`}>
-    <svg viewBox="0 0 300 102" aria-hidden="true">
-      <defs><linearGradient id="weight-fill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#ff8d67" stopOpacity=".34" /><stop offset="1" stopColor="#ff8d67" stopOpacity="0" /></linearGradient></defs>
-      <path className="weight-chart__area" d={`${path} L${plotted.at(-1)?.x},96 L${plotted[0].x},96 Z`} />
-      <path className="weight-chart__line" d={path} />
-      {plotted.map((point) => <circle key={`${point.x}-${point.value}`} cx={point.x} cy={point.y} r="4" />)}
-    </svg>
-    <div><span>{points[0].weightJin} 斤</span><strong>{points.at(-1)?.weightJin} 斤</strong></div>
-  </div>;
+  return <TrendChart
+    emptyText="记录体重后，这里会长出一条属于你的曲线。"
+    label="体重趋势"
+    points={points.map((point) => ({ key: point.recordedAt, value: point.weightJin }))}
+    unit="斤"
+  />;
 }
 
 export function BodyActivation({ areas }: { areas: string[] }) {

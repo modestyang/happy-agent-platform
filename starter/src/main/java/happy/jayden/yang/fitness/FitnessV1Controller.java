@@ -71,6 +71,35 @@ public class FitnessV1Controller {
         .body(run);
   }
 
+  @PostMapping("/ai/sessions")
+  ResponseEntity<FitnessAgentRunService.AiSession> createAiSession(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody CreateAiSessionBody request) {
+    if (key == null || key.isBlank()) throw new InvalidRequestException("Idempotency-Key 必填");
+    if (request == null || request.topic() == null) {
+      throw new InvalidRequestException("topic 必填");
+    }
+    var session = agentRuns.createUserSession(token);
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .header(HttpHeaders.LOCATION, "/api/v1/app/ai/sessions/" + session.sessionId())
+        .body(session);
+  }
+
+  @PostMapping("/ai/sessions/{sessionId}/messages")
+  ResponseEntity<FitnessAgentRunService.RunAccepted> createAiMessage(
+      @CookieValue(name = SESSION_COOKIE, required = false) String token,
+      @PathVariable("sessionId") UUID sessionId,
+      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+      @RequestBody CreateAiRunBody request) {
+    if (key == null || key.isBlank()) throw new InvalidRequestException("Idempotency-Key 必填");
+    var run = agentRuns.startUser(token, sessionId, request == null ? null : request.text());
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .header(HttpHeaders.LOCATION, "/api/v1/app/ai/runs/" + run.runId())
+        .header(HttpHeaders.RETRY_AFTER, "1")
+        .body(run);
+  }
+
   @GetMapping(value = "/ai/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   SseEmitter streamAiRun(
       @CookieValue(name = SESSION_COOKIE, required = false) String token,
@@ -91,6 +120,8 @@ public class FitnessV1Controller {
   }
 
   record CreateAiRunBody(String text, UUID clientMessageId) {}
+
+  record CreateAiSessionBody(String topic, String clientTimezone) {}
 
   record ApprovalDecisionBody(String decision) {}
 

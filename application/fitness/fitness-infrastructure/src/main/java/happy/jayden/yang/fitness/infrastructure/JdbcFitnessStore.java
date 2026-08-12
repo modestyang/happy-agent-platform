@@ -38,6 +38,8 @@ import happy.jayden.yang.fitness.service.FitnessDtos.PlanDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.PlanExerciseDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.SaveTrainingPlanRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.Sentiment;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingProfileDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingProfileInput;
 import happy.jayden.yang.fitness.service.FitnessDtos.UserDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
@@ -69,6 +71,7 @@ public final class JdbcFitnessStore implements FitnessStore {
   private static final TypeReference<List<MealRecognitionCandidate>> CANDIDATES =
       new TypeReference<>() {};
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
+  private static final TypeReference<List<Integer>> INTEGERS = new TypeReference<>() {};
   private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
   private static final int MAX_CONTEXT_FOOD_LENGTH = 120;
   private static final int MAX_CONTEXT_NOTE_LENGTH = 160;
@@ -183,6 +186,7 @@ public final class JdbcFitnessStore implements FitnessStore {
             "SELECT COUNT(*) FROM workout_plans WHERE user_id=? AND status='COMPLETED'",
             Long.class,
             userId);
+    TrainingProfileDto trainingProfile = trainingProfile(userId);
     return new BootstrapData(
         user,
         goal,
@@ -191,7 +195,8 @@ public final class JdbcFitnessStore implements FitnessStore {
         mealRecommendations,
         plan,
         exercises,
-        completedWorkoutCount == null ? 0 : completedWorkoutCount);
+        completedWorkoutCount == null ? 0 : completedWorkoutCount,
+        trainingProfile);
   }
 
   @Override
@@ -484,7 +489,7 @@ public final class JdbcFitnessStore implements FitnessStore {
                 + " ON CONFLICT (user_id,plan_date) DO UPDATE SET status='GENERATING',generated_at=NULL,"
                 + " failure_code=NULL,failure_message=NULL,lease_token=NULL,lease_until=NULL,"
                 + " version=daily_meal_plan_runs.version+1,updated_at=CURRENT_TIMESTAMP"
-                + " WHERE daily_meal_plan_runs.status='FAILED' RETURNING"
+                + " WHERE daily_meal_plan_runs.status IN ('FAILED','READY') RETURNING"
                 + " meal_plan_id,user_id,plan_date,status,generated_at,failure_code,failure_message,version,lease_token,lease_until",
             (rs, row) -> dailyMealPlanRun(rs),
             UUID.randomUUID(),
@@ -736,6 +741,30 @@ public final class JdbcFitnessStore implements FitnessStore {
         (rs, row) -> rs.getObject("user_id", UUID.class));
   }
 
+  @Override
+  public void recordUserActivity(UUID userId, Instant occurredAt) {
+    jdbc.update(
+        "UPDATE users SET updated_at=GREATEST(updated_at,?) WHERE user_id=? AND status='ACTIVE'",
+        Timestamp.from(occurredAt),
+        userId);
+  }
+
+  @Override
+  public List<UUID> dailyMealPlanEligibleUserIds(Instant activeSince, LocalDate planDate) {
+    return jdbc.query(
+        "SELECT u.user_id FROM users u WHERE u.status='ACTIVE' AND u.updated_at>=?"
+            + " AND EXISTS (SELECT 1 FROM goals g WHERE g.user_id=u.user_id AND g.status='ACTIVE')"
+            + " AND NOT EXISTS (SELECT 1 FROM daily_meal_plan_runs r"
+            + " WHERE r.user_id=u.user_id AND r.plan_date=?)"
+            + " AND NOT EXISTS (SELECT 1 FROM daily_meal_recommendations d"
+            + " WHERE d.user_id=u.user_id AND d.recommendation_date=? AND d.status='READY'"
+            + " GROUP BY d.user_id,d.recommendation_date HAVING count(*)=3) ORDER BY u.user_id",
+        (rs, row) -> rs.getObject("user_id", UUID.class),
+        Timestamp.from(activeSince),
+        planDate,
+        planDate);
+  }
+
   private static String truncateCodePoints(String value, int maximum) {
     if (value.codePointCount(0, value.length()) <= maximum) return value;
     return value.substring(0, value.offsetByCodePoints(0, maximum));
@@ -901,6 +930,7 @@ public final class JdbcFitnessStore implements FitnessStore {
           if (goalCount != null && goalCount > 0) {
             throw new InvalidRequestException("首次设置已完成");
           }
+          upsertTrainingProfile(userId, request.trainingProfile());
           Instant recordedAt = Instant.now();
           jdbc.update(
               "INSERT INTO body_records(body_record_id,user_id,recorded_at,weight_jin,waist_cm) VALUES (?,?,?,?,?)",
@@ -921,6 +951,17 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   @Override
+  public TrainingProfileDto updateTrainingProfile(UUID userId, TrainingProfileInput request) {
+    return transactions.execute(
+        ignored -> {
+          jdbc.queryForObject(
+              "SELECT user_id FROM users WHERE user_id=? FOR UPDATE", UUID.class, userId);
+          upsertTrainingProfile(userId, request);
+          return trainingProfile(userId);
+        });
+  }
+
+  @Override
   public BootstrapData loadForAi(UUID userId) {
     return loadBootstrap(userId, LocalDate.now(USER_ZONE));
   }
@@ -933,6 +974,20 @@ public final class JdbcFitnessStore implements FitnessStore {
             + " SET username='user',password_hash=EXCLUDED.password_hash,nickname='小秦',status='ACTIVE'",
         userId,
         passwordHash);
+    upsertTrainingProfile(
+        userId,
+        new TrainingProfileInput(
+            "NOT_DISCLOSED",
+            null,
+            null,
+            "BEGINNER",
+            List.of("HOME"),
+            List.of("瑜伽垫"),
+            List.of(1, 3, 5),
+            30,
+            List.of(),
+            "WARM_DIRECT",
+            List.of("中式家常")));
     jdbc.update(
         "INSERT INTO"
             + " goals(goal_id,user_id,name,start_weight_jin,target_weight_jin,target_date,status,created_at)"
@@ -1353,11 +1408,59 @@ public final class JdbcFitnessStore implements FitnessStore {
         rs.getTimestamp("feedback_updated_at").toInstant());
   }
 
+  private TrainingProfileDto trainingProfile(UUID userId) {
+    return jdbc
+        .query(
+            "SELECT biological_sex,birth_year,height_cm,experience_level,training_venues,available_equipment,training_weekdays,session_minutes,training_restrictions,coaching_tone,nutrition_preferences FROM user_training_profiles WHERE user_id=?",
+            (rs, row) ->
+                new TrainingProfileDto(
+                    rs.getString("biological_sex"),
+                    rs.getObject("birth_year", Integer.class),
+                    rs.getBigDecimal("height_cm"),
+                    rs.getString("experience_level"),
+                    strings(rs.getString("training_venues")),
+                    strings(rs.getString("available_equipment")),
+                    integers(rs.getString("training_weekdays")),
+                    rs.getInt("session_minutes"),
+                    strings(rs.getString("training_restrictions")),
+                    rs.getString("coaching_tone"),
+                    strings(rs.getString("nutrition_preferences"))),
+            userId)
+        .stream()
+        .findFirst()
+        .orElse(null);
+  }
+
+  private void upsertTrainingProfile(UUID userId, TrainingProfileInput request) {
+    jdbc.update(
+        "INSERT INTO user_training_profiles(user_id,biological_sex,birth_year,height_cm,experience_level,training_venues,available_equipment,training_weekdays,session_minutes,training_restrictions,coaching_tone,nutrition_preferences) VALUES (?,?,?,?,?,?::jsonb,?::jsonb,?::jsonb,?,?::jsonb,?,?::jsonb) ON CONFLICT (user_id) DO UPDATE SET biological_sex=EXCLUDED.biological_sex,birth_year=EXCLUDED.birth_year,height_cm=EXCLUDED.height_cm,experience_level=EXCLUDED.experience_level,training_venues=EXCLUDED.training_venues,available_equipment=EXCLUDED.available_equipment,training_weekdays=EXCLUDED.training_weekdays,session_minutes=EXCLUDED.session_minutes,training_restrictions=EXCLUDED.training_restrictions,coaching_tone=EXCLUDED.coaching_tone,nutrition_preferences=EXCLUDED.nutrition_preferences,updated_at=CURRENT_TIMESTAMP",
+        userId,
+        request.biologicalSex(),
+        request.birthYear(),
+        request.heightCm(),
+        request.experienceLevel(),
+        json(request.trainingVenues()),
+        json(request.availableEquipment()),
+        json(request.trainingWeekdays()),
+        request.sessionMinutes(),
+        json(request.trainingRestrictions()),
+        request.coachingTone(),
+        json(request.nutritionPreferences()));
+  }
+
   private List<String> strings(String json) throws SQLException {
     try {
       return objectMapper.readValue(json, STRINGS);
     } catch (JsonProcessingException exception) {
       throw new SQLException("Invalid JSON string list", exception);
+    }
+  }
+
+  private List<Integer> integers(String json) throws SQLException {
+    try {
+      return objectMapper.readValue(json, INTEGERS);
+    } catch (JsonProcessingException exception) {
+      throw new SQLException("Invalid JSON integer list", exception);
     }
   }
 

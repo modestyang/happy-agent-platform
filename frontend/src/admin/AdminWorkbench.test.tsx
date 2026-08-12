@@ -56,7 +56,7 @@ type WorkbenchFixture = {
 const snapshot: WorkbenchFixture = {
   overview: { agentCount: 1, platformStatus: 'NEEDS_CONFIGURATION', availableComponents: 2, configuredProviders: 0, runCount: 0 },
   agents: [{
-    agentKey: 'fitness.coach', name: '瘦瘦健身教练', description: '陪伴用户完成训练与饮食管理', status: 'DRAFT',
+    agentKey: 'fitness.coach', name: '花爷健身教练', description: '陪伴用户完成训练与饮食管理', status: 'DRAFT',
     frameworkKey: 'framework.agentscope', providerKey: 'provider.bailian', modelKey: 'model.qwen-plus',
     promptKey: 'prompt.fitness-coach', toolKeys: [], skillKeys: [], hookKeys: [], memoryKey: 'memory.session',
     temperature: 0.6, maxToolCalls: 8, publishedVersion: 0, revision: 1, updatedAt: '2026-08-06T01:00:00Z',
@@ -122,7 +122,7 @@ describe('AdminWorkbench', () => {
     renderAt('/admin');
 
     expect(await screen.findByRole('heading', { name: 'Agent 工作台' })).toBeInTheDocument();
-    expect(screen.getByText('瘦瘦健身教练')).toBeInTheDocument();
+    expect(screen.getByText('花爷健身教练')).toBeInTheDocument();
     expect(screen.getByText('尚未配置运行依赖')).toBeInTheDocument();
     expect(screen.getByText('暂无真实 Run')).toBeInTheDocument();
     expect(screen.getByText('可用能力')).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe('AdminWorkbench', () => {
     renderAt('/admin/agents');
 
     expect(await screen.findByRole('heading', { name: 'Agent' })).toBeInTheDocument();
-    expect(screen.getByText('瘦瘦健身教练')).toBeInTheDocument();
+    expect(screen.getByText('花爷健身教练')).toBeInTheDocument();
     expect(screen.getByText('陪伴用户完成训练与饮食管理')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /进入配置/ })).toHaveAttribute('href', '/admin/agents/fitness.coach');
   });
@@ -170,13 +170,15 @@ describe('AdminWorkbench', () => {
     expect(screen.getByLabelText('Agent Key')).toBeInTheDocument();
   });
 
-  it('loads recent conversations without exposing UUID search', async () => {
+  it('searches paged conversations and shows all conversation identities', async () => {
     const conversation = {
-      conversationId: 'conversation-1', userId: 'user-1', agentKey: 'fitness.coach', title: '明天怎么训练', status: 'ACTIVE',
+      conversationId: 'conversation-1', userId: 'user-1', username: 'trace-alice', agentKey: 'fitness.coach', title: '明天怎么训练', status: 'ACTIVE',
       startedAt: '2026-08-10T08:00:00Z', lastMessageAt: '2026-08-10T08:01:00Z', messageCount: 2, runCount: 1,
     };
     const fetchMock = mockFetch({
-      '/api/admin/traces/conversations?page=0&size=30': [conversation],
+      '/api/admin/traces/conversations?page=0&size=10': { items: [conversation], page: 0, size: 10, hasNext: true },
+      '/api/admin/traces/conversations?query=alice&page=0&size=10': { items: [conversation], page: 0, size: 10, hasNext: true },
+      '/api/admin/traces/conversations?query=alice&page=1&size=10': { items: [], page: 1, size: 10, hasNext: false },
       '/api/admin/traces/conversations/conversation-1': {
         conversation,
         messages: [
@@ -186,14 +188,34 @@ describe('AdminWorkbench', () => {
         runs: [],
       },
     });
+    const user = userEvent.setup();
     renderAt('/admin/traces');
 
     expect(await screen.findByRole('link', { name: 'Trace' })).toHaveAttribute('href', '/admin/traces');
     expect(screen.getByRole('heading', { name: '会话 Trace' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('用户 ID')).not.toBeInTheDocument();
-    expect(screen.queryByText('最近运行')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /明天怎么训练/ })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith('/api/admin/traces/conversations?page=0&size=30', expect.anything());
+    expect(screen.getAllByText('trace-alice').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('user-1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('conversation-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('第 1 页')).toBeInTheDocument();
+
+    const searchbox = screen.getByRole('searchbox', { name: '搜索会话' });
+    await user.type(searchbox, 'alice');
+    await user.click(screen.getByRole('button', { name: '搜索' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/traces/conversations?query=alice&page=0&size=10', expect.anything(),
+    ));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    expect(await screen.findByText('未找到匹配会话')).toBeInTheDocument();
+    expect(screen.getByText('第 2 页')).toBeInTheDocument();
+
+    await user.clear(searchbox);
+    await user.click(screen.getByRole('button', { name: '搜索' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(
+      ([input]) => String(input) === '/api/admin/traces/conversations?page=0&size=10',
+    )).toHaveLength(2));
+    expect(await screen.findByRole('button', { name: /明天怎么训练/ })).toBeInTheDocument();
   });
 
   it('opens model creation in a modal with compact capability declarations', async () => {
@@ -238,9 +260,9 @@ describe('AdminWorkbench', () => {
         costUsd: 0, modelKey: 'MiniMax-M3', frameworkKey: 'agentscope', errorCode: null, errorMessage: null,
         inputSummary: '明天怎么训练？', outputSummary: '## 全身训练\n- 深蹲 4 组',
         events: [
-          { sequence: 1, type: 'TOOL_STARTED', title: '调用 Tool', detail: 'fitness.plan.generate', occurredAt: '2026-08-10T08:00:00Z' },
-          { sequence: 2, type: 'TOOL_COMPLETED', title: 'Tool 返回', detail: 'fitness.plan.generate', occurredAt: '2026-08-10T08:00:01Z' },
-          { sequence: 3, type: 'TOKEN', title: 'model output', detail: '重复正文', occurredAt: '2026-08-10T08:00:02Z' },
+          { sequence: 1, type: 'TOOL_STARTED', title: '调用 Tool', detail: 'fitness.exercise.search', payload: {}, occurredAt: '2026-08-10T08:00:00Z' },
+          { sequence: 2, type: 'TOOL_COMPLETED', title: 'Tool 返回', detail: 'fitness.exercise.search', payload: {}, occurredAt: '2026-08-10T08:00:01Z' },
+          { sequence: 3, type: 'TOKEN', title: 'model output', detail: '重复正文', payload: {}, occurredAt: '2026-08-10T08:00:02Z' },
         ],
       },
     });
@@ -307,6 +329,27 @@ describe('AdminWorkbench', () => {
     expect(await screen.findByText('技能配置已保存')).toBeInTheDocument();
   });
 
+  it('shows an unavailable required Tool in a Skill so it can be removed', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        components: [
+          ...snapshot.components,
+          { type: 'SKILL', componentKey: 'fitness.plan.skill', displayName: '训练计划编排', description: '组合目标和训练记录。', version: 1, status: 'AVAILABLE', tags: ['计划'], config: { requiredTools: ['fitness.plan.generate'] } },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderAt('/admin/skills');
+
+    await user.click(await screen.findByRole('button', { name: /训练计划编排/ }));
+    const staleTool = await screen.findByRole('button', { name: /未登记工具：fitness\.plan\.generate/ });
+    expect(staleTool).toHaveClass('is-unavailable');
+
+    await user.click(staleTool);
+    expect(screen.queryByRole('button', { name: /未登记工具：fitness\.plan\.generate/ })).not.toBeInTheDocument();
+  });
+
   it('keeps the mandatory safety Hook selected in the Agent editor', async () => {
     mockFetch({
       '/api/admin/workbench': {
@@ -323,6 +366,24 @@ describe('AdminWorkbench', () => {
     const safetyHook = await screen.findByRole('button', { name: /健身安全护栏/ });
     expect(safetyHook).toHaveAttribute('aria-pressed', 'true');
     expect(safetyHook).toBeDisabled();
+  });
+
+  it('shows a selected unavailable Tool so an outdated draft binding can be removed', async () => {
+    mockFetch({
+      '/api/admin/workbench': {
+        ...snapshot,
+        agents: [{ ...snapshot.agents[0], toolKeys: ['tool.fitness.plan', 'fitness.plan.generate'] }],
+      },
+    });
+    const user = userEvent.setup();
+    renderAt('/admin/agents/fitness.coach');
+
+    const staleTool = await screen.findByRole('button', { name: /未登记工具：fitness\.plan\.generate/ });
+    expect(staleTool).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(staleTool);
+    expect(screen.queryByRole('button', { name: /未登记工具：fitness\.plan\.generate/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /工具1 已选择/ })).toBeInTheDocument();
   });
 
   it('does not inject a fitness safety Hook into a generic Agent', async () => {
@@ -434,9 +495,13 @@ describe('AdminWorkbench', () => {
         const events = [
           { type: 'RUN_STATE', data: { status: 'RUNNING', summary: '正在整理建议' } },
           { type: 'TEXT_DELTA', data: { messageId: 'run-1', delta: '今天也要好好吃饭。' } },
+          { type: 'STRUCTURED_COMPONENT', data: { block: { kind: 'CONFIRMATION', confirmationId: 'approval-admin', title: '保存计划', message: '保存调试计划？', confirmLabel: '保存', cancelLabel: '取消' } } },
           { type: 'COMPLETED', data: { status: 'SUCCEEDED' } },
         ];
         return new Response(events.map((event, index) => `id: ${index + 1}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      if (url === '/api/v1/admin/playground/runs/run-1/approvals/approval-admin' && init?.method === 'POST') {
+        return new Promise<Response>(() => undefined);
       }
       return new Response('{}', { status: 200 });
     });
@@ -444,7 +509,7 @@ describe('AdminWorkbench', () => {
     const user = userEvent.setup();
     renderAt('/admin/playground');
 
-    expect(await screen.findByRole('option', { name: /瘦瘦健身教练/ })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /花爷健身教练/ })).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('调试 Agent'), 'baby.food');
     expect(screen.getByRole('option', { name: /辅食助手/ })).toBeInTheDocument();
     const input = await screen.findByPlaceholderText('请输入测试问题');
@@ -452,6 +517,8 @@ describe('AdminWorkbench', () => {
     await user.click(screen.getByRole('button', { name: /发送/ }));
 
     expect(await screen.findByText('今天也要好好吃饭。')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: '保存' }));
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/admin/playground/runs',
       expect.objectContaining({

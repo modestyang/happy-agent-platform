@@ -16,6 +16,31 @@ function componentOptions(components: WorkbenchComponent[], type: string) {
   return components.filter((item) => item.type === type);
 }
 
+function capabilityItems(
+  components: WorkbenchComponent[],
+  type: 'TOOL' | 'SKILL' | 'HOOK',
+  selectedKeys: string[],
+) {
+  const items = components.filter((item) => item.type === type);
+  const registeredKeys = new Set(items.map((item) => item.componentKey));
+  const label = type === 'TOOL' ? '工具' : type === 'SKILL' ? '技能' : 'Hook';
+  return [
+    ...items,
+    ...selectedKeys
+      .filter((key) => !registeredKeys.has(key))
+      .map((componentKey) => ({
+        type,
+        componentKey,
+        displayName: `未登记${label}：${componentKey}`,
+        description: '该能力不再存在于当前目录，请移除后再保存草稿。',
+        version: 0,
+        status: 'UNAVAILABLE',
+        tags: [],
+        config: {},
+      })),
+  ];
+}
+
 const FITNESS_AGENT_KEY = 'fitness.coach';
 const FITNESS_SAFETY_HOOK = 'fitness.safety';
 
@@ -162,14 +187,15 @@ export function AgentEditor() {
       <div className="admin-section-title"><span><Sparkles /></span><div><h2>能力装配</h2><p>只展示代码或目录中已登记的能力；不可用项会阻止发布。</p></div></div>
       {(['TOOL', 'SKILL', 'HOOK'] as const).map((type) => {
         const key = type === 'TOOL' ? 'toolKeys' : type === 'SKILL' ? 'skillKeys' : 'hookKeys';
-        const items = components.filter((item) => item.type === type);
+        const items = capabilityItems(components, type, draft[key]);
         const Icon = type === 'TOOL' ? Wrench : type === 'SKILL' ? Sparkles : Webhook;
         const label = type === 'TOOL' ? '工具' : type === 'SKILL' ? '技能' : 'Hook';
         return <div className="admin-capability-group" key={type}>
           <h3><Icon /> {label}<small>{draft[key].length} 已选择</small></h3>
           {items.length ? <div>{items.map((item) => {
             const mandatory = type === 'HOOK' && agent.agentKey === FITNESS_AGENT_KEY && item.componentKey === FITNESS_SAFETY_HOOK;
-            return <button type="button" className={draft[key].includes(item.componentKey) ? 'is-selected' : ''} aria-pressed={draft[key].includes(item.componentKey)} key={item.componentKey} disabled={mandatory} onClick={() => toggle(key, item.componentKey)}><span>{draft[key].includes(item.componentKey) ? <Check /> : <Icon />}</span><b>{item.displayName}</b><small>{mandatory ? 'MANDATORY' : item.status}</small></button>;
+            const selected = draft[key].includes(item.componentKey);
+            return <button type="button" className={`${selected ? 'is-selected' : ''}${item.status === 'UNAVAILABLE' ? ' is-unavailable' : ''}`} aria-pressed={selected} key={item.componentKey} disabled={mandatory} onClick={() => toggle(key, item.componentKey)}><span>{selected ? <Check /> : <Icon />}</span><b>{item.displayName}</b><small>{mandatory ? 'MANDATORY' : item.status}</small></button>;
           })}</div> : <p className="admin-inline-empty">当前没有登记的{label}</p>}
         </div>;
       })}

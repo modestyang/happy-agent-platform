@@ -1,5 +1,6 @@
 package happy.jayden.yang.agentbuilder.framework.adapter.springai;
 
+import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.hook.AgentHook;
@@ -49,6 +50,7 @@ final class SpringAiAlibabaRuntimeBridge {
   private volatile ReactAgent agent;
   private volatile RunnableConfig runnableConfig;
   private volatile Disposable subscription;
+  private volatile SpringAiAlibabaNodeOutputTranslator outputTranslator;
 
   SpringAiAlibabaRuntimeBridge(RunRequest request, AtomicLong sequence) {
     this(request, SpringAiAlibabaOpenAiModelFactory.create(request.model()), sequence);
@@ -65,7 +67,7 @@ final class SpringAiAlibabaRuntimeBridge {
     return Flux.defer(
         () -> {
           start();
-          return events.asFlux();
+          return events.asFlux().doOnCancel(this::cancel);
         });
   }
 
@@ -73,7 +75,28 @@ final class SpringAiAlibabaRuntimeBridge {
     if (!started.compareAndSet(false, true)) {
       return;
     }
-    var output = new StringBuilder();
+    outputTranslator =
+        new SpringAiAlibabaNodeOutputTranslator(
+            request.runId() + "-reply", "run-" + request.runId(), sequence, this::emitEvent);
+    emit(
+        RunEvent.Type.CONTEXT_ASSEMBLED,
+        Map.of("runId", request.runId(), "memoryEntries", request.memory().entries().size()));
+    if (!request.memory().entries().isEmpty()) {
+      emit(
+          RunEvent.Type.MEMORY_LOADED,
+          Map.of("runId", request.runId(), "entryCount", request.memory().entries().size()));
+    }
+    for (var skill : request.skills()) {
+      emit(
+          RunEvent.Type.SKILL_DISCOVERED,
+          Map.of(
+              "runId",
+              request.runId(),
+              "skillKey",
+              skill.key(),
+              "description",
+              skill.description()));
+    }
     var hooks = hooks();
     agent =
         ReactAgent.builder()
@@ -90,21 +113,20 @@ final class SpringAiAlibabaRuntimeBridge {
     runnableConfig = RunnableConfig.builder().threadId(request.runId()).build();
     try {
       subscription =
-          agent
-              .streamMessages(new UserMessage(request.input()), runnableConfig)
-              .doOnNext(
-                  message -> {
-                    var text = text(message);
-                    if (!text.isBlank()) {
-                      output.append(text);
-                      emit(RunEvent.Type.MODEL_DELTA, Map.of("text", text));
-                    }
-                  })
+          agent.stream(new UserMessage(request.input()), runnableConfig)
+              .doOnNext(this::acceptOutput)
               .doOnComplete(
-                  () ->
-                      emit(
-                          RunEvent.Type.RUN_COMPLETED,
-                          Map.of("result", RunResult.completed(output.toString()))))
+                  () -> {
+                    var translator = outputTranslator;
+                    if (translator != null) {
+                      translator.complete();
+                    }
+                    emit(
+                        RunEvent.Type.RUN_COMPLETED,
+                        Map.of(
+                            "result",
+                            RunResult.completed(translator == null ? "" : translator.text())));
+                  })
               .subscribe(ignored -> {}, this::fail, events::tryEmitComplete);
     } catch (com.alibaba.cloud.ai.graph.exception.GraphRunnerException error) {
       fail(error);
@@ -116,6 +138,22 @@ final class SpringAiAlibabaRuntimeBridge {
         .map(tool -> new SpringAiAlibabaToolCallback(tool, request, budget, this::emit, this::fail))
         .map(ToolCallback.class::cast)
         .toList();
+  }
+
+  private void acceptOutput(NodeOutput output) {
+    var translator = outputTranslator;
+    if (translator != null) {
+      translator.accept(output);
+    }
+    if (!(output instanceof com.alibaba.cloud.ai.graph.streaming.StreamingOutput<?> streamingOutput)
+        || streamingOutput.getOutputType()
+            != com.alibaba.cloud.ai.graph.streaming.OutputType.AGENT_MODEL_STREAMING) {
+      return;
+    }
+    var value = text(streamingOutput.message());
+    if (!value.isBlank()) {
+      emit(RunEvent.Type.MODEL_DELTA, Map.of("text", value));
+    }
   }
 
   private OpenAiChatOptions chatOptions() {
@@ -144,7 +182,16 @@ final class SpringAiAlibabaRuntimeBridge {
   }
 
   private String systemPrompt() {
-    var prompt = new StringBuilder("You are a helpful assistant.");
+    var prompt =
+        new StringBuilder(
+            request.systemPrompt().isBlank()
+                ? "You are a helpful assistant."
+                : request.systemPrompt());
+    if (!request.skills().isEmpty()) {
+      prompt.append(
+          "\n\nWhen the user's request matches a supplied Skill, load that Skill before answering "
+              + "and treat its instructions as binding for this turn.");
+    }
     for (var skill : request.skills()) {
       prompt.append("\n\nSkill ").append(skill.key()).append(":\n").append(skill.description());
       for (var resource : skill.alwaysIncludedResources()) {
@@ -166,11 +213,28 @@ final class SpringAiAlibabaRuntimeBridge {
         continue;
       }
       try {
+        emit(
+            RunEvent.Type.HOOK_STARTED,
+            Map.of("runId", request.runId(), "hookKey", hook.key(), "phase", phase.name()));
         hook.action()
             .execute(
                 new RunRequest.HookContext(
                     request.runId(), request.userId(), request.input(), phase));
+        emit(
+            RunEvent.Type.HOOK_COMPLETED,
+            Map.of("runId", request.runId(), "hookKey", hook.key(), "phase", phase.name()));
       } catch (Exception error) {
+        emit(
+            RunEvent.Type.HOOK_FAILED,
+            Map.of(
+                "runId",
+                request.runId(),
+                "hookKey",
+                hook.key(),
+                "phase",
+                phase.name(),
+                "errorMessage",
+                error.getMessage() == null ? "Hook failed" : error.getMessage()));
         if (hook.failurePolicy() == HookDefinition.FailurePolicy.FAIL_CLOSED) {
           throw new SpringAiAlibabaAdapter.HookFailure(hook.key(), error);
         }
@@ -179,11 +243,45 @@ final class SpringAiAlibabaRuntimeBridge {
   }
 
   void emit(RunEvent.Type type, Map<String, Object> data) {
+    var translator = outputTranslator;
+    if (translator != null) {
+      var toolName = data.get("toolName");
+      if (toolName instanceof String name) {
+        if (type == RunEvent.Type.TOOL_STARTED) {
+          translator.toolStarted(name);
+        } else if (type == RunEvent.Type.TOOL_RESULT) {
+          translator.toolCompleted(
+              name, String.valueOf(data.getOrDefault("encodedResult", data.get("result"))));
+          if ("read_skill".equals(name)) {
+            emit(
+                RunEvent.Type.SKILL_LOADED,
+                Map.of(
+                    "runId",
+                    request.runId(),
+                    "skillLoader",
+                    name,
+                    "result",
+                    String.valueOf(data.get("result"))));
+          }
+        } else if (type == RunEvent.Type.TOOL_FAILED) {
+          translator.toolFailed(
+              name, String.valueOf(data.getOrDefault("errorMessage", "Tool failed")));
+        }
+      }
+    }
     events.emitNext(
         SpringAiAlibabaAdapter.event(sequence, type, data), Sinks.EmitFailureHandler.FAIL_FAST);
   }
 
+  private void emitEvent(RunEvent event) {
+    events.emitNext(event, Sinks.EmitFailureHandler.FAIL_FAST);
+  }
+
   private void fail(Throwable error) {
+    var translator = outputTranslator;
+    if (translator != null) {
+      translator.fail(error);
+    }
     events.emitError(error, Sinks.EmitFailureHandler.FAIL_FAST);
   }
 
@@ -198,6 +296,10 @@ final class SpringAiAlibabaRuntimeBridge {
     }
     var activeSubscription = subscription;
     if (activeSubscription != null) {
+      var translator = outputTranslator;
+      if (translator != null) {
+        translator.interrupted();
+      }
       activeSubscription.dispose();
     }
   }
@@ -374,6 +476,8 @@ final class SpringAiAlibabaRuntimeBridge {
             bridge.runHooks(HookDefinition.Phase.POST_TOOL);
             bridge.emit(RunEvent.Type.TOOL_RESULT, Map.of("toolName", name, "result", result));
             return result;
+          } catch (SpringAiAlibabaToolCallback.ApprovalRequired confirmation) {
+            return "{\"status\":\"WAITING_USER_CONFIRMATION\"}";
           } catch (SpringAiAlibabaAdapter.HookFailure | SpringAiAlibabaAdapter.ToolFailure error) {
             bridge.fail(error);
             throw error;

@@ -53,8 +53,15 @@ class FitnessSkillRegistryTest {
     assertEquals("fitness.plan.skill", result.key());
     assertEquals("weekly-training-plan", result.value().get("kind"));
     assertEquals(
-        List.of("fitness.profile.query", "fitness.workout.query", "fitness.plan.generate"), calls);
-    assertEquals("READ_ONLY", result.value().get("persistence"));
+        List.of(
+            "fitness.goal.current.query",
+            "fitness.training.constraints.query",
+            "fitness.body.latest.query",
+            "fitness.workout.summary.query",
+            "fitness.workout.schedule.query",
+            "fitness.exercise.candidates.query"),
+        calls);
+    assertEquals("AGENT_DECIDES", result.value().get("persistence"));
     assertTrue(result.value().containsKey("facts"));
   }
 
@@ -72,7 +79,12 @@ class FitnessSkillRegistryTest {
                 "fitness.workout.query",
                 "fitness.meal.query",
                 "fitness.meal.feedback_context",
-                "fitness.plan.generate"),
+                "fitness.goal.current.query",
+                "fitness.training.constraints.query",
+                "fitness.body.latest.query",
+                "fitness.workout.summary.query",
+                "fitness.workout.schedule.query",
+                "fitness.exercise.candidates.query"),
             new ToolExecutionContext("user-1", "run-1", Set.of("fitness.read"), "fitness.skill"),
             (toolKey, input, ignored) -> {
               receivedArguments.put(toolKey, Map.copyOf(input));
@@ -86,6 +98,8 @@ class FitnessSkillRegistryTest {
     assertEquals(Map.of(), receivedArguments.get("fitness.workout.query"));
     assertEquals(Map.of(), receivedArguments.get("fitness.meal.query"));
     assertEquals(Map.of(), receivedArguments.get("fitness.meal.feedback_context"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.workout.schedule.query"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.exercise.candidates.query"));
   }
 
   private static AgentExecutionContext context(List<String> calls) {
@@ -99,7 +113,12 @@ class FitnessSkillRegistryTest {
             "fitness.workout.query",
             "fitness.meal.query",
             "fitness.meal.feedback_context",
-            "fitness.plan.generate"),
+            "fitness.goal.current.query",
+            "fitness.training.constraints.query",
+            "fitness.body.latest.query",
+            "fitness.workout.summary.query",
+            "fitness.workout.schedule.query",
+            "fitness.exercise.candidates.query"),
         new ToolExecutionContext("user-1", "run-1", Set.of("fitness.read"), "fitness.skill"),
         (toolKey, input, ignored) -> {
           calls.add(toolKey);

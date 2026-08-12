@@ -59,15 +59,15 @@ public abstract class FrameworkAdapterContract {
             "post-model",
             "post-agent"),
         evidence.mandatoryHookOrder());
-    assertEquals(
+    assertInRelativeOrder(
+        evidence.events(),
         List.of(
             RunEvent.Type.RUN_STARTED,
             RunEvent.Type.MODEL_DELTA,
             RunEvent.Type.TOOL_STARTED,
             RunEvent.Type.TOOL_RESULT,
             RunEvent.Type.MODEL_DELTA,
-            RunEvent.Type.RUN_COMPLETED),
-        evidence.events().stream().map(RunEvent::type).toList());
+            RunEvent.Type.RUN_COMPLETED));
     assertTrue(isStrictlyIncreasing(evidence.events()));
     assertTrue(
         Set.of("userId", "runId", "permissions", "operationId").stream()
@@ -117,6 +117,16 @@ public abstract class FrameworkAdapterContract {
       }
     }
     return !events.isEmpty();
+  }
+
+  private static void assertInRelativeOrder(List<RunEvent> events, List<RunEvent.Type> expected) {
+    int nextExpected = 0;
+    for (var event : events) {
+      if (nextExpected < expected.size() && event.type() == expected.get(nextExpected)) {
+        nextExpected++;
+      }
+    }
+    assertEquals(expected.size(), nextExpected, "legacy lifecycle must remain ordered among typed events");
   }
 
   protected record ConformanceEvidence(

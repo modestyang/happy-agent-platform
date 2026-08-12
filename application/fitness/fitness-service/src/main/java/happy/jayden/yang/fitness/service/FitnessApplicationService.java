@@ -1,6 +1,5 @@
 package happy.jayden.yang.fitness.service;
 
-import happy.jayden.yang.fitness.service.FitnessDtos.AiMessageResponse;
 import happy.jayden.yang.fitness.service.FitnessDtos.AiStatusDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BodyRecordDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.BootstrapData;
@@ -24,15 +23,15 @@ import happy.jayden.yang.fitness.service.FitnessDtos.OnboardingDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.RegisterRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.ReportDto;
 import happy.jayden.yang.fitness.service.FitnessDtos.ReportMetric;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingProfileDto;
+import happy.jayden.yang.fitness.service.FitnessDtos.TrainingProfileInput;
 import happy.jayden.yang.fitness.service.FitnessDtos.WorkoutCompletionDto;
-import happy.jayden.yang.fitness.service.FitnessExceptions.DependencyNotConfiguredException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConcurrencyException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.IdempotencyConflictException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.InvalidRequestException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.NotFoundException;
 import happy.jayden.yang.fitness.service.FitnessExceptions.UnauthorizedException;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
-import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
 import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
@@ -55,6 +54,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -67,7 +67,6 @@ public final class FitnessApplicationService {
   private final FitnessStore store;
   private final PasswordVerifier passwordVerifier;
   private final AgentProviderStatus providerStatus;
-  private final AiConversation aiConversation;
   private final MediaUploadPort mediaUploadPort;
   private final TransactionRunner transactionRunner;
   private final DailyMealPlanGenerationPort dailyMealPlanGenerationPort;
@@ -78,15 +77,13 @@ public final class FitnessApplicationService {
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
-      AiConversation aiConversation,
       MediaUploadPort mediaUploadPort) {
     this(
         store,
         passwordVerifier,
         providerStatus,
-        aiConversation,
         mediaUploadPort,
-        (userId, date, feedback) ->
+        (userId, date) ->
             new FitnessDtos.DailyMealPlanGenerationResult(
                 "FAILED", List.of(), "DEPENDENCY_NOT_CONFIGURED", "三餐生成运行时未配置"),
         new TransactionRunner() {
@@ -101,16 +98,14 @@ public final class FitnessApplicationService {
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
-      AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
       TransactionRunner transactionRunner) {
     this(
         store,
         passwordVerifier,
         providerStatus,
-        aiConversation,
         mediaUploadPort,
-        (userId, date, feedback) ->
+        (userId, date) ->
             new FitnessDtos.DailyMealPlanGenerationResult(
                 "FAILED", List.of(), "DEPENDENCY_NOT_CONFIGURED", "三餐生成运行时未配置"),
         transactionRunner);
@@ -120,7 +115,6 @@ public final class FitnessApplicationService {
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
-      AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
       DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
       TransactionRunner transactionRunner) {
@@ -128,7 +122,6 @@ public final class FitnessApplicationService {
         store,
         passwordVerifier,
         providerStatus,
-        aiConversation,
         mediaUploadPort,
         dailyMealPlanGenerationPort,
         facts ->
@@ -141,7 +134,6 @@ public final class FitnessApplicationService {
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
-      AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
       DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
       FitnessPorts.CurrentGoalReportGenerationPort currentGoalReportGenerationPort,
@@ -149,7 +141,6 @@ public final class FitnessApplicationService {
     this.store = store;
     this.passwordVerifier = passwordVerifier;
     this.providerStatus = providerStatus;
-    this.aiConversation = aiConversation;
     this.mediaUploadPort = mediaUploadPort;
     this.dailyMealPlanGenerationPort = dailyMealPlanGenerationPort;
     this.currentGoalReportGenerationPort = currentGoalReportGenerationPort;
@@ -200,7 +191,14 @@ public final class FitnessApplicationService {
   }
 
   public BootstrapDto bootstrap(String sessionToken) {
-    BootstrapData data = store.loadBootstrap(authenticate(sessionToken), LocalDate.now(USER_ZONE));
+    UUID userId = authenticate(sessionToken);
+    Instant now = Instant.now();
+    LocalDate today = LocalDate.now(USER_ZONE);
+    store.recordUserActivity(userId, now);
+    BootstrapData data = store.loadBootstrap(userId, today);
+    if (data.goal() != null && store.findDailyMealPlan(userId, today).isEmpty()) {
+      store.enqueueDailyMealPlanGeneration(userId, today);
+    }
     AiStatusDto ai =
         new AiStatusDto(
             providerStatus.configured(), providerStatus.configured() ? null : AI_REASON);
@@ -216,7 +214,8 @@ public final class FitnessApplicationService {
           List.of(),
           0,
           null,
-          ai);
+          ai,
+          data.trainingProfile());
     }
     BigDecimal currentWeight = currentWeight(data);
     GoalDto goal = goal(data.goal(), currentWeight);
@@ -231,7 +230,8 @@ public final class FitnessApplicationService {
         data.exercises(),
         data.completedWorkoutCount(),
         report(data, goal),
-        ai);
+        ai,
+        data.trainingProfile());
   }
 
   public UUID authenticateSession(String sessionToken) {
@@ -259,7 +259,20 @@ public final class FitnessApplicationService {
     positive(request.weightJin(), "weightJin");
     positive(request.waistCm(), "waistCm");
     positive(request.targetWeightJin(), "targetWeightJin");
-    store.completeFirstSetup(authenticate(sessionToken), request);
+    store.completeFirstSetup(
+        authenticate(sessionToken),
+        new FirstSetupRequest(
+            request.weightJin(),
+            request.waistCm(),
+            request.targetWeightJin(),
+            request.targetDate(),
+            validateTrainingProfile(request.trainingProfile())));
+  }
+
+  public TrainingProfileDto updateTrainingProfile(
+      String sessionToken, TrainingProfileInput request) {
+    return store.updateTrainingProfile(
+        authenticate(sessionToken), validateTrainingProfile(request));
   }
 
   public java.util.Optional<FitnessDtos.IdempotencyEntry> idempotency(
@@ -496,22 +509,42 @@ public final class FitnessApplicationService {
   /** Invoked by the 05:30 local scheduler; it only makes durable work visible to workers. */
   public void enqueueScheduledDailyMealPlans() {
     LocalDate today = LocalDate.now(USER_ZONE);
-    for (UUID userId : store.activeUserIds()) {
-      enqueueDailyMealPlan(userId, today);
+    Instant activeSince = Instant.now().minus(Duration.ofDays(14));
+    for (UUID userId : store.dailyMealPlanEligibleUserIds(activeSince, today)) {
+      store.enqueueDailyMealPlanGeneration(userId, today);
     }
   }
 
   private FitnessDtos.DailyMealPlanStateDto enqueueDailyMealPlan(UUID userId, LocalDate date) {
     var existing = store.findDailyMealPlan(userId, date);
     if (existing.isPresent()
-        && ("READY".equals(existing.get().run().status())
-            || "GENERATING".equals(existing.get().run().status()))) {
+        && ("GENERATING".equals(existing.get().run().status())
+            || ("READY".equals(existing.get().run().status())
+                && usesChineseUserFacingCopy(existing.get())))) {
       return existing.get();
     }
     store.enqueueDailyMealPlanGeneration(userId, date);
     return store
         .findDailyMealPlan(userId, date)
         .orElseThrow(() -> new IllegalStateException("三餐生成状态未持久化"));
+  }
+
+  private static boolean usesChineseUserFacingCopy(FitnessDtos.DailyMealPlanStateDto plan) {
+    return plan.recommendations().size() == 3
+        && plan.recommendations().stream()
+            .allMatch(
+                recommendation ->
+                    containsHan(recommendation.reason())
+                        && recommendation.items().stream()
+                            .allMatch(item -> containsHan(item.name())));
+  }
+
+  private static boolean containsHan(String value) {
+    return value != null
+        && value
+            .codePoints()
+            .anyMatch(
+                codePoint -> Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN);
   }
 
   /** Executes at most one durable lease. Returns false if no pending/stale run was claimable. */
@@ -526,9 +559,7 @@ public final class FitnessApplicationService {
     FitnessDtos.DailyMealPlanRunDto run = claim.run();
     FitnessDtos.DailyMealPlanGenerationResult result;
     try {
-      result =
-          dailyMealPlanGenerationPort.generate(
-              run.userId(), run.date(), mealRecommendationFeedbackContext(run.userId()));
+      result = dailyMealPlanGenerationPort.generate(run.userId(), run.date());
     } catch (RuntimeException exception) {
       result =
           new FitnessDtos.DailyMealPlanGenerationResult(
@@ -1032,36 +1063,10 @@ public final class FitnessApplicationService {
     return goal(created, current);
   }
 
-  public AiMessageResponse sendAiMessage(String sessionToken, String message) {
-    UUID userId = authenticate(sessionToken);
-    return sendAiMessageForUser(userId, message);
-  }
-
-  /**
-   * Executes a developer-console probe against the same runtime used by the personal app.
-   *
-   * <p>The caller has already passed the separate developer authentication boundary. The resulting
-   * prompt uses the first active local profile only as runtime context; it does not authenticate or
-   * impersonate a fitness-app browser session.
-   */
-  public AiMessageResponse sendAiMessageForDeveloper(String message) {
-    return sendAiMessageForUser(developerUserId(), message);
-  }
-
   public UUID developerUserId() {
     return store.activeUserIds().stream()
         .findFirst()
         .orElseThrow(() -> new InvalidRequestException("没有可用于调试的本地用户数据"));
-  }
-
-  private AiMessageResponse sendAiMessageForUser(UUID userId, String message) {
-    if (blank(message)) {
-      throw new InvalidRequestException("message 不能为空");
-    }
-    if (!providerStatus.configured()) {
-      throw new DependencyNotConfiguredException();
-    }
-    return aiConversation.send(userId, message.trim());
   }
 
   private UUID authenticate(String token) {
@@ -1124,6 +1129,111 @@ public final class FitnessApplicationService {
     if (value != null && value.compareTo(BigDecimal.ZERO) <= 0) {
       throw new InvalidRequestException(name + " 必须大于 0");
     }
+  }
+
+  private static TrainingProfileInput validateTrainingProfile(TrainingProfileInput request) {
+    if (request == null) {
+      throw new InvalidRequestException("请补充训练档案");
+    }
+    String biologicalSex =
+        allowed(request.biologicalSex(), "biologicalSex", "FEMALE", "MALE", "NOT_DISCLOSED");
+    String experienceLevel =
+        allowed(
+            request.experienceLevel(), "experienceLevel", "BEGINNER", "INTERMEDIATE", "ADVANCED");
+    List<String> venues =
+        allowedStrings(
+            request.trainingVenues(),
+            "trainingVenues",
+            Set.of("HOME", "GYM", "OUTDOOR", "OTHER"),
+            true);
+    List<String> equipment =
+        freeTextList(request.availableEquipment(), "availableEquipment", 20, 40);
+    List<Integer> weekdays = weekdays(request.trainingWeekdays());
+    List<String> restrictions =
+        freeTextList(request.trainingRestrictions(), "trainingRestrictions", 20, 80);
+    String coachingTone =
+        optionalAllowed(
+            request.coachingTone(),
+            "coachingTone",
+            "WARM_DIRECT",
+            "LIGHT_HEARTED",
+            "CALM_PROFESSIONAL");
+    List<String> nutritionPreferences =
+        freeTextList(request.nutritionPreferences(), "nutritionPreferences", 20, 40);
+    if (request.sessionMinutes() == null
+        || request.sessionMinutes() < 10
+        || request.sessionMinutes() > 180) {
+      throw new InvalidRequestException("sessionMinutes 必须在 10 到 180 之间");
+    }
+    if (request.birthYear() != null
+        && (request.birthYear() < 1900
+            || request.birthYear() > LocalDate.now(USER_ZONE).getYear())) {
+      throw new InvalidRequestException("birthYear 不合理");
+    }
+    if (request.heightCm() != null
+        && (request.heightCm().compareTo(BigDecimal.valueOf(80)) < 0
+            || request.heightCm().compareTo(BigDecimal.valueOf(250)) > 0)) {
+      throw new InvalidRequestException("heightCm 必须在 80 到 250 之间");
+    }
+    return new TrainingProfileInput(
+        biologicalSex,
+        request.birthYear(),
+        request.heightCm(),
+        experienceLevel,
+        venues,
+        equipment,
+        weekdays,
+        request.sessionMinutes(),
+        restrictions,
+        coachingTone,
+        nutritionPreferences);
+  }
+
+  private static String allowed(String value, String field, String... candidates) {
+    if (blank(value) || !Set.of(candidates).contains(value.trim())) {
+      throw new InvalidRequestException(field + " 不合法");
+    }
+    return value.trim();
+  }
+
+  private static String optionalAllowed(String value, String field, String... candidates) {
+    return blank(value) ? candidates[0] : allowed(value, field, candidates);
+  }
+
+  private static List<String> allowedStrings(
+      List<String> values, String field, Set<String> candidates, boolean required) {
+    if (values == null || (required && values.isEmpty())) {
+      throw new InvalidRequestException(field + " 至少选择一项");
+    }
+    List<String> normalized =
+        values.stream().map(value -> value == null ? "" : value.trim()).toList();
+    if (normalized.stream().anyMatch(value -> !candidates.contains(value))
+        || normalized.stream().distinct().count() != normalized.size()) {
+      throw new InvalidRequestException(field + " 不合法");
+    }
+    return normalized;
+  }
+
+  private static List<String> freeTextList(
+      List<String> values, String field, int maxItems, int maxLength) {
+    if (values == null) return List.of();
+    List<String> normalized =
+        values.stream().map(value -> value == null ? "" : value.trim()).toList();
+    if (normalized.size() > maxItems
+        || normalized.stream().anyMatch(value -> value.isEmpty() || value.length() > maxLength)
+        || normalized.stream().distinct().count() != normalized.size()) {
+      throw new InvalidRequestException(field + " 不合法");
+    }
+    return normalized;
+  }
+
+  private static List<Integer> weekdays(List<Integer> values) {
+    if (values == null) return List.of();
+    if (values.stream().anyMatch(value -> value == null || value < 1 || value > 7)
+        || values.stream().distinct().count() != values.size()) {
+      throw new InvalidRequestException("trainingWeekdays 不合法");
+    }
+    return values.stream().sorted().toList();
   }
 
   private static void rejectFuture(Instant occurredAt, String field) {

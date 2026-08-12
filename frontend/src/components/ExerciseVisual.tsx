@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ExpandableSurface } from './ContentSurface';
 
 export type ExerciseMedia = {
   name: string;
@@ -10,6 +11,7 @@ type ExerciseVisualProps = {
   exercise: ExerciseMedia;
   step?: number;
   compact?: boolean;
+  autoPlay?: boolean;
 };
 
 function Pose({ area, step }: { area: string; step: number }) {
@@ -29,16 +31,41 @@ function Pose({ area, step }: { area: string; step: number }) {
   </svg>;
 }
 
-export function ExerciseVisual({ exercise, step = 1, compact = false }: ExerciseVisualProps) {
-  const imageUrl = exercise.imageUrls?.[step - 1] ?? exercise.imageUrls?.[0];
+export function ExerciseVisual({ exercise, step = 1, compact = false, autoPlay = false }: ExerciseVisualProps) {
+  const frameCount = exercise.imageUrls?.length ?? 0;
+  const mediaKey = exercise.imageUrls?.join('\n') ?? '';
+  const reducedMotion = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const [previewStep, setPreviewStep] = useState(1);
+  useEffect(() => {
+    setPreviewStep(1);
+    if (!autoPlay || reducedMotion || frameCount <= 1) return;
+    const timer = window.setInterval(() => setPreviewStep((current) => current % frameCount + 1), 1500);
+    return () => window.clearInterval(timer);
+  }, [autoPlay, frameCount, mediaKey, reducedMotion]);
+  const activeStep = autoPlay ? previewStep : step;
+  const imageUrl = exercise.imageUrls?.[activeStep - 1] ?? exercise.imageUrls?.[0];
   const isSeedPlaceholder = Boolean(imageUrl?.startsWith('data:image/svg+xml') && imageUrl.includes('%3Ctext'));
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [imageUrl]);
 
-  return <div className={`exercise-visual${compact ? ' exercise-visual--compact' : ''}`} role="img" aria-label={`${exercise.name}第${step}步动作示意`}>
-    {imageUrl && !failed && !isSeedPlaceholder
-      ? <img src={imageUrl} alt="" onError={() => setFailed(true)} />
-      : <Pose area={exercise.targetArea} step={step} />}
-    {!compact && <span>STEP {String(step).padStart(2, '0')}</span>}
+  const visual = () => <div className={`exercise-visual${compact ? ' exercise-visual--compact' : ''}`} role="img" aria-label={`${exercise.name}第${activeStep}步动作示意`}>
+    {imageUrl && !failed && !isSeedPlaceholder ? <img src={imageUrl} alt="" onError={() => setFailed(true)} /> : <Pose area={exercise.targetArea} step={activeStep} />}
+    {!compact && <span>STEP {String(activeStep).padStart(2, '0')}</span>}
   </div>;
+
+  if (compact) return <div className="exercise-carousel exercise-carousel--compact">
+    {visual()}
+    {autoPlay && frameCount > 1 && <div className="exercise-carousel__pages" aria-label={`${exercise.name}动作帧`}>
+      {exercise.imageUrls?.map((imageUrl, index) => <button
+        aria-label={`查看${exercise.name}第${index + 1}帧`}
+        aria-pressed={activeStep === index + 1}
+        key={`${imageUrl}:${index}`}
+        onClick={() => setPreviewStep(index + 1)}
+        type="button"
+      />)}
+    </div>}
+  </div>;
+  return <ExpandableSurface variant="media" className="exercise-visual-surface" label={`${exercise.name}动作示意`} title={`${exercise.name}动作示意详情`} expandedChildren={visual()}>{visual()}</ExpandableSurface>;
 }

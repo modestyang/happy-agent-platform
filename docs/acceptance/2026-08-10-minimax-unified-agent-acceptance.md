@@ -16,7 +16,7 @@
 | 场景 | 结果 | 说明 |
 |---|---|---|
 | 独立管理员会话 | 通过 | 管理后台与健身用户会话可同时存在。 |
-| Provider 管理 | 通过 | Bailian 保留；MiniMax endpoint 为 `https://api.minimaxi.com/v1`，凭据显示已加密。 |
+| Provider 管理 | 通过 | Bailian 保留；MiniMax endpoint 为 `https://api.minimax.io/v1`，凭据显示已加密。 |
 | 模型目录 | 通过 | MiniMax M3 可选，并声明文本、工具、流式和视觉能力。 |
 | Agent 配置 | 通过 | `fitness.coach` 选择 MiniMax / MiniMax M3，工具、技能与安全 Hook 可用。 |
 | 发布与不可变快照 | 通过 | 发布 v1；对话、目标报告、三餐和图片识别统一读取同一发布快照及凭据版本。 |
@@ -68,4 +68,3 @@ Trace 首页要求管理员手工输入用户 UUID。建议默认展示最近会
 - `git diff --check`：通过。
 - 全量 ESLint：仍被既有 `frontend/src/App.test.tsx:162` 未使用参数阻塞，本轮未修改该文件。
 - 全仓库 Spotless：仍先被既有 Agent service 格式问题阻塞；本轮未扩大范围修改这些文件。
-

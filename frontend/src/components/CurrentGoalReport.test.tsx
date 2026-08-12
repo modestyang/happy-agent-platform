@@ -59,7 +59,7 @@ describe('CurrentGoalReportCard', () => {
     );
 
     expect(screen.getByLabelText('报告生成中')).toBeInTheDocument();
-    expect(screen.getByText('瘦瘦正在整理你的当前目标')).toBeInTheDocument();
+    expect(screen.getByText('花爷正在整理你的当前目标')).toBeInTheDocument();
   });
 
   it('renders deterministic trends with the fixed narrative report card and action', async () => {
@@ -79,6 +79,16 @@ describe('CurrentGoalReportCard', () => {
 
     await user.click(screen.getByRole('button', { name: '生成下周计划' }));
     expect(onGeneratePlan).toHaveBeenCalledOnce();
+  });
+
+  it('opens report trends in the shared visual dialog', async () => {
+    const user = userEvent.setup();
+    render(<CurrentGoalReportCard report={readyReport} onRetry={vi.fn()} onGeneratePlan={vi.fn()} onOpenRecord={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: '放大查看四周体重趋势' }));
+    const dialog = screen.getByRole('dialog', { name: '四周体重趋势详情' });
+    expect(dialog).toHaveClass('surface-dialog--media');
+    expect(dialog.querySelector('header')).toBeNull();
   });
 
   it('keeps failed generation honest and lets the user retry', async () => {

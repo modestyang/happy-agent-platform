@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
+import happy.jayden.yang.agentbuilder.service.workbench.AdminResourceDtos.SkillCreate;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchDtos.CreateAgentRequest;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchPort;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +21,7 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
@@ -49,7 +51,9 @@ class JdbcAdminWorkbenchStoreTest {
     jdbc.execute("CREATE SCHEMA public");
     try (var connection = dataSource.getConnection()) {
       ScriptUtils.executeSqlScript(
-          connection, new ClassPathResource("db/agent/V1__agent_baseline.sql"));
+          connection,
+          new EncodedResource(
+              new ClassPathResource("db/agent/V1__agent_baseline.sql"), StandardCharsets.UTF_8));
     }
     mapper = new ObjectMapper().findAndRegisterModules();
     masterKey = Files.createTempFile("happy-agent-workbench", ".key");
@@ -60,15 +64,20 @@ class JdbcAdminWorkbenchStoreTest {
   }
 
   @Test
-  void baselineDraftAndProvidersComeFromPostgres() {
+  void baselineDraftAndProvidersComeFromPostgres() throws Exception {
     var draft = store.findDraft("fitness.coach").orElseThrow();
 
+    assertEquals("花爷健身教练", draft.name());
     assertEquals("minimax", draft.providerKey());
     assertEquals("minimax-m3", draft.modelKey());
+    assertEquals(16, draft.maxToolCalls());
+    assertTrue(draft.toolKeys().contains("fitness.exercise.candidates.query"));
+    assertTrue(draft.toolKeys().contains("fitness.exercise.details.query"));
+    assertTrue(draft.toolKeys().contains("fitness.exercise.catalog.search"));
     assertEquals(2, resources.listProviders().size());
     assertTrue(resources.listProviders().stream().noneMatch(item -> item.configured()));
     assertEquals(
-        "https://api.minimaxi.com/v1",
+        "https://api.minimax.io/v1",
         resources.listProviders().stream()
             .filter(provider -> provider.providerKey().equals("minimax"))
             .findFirst()
@@ -78,6 +87,27 @@ class JdbcAdminWorkbenchStoreTest {
         1,
         new JdbcTemplate(dataSource)
             .queryForObject("SELECT count(*) FROM agent_drafts", Integer.class));
+    assertEquals(
+        "花爷系统提示词",
+        new JdbcTemplate(dataSource)
+            .queryForObject(
+                "SELECT display_name FROM agent_prompts WHERE prompt_key='fitness.coach.prompt'",
+                String.class));
+    assertTrue(
+        new JdbcTemplate(dataSource)
+            .queryForObject(
+                "SELECT template FROM agent_prompts WHERE prompt_key='fitness.coach.prompt'",
+                String.class)
+            .startsWith("你是“花爷”"));
+    var requiredTools =
+        mapper.readTree(
+            new JdbcTemplate(dataSource)
+                .queryForObject(
+                    "SELECT required_tool_keys::text FROM agent_skills WHERE skill_key='fitness.plan.skill'",
+                    String.class));
+    assertTrue(requiredTools.toString().contains("fitness.exercise.candidates.query"));
+    assertTrue(requiredTools.toString().contains("fitness.exercise.details.query"));
+    assertFalse(requiredTools.toString().contains("fitness.exercise.catalog.search"));
   }
 
   @Test
@@ -106,7 +136,7 @@ class JdbcAdminWorkbenchStoreTest {
     var original = store.findDraft("fitness.coach").orElseThrow();
     var update =
         new DraftUpdate(
-            "瘦瘦教练",
+            "花爷教练",
             "更新后的说明",
             original.frameworkKey(),
             original.providerKey(),
@@ -155,7 +185,17 @@ class JdbcAdminWorkbenchStoreTest {
   }
 
   @Test
-  void startupReconciliationProjectsOnlyRegisteredSkillsAndHooksAsRuntimeReady() {
+  void startupReconciliationKeepsDeclarativeSkillsAvailableAndDisablesMissingHooks() {
+    resources.createSkill(
+        new SkillCreate(
+            "fruit-only-acceptance",
+            "水果推荐验收技能",
+            "只推荐水果",
+            "用户需要食物推荐时",
+            "用户需要训练建议时",
+            "只推荐水果，不推荐其他食物。",
+            List.of()));
+
     store.reconcileRuntimeCapabilities(
         (RuntimeCapabilityRegistry)
             (type, key) -> type.equals("SKILL") && key.equals("fitness.meal.skill"));
@@ -165,9 +205,13 @@ class JdbcAdminWorkbenchStoreTest {
         jdbc.queryForObject(
             "SELECT runtime_ready FROM agent_skills WHERE skill_key='fitness.meal.skill'",
             Boolean.class));
-    assertFalse(
+    assertTrue(
         jdbc.queryForObject(
             "SELECT runtime_ready FROM agent_skills WHERE skill_key='fitness.plan.skill'",
+            Boolean.class));
+    assertTrue(
+        jdbc.queryForObject(
+            "SELECT runtime_ready FROM agent_skills WHERE skill_key='fruit-only-acceptance'",
             Boolean.class));
     assertFalse(
         jdbc.queryForObject(
@@ -190,11 +234,14 @@ class JdbcAdminWorkbenchStoreTest {
     JsonNode snapshot = mapper.readTree(configuration).path("currentGoalReportRuntime");
     assertEquals("minimax", snapshot.path("provider").path("key").asText());
     assertEquals(
-        "https://api.minimaxi.com/v1",
+        "https://api.minimax.io/v1",
         snapshot.path("provider").path("config").path("endpoint").asText());
     assertEquals("minimax-m3", snapshot.path("model").path("key").asText());
     assertEquals("MiniMax-M3", snapshot.path("model").path("config").path("model").asText());
     assertTrue(snapshot.path("model").path("config").path("vision").asBoolean());
+    assertEquals("fitness.meal.skill", snapshot.path("skills").get(0).path("key").asText());
+    assertEquals("fitness.safety", snapshot.path("hooks").get(0).path("key").asText());
+    assertEquals("fitness.daily-memory", snapshot.path("memory").path("key").asText());
     assertFalse(snapshot.path("credential").path("ciphertext").asText().isBlank());
     assertFalse(snapshot.path("credential").path("iv").asText().isBlank());
     assertFalse(configuration.contains(secret));

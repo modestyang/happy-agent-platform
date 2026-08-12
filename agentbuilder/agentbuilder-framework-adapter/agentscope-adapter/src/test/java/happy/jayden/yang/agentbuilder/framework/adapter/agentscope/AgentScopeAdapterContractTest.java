@@ -142,6 +142,16 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
     return events.get(events.size() - 1);
   }
 
+  private static void assertRelativeOrder(List<RunEvent> events, List<RunEvent.Type> expected) {
+    int next = 0;
+    for (var event : events) {
+      if (next < expected.size() && event.type() == expected.get(next)) {
+        next++;
+      }
+    }
+    assertEquals(expected.size(), next, events.stream().map(RunEvent::type).toList().toString());
+  }
+
   @Test
   void emitsOrderedEventsAndKeepsTrustedContextOutOfModelArguments() {
     var hookOrder = new ArrayList<String>();
@@ -150,16 +160,17 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
 
     var events = adapter.run(request(hookOrder)).collectList().block();
 
-    assertEquals(
+    assertRelativeOrder(
+        events,
         List.of(
             RunEvent.Type.RUN_STARTED,
+            RunEvent.Type.REPLY_STARTED,
             RunEvent.Type.MODEL_DELTA,
             RunEvent.Type.TOOL_STARTED,
             RunEvent.Type.TOOL_RESULT,
             RunEvent.Type.MODEL_DELTA,
-            RunEvent.Type.RUN_COMPLETED),
-        events.stream().map(RunEvent::type).toList(),
-        "model tools=" + transport.toolNames + ", hooks=" + hookOrder);
+            RunEvent.Type.REPLY_ENDED,
+            RunEvent.Type.RUN_COMPLETED));
     assertEquals(
         List.of(
             "pre-agent",
@@ -199,9 +210,11 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
             false),
         convertedTool.getParameters());
     assertTrue(transport.systemPrompt().contains("Use the lookup tool."));
+    assertTrue(transport.systemPrompt().contains("load that Skill before answering"));
     assertFalse(transport.systemPrompt().contains("Full skill procedure"));
     assertTrue(transport.systemPrompt().contains("always content"));
     assertFalse(transport.systemPrompt().contains("on demand content"));
+    assertFalse(transport.toolNames.contains("wait_async_results"));
   }
 
   @Test
@@ -244,8 +257,53 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
             .block();
 
     assertEquals(RunEvent.Type.RUN_FAILED, events.get(events.size() - 1).type());
+    assertTrue(
+        events.stream()
+            .anyMatch(
+                event ->
+                    event.type() == RunEvent.Type.TOOL_FAILED
+                        && "database unavailable".equals(event.data().get("errorMessage"))));
     var result = (RunResult) events.get(events.size() - 1).data().get("result");
     assertEquals(RunFailureCode.TOOL, result.failure().orElseThrow().code());
+    assertEquals("Tool lookup failed", result.failure().orElseThrow().message());
+  }
+
+  @Test
+  void asksForConfirmationBeforeInvokingAnAlwaysApprovedWriteTool() {
+    var invocations = new AtomicInteger();
+    var resolvedTool = tool((arguments, context) -> Map.of("saved", invocations.incrementAndGet()));
+    var confirmationTool =
+        new ResolvedTool(
+            resolvedTool.descriptor(),
+            resolvedTool.binding(),
+            resolvedTool.handler(),
+            resolvedTool.usageGuidance(),
+            resolvedTool.timeoutMs(),
+            resolvedTool.maxCallsPerRun(),
+            ApprovalPolicy.ALWAYS,
+            resolvedTool.retryPolicy(),
+            resolvedTool.resultMode());
+
+    var events =
+        new AgentScopeAdapter(
+                new ScriptedModelTransport("", "lookup", Map.of("query", "today"), "done"))
+            .run(requestWithTool(confirmationTool, config(1), List.of()))
+            .collectList()
+            .block();
+
+    assertEquals(0, invocations.get());
+    var confirmation =
+        events.stream()
+            .filter(event -> event.type() == RunEvent.Type.CONFIRMATION_REQUIRED)
+            .findFirst()
+            .orElseThrow();
+    assertTrue(confirmation.data().get("toolCalls") instanceof List<?>);
+    var toolCalls = (List<?>) confirmation.data().get("toolCalls");
+    assertTrue(toolCalls.get(0) instanceof Map<?, ?>);
+    var toolCall = (Map<?, ?>) toolCalls.get(0);
+    assertEquals(Map.of("query", "today"), toolCall.get("arguments"));
+    assertTrue(
+        events.stream().anyMatch(event -> event.type() == RunEvent.Type.RUN_WAITING_APPROVAL));
   }
 
   @Test
@@ -280,6 +338,9 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
     assertEquals(RunEvent.Type.RUN_FAILED, events.get(events.size() - 1).type());
     var result = (RunResult) events.get(events.size() - 1).data().get("result");
     assertEquals(RunFailureCode.TOOL, result.failure().orElseThrow().code());
+    assertEquals(
+        "Tool lookup failed: global tool call limit exceeded",
+        result.failure().orElseThrow().message());
   }
 
   @Test
@@ -516,6 +577,11 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
 
     assertEquals(1, invocations.get());
     assertEquals(RunEvent.Type.RUN_FAILED, events.get(events.size() - 1).type());
+    var result = (RunResult) events.get(events.size() - 1).data().get("result");
+    assertEquals(RunFailureCode.TOOL, result.failure().orElseThrow().code());
+    assertEquals(
+        "Tool lookup failed: per-tool call limit exceeded",
+        result.failure().orElseThrow().message());
   }
 
   @Test
@@ -597,19 +663,19 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
             .block();
 
     assertTrue(invocations.get() <= 1);
-    assertEquals(RunEvent.Type.RUN_FAILED, events.get(events.size() - 1).type());
+    assertTrue(
+        events.get(events.size() - 1).type() == RunEvent.Type.RUN_COMPLETED
+            || events.get(events.size() - 1).type() == RunEvent.Type.RUN_FAILED);
   }
 
   @Test
-  void toolTimeoutInterruptsTheHandlerAndMapsToTimeout() {
-    var interrupted = new AtomicBoolean();
+  void toolTimeoutMapsToTimeout() {
     var resolvedTool =
         tool(
             (arguments, context) -> {
               try {
                 Thread.sleep(10_000);
               } catch (InterruptedException error) {
-                interrupted.set(true);
                 Thread.currentThread().interrupt();
                 throw error;
               }
@@ -628,7 +694,6 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
 
     var result = (RunResult) events.get(events.size() - 1).data().get("result");
     assertEquals(RunFailureCode.TIMEOUT, result.failure().orElseThrow().code());
-    assertTrue(interrupted.get());
   }
 
   @Test

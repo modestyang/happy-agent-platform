@@ -162,6 +162,15 @@ public final class AdminWorkbenchService {
               if (item.isEmpty()
                   || !"ACTIVE".equals(item.get().status())
                   || !item.get().runtimeReady()) errors.add("Skill " + key + " 当前不可用");
+              else
+                item.get()
+                    .requiredToolKeys()
+                    .forEach(
+                        requiredTool -> {
+                          if (!draft.toolKeys().contains(requiredTool)) {
+                            errors.add("Skill " + key + " 缺少所需 Tool " + requiredTool);
+                          }
+                        });
             });
     var hooks = resources.listHooks();
     draft

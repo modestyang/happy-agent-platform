@@ -3,7 +3,9 @@ package happy.jayden.yang.agentbuilder;
 import happy.jayden.yang.agentbuilder.core.runtime.AgentExecutionContext;
 import happy.jayden.yang.agentbuilder.core.runtime.AgentHook;
 import happy.jayden.yang.agentbuilder.core.runtime.ExecutableSkill;
+import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
+import happy.jayden.yang.agentbuilder.core.runtime.RuntimeHookExecutor;
 import happy.jayden.yang.agentbuilder.core.runtime.SkillResult;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,7 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** Runtime registry for Fitness-owned hooks and deterministic, Tool-backed skill preparation. */
-public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry {
+public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry, RuntimeHookExecutor {
   private final Map<String, ExecutableSkill> skills;
   private final Map<String, AgentHook> hooks;
 
@@ -38,6 +40,29 @@ public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry {
 
   public Optional<AgentHook> hook(String key) {
     return Optional.ofNullable(hooks.get(key));
+  }
+
+  @Override
+  public void execute(String hookKey, RunRequest.HookContext context) {
+    var hook =
+        hook(hookKey).orElseThrow(() -> new IllegalArgumentException("unknown Hook: " + hookKey));
+    var execution =
+        new AgentExecutionContext(
+            "published-agent",
+            context.runId(),
+            context.userId(),
+            context.input(),
+            java.util.Set.of(),
+            new happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext(
+                context.userId(), context.runId(), java.util.Set.of(), "runtime-hook"),
+            (toolKey, input, toolContext) -> {
+              throw new UnsupportedOperationException("Hook cannot invoke Tools in this phase");
+            });
+    var decision = hook.beforeRun(execution);
+    if (decision.action()
+        == happy.jayden.yang.agentbuilder.core.runtime.HookDecision.Action.BLOCK) {
+      throw new IllegalStateException(decision.message());
+    }
   }
 
   private static final class MealSkill implements ExecutableSkill {
@@ -66,7 +91,11 @@ public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry {
                       "type",
                       "object",
                       "required",
-                      List.of("breakfast", "lunch", "dinner", "rationale"),
+                      List.of("recommendations"),
+                      "mealTypes",
+                      List.of("BREAKFAST", "LUNCH", "DINNER"),
+                      "language",
+                      "zh-CN",
                       "additionalProperties",
                       false)));
     }
@@ -82,16 +111,20 @@ public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry {
     public SkillResult execute(AgentExecutionContext context, Map<String, Object> input)
         throws Exception {
       var facts = new LinkedHashMap<String, Object>();
-      facts.put("goalAndSafety", context.invokeTool("fitness.profile.query", Map.of()));
-      facts.put("recentLoad", context.invokeTool("fitness.workout.query", Map.of()));
-      facts.put("exerciseLibrary", context.invokeTool("fitness.plan.generate", Map.of()));
+      facts.put("goal", context.invokeTool("fitness.goal.current.query", Map.of()));
+      facts.put("constraints", context.invokeTool("fitness.training.constraints.query", Map.of()));
+      facts.put("body", context.invokeTool("fitness.body.latest.query", Map.of()));
+      facts.put("recentLoad", context.invokeTool("fitness.workout.summary.query", Map.of()));
+      facts.put("schedule", context.invokeTool("fitness.workout.schedule.query", Map.of()));
+      facts.put(
+          "exerciseCandidates", context.invokeTool("fitness.exercise.candidates.query", Map.of()));
       return new SkillResult(
           key(),
           Map.of(
               "kind",
               "weekly-training-plan",
               "persistence",
-              "READ_ONLY",
+              "AGENT_DECIDES",
               "facts",
               facts,
               "input",

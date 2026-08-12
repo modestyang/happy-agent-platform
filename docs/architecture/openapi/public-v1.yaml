@@ -1945,8 +1945,8 @@
           "AI"
         ],
         "operationId": "createAiSession",
-        "summary": "Create a 24-hour AI session",
-        "description": "Creates a session whose expiry is exactly 24 hours after creation and freezes the published Agent version.",
+        "summary": "Create an AI session",
+        "description": "Creates a backend-owned session. Each message uses the latest published Fitness Agent version.",
         "x-error-codes": [
           "VALIDATION_FAILED",
           "UNAUTHORIZED",
@@ -2070,7 +2070,7 @@
         ],
         "operationId": "createAiMessage",
         "summary": "Send a message and create an AI run",
-        "description": "Persists a user message and asynchronously creates a run; messages do not extend the 24-hour session expiry.",
+        "description": "Persists a user message in the backend-owned session and asynchronously creates a run with the latest published Fitness Agent.",
         "x-asynchronous": true,
         "x-error-codes": [
           "VALIDATION_FAILED",
@@ -5813,9 +5813,7 @@
           "sessionId",
           "status",
           "agentKey",
-          "agentVersion",
-          "createdAt",
-          "expiresAt"
+          "createdAt"
         ],
         "properties": {
           "sessionId": {
@@ -5835,15 +5833,7 @@
             "minLength": 1,
             "maxLength": 120
           },
-          "agentVersion": {
-            "type": "integer",
-            "minimum": 1
-          },
           "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expiresAt": {
             "type": "string",
             "format": "date-time"
           },

@@ -109,14 +109,32 @@ public final class AgentScopeAdapter implements AgentFrameworkAdapter {
   static final class Signal {
     private final RunEvent.Type type;
     private final Map<String, Object> data;
+    private final RunEvent.Payload payload;
 
     Signal(RunEvent.Type type, Map<String, Object> data) {
       this.type = Objects.requireNonNull(type, "type");
       this.data = Map.copyOf(Objects.requireNonNull(data, "data"));
+      this.payload = null;
+    }
+
+    private Signal(RunEvent.Type type, RunEvent.Payload payload) {
+      this.type = Objects.requireNonNull(type, "type");
+      this.payload = Objects.requireNonNull(payload, "payload");
+      this.data = Map.of();
+    }
+
+    static Signal generic(RunEvent.Type type, Map<String, Object> data) {
+      return new Signal(type, data);
+    }
+
+    static Signal typed(RunEvent.Type type, RunEvent.Payload payload) {
+      return new Signal(type, payload);
     }
 
     RunEvent toEvent(AtomicLong sequence) {
-      return event(sequence, type, data);
+      return payload == null
+          ? event(sequence, type, data)
+          : new RunEvent(sequence.incrementAndGet(), type, Instant.now(), payload);
     }
   }
 
@@ -127,8 +145,9 @@ public final class AgentScopeAdapter implements AgentFrameworkAdapter {
       if (find(error, java.util.concurrent.TimeoutException.class) != null) {
         return new RunFailure(RunFailureCode.TIMEOUT, "Agent run timed out", true);
       }
-      if (find(error, AgentScopeRuntimeBridge.ToolFailure.class) != null) {
-        return new RunFailure(RunFailureCode.TOOL, safeMessage(error), false);
+      var toolFailure = find(error, AgentScopeRuntimeBridge.ToolFailure.class);
+      if (toolFailure != null) {
+        return new RunFailure(RunFailureCode.TOOL, toolFailure.safeRunMessage(), false);
       }
       if (find(error, AgentScopeRuntimeBridge.HookFailure.class) != null) {
         return new RunFailure(RunFailureCode.HOOK, safeMessage(error), false);

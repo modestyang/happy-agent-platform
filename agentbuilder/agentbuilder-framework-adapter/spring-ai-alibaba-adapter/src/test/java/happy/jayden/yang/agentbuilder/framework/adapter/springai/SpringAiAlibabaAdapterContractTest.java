@@ -282,6 +282,38 @@ class SpringAiAlibabaAdapterContractTest extends FrameworkAdapterContract {
                         request.toolExecutionContext()))));
   }
 
+  @Test
+  void emitsTheRawToolResultWhileReturningEncodedJsonToTheModel() {
+    var output = new WorkoutSummary(List.of("run"), LocalDate.of(2026, 8, 5));
+    var emitted = new ArrayList<RunEvent>();
+    var tool = complexTool((arguments, context) -> output);
+    var request = request(List.of(), tool, hooks(new ArrayList<>(), false), RetryPolicy.NONE, 2);
+    var callback =
+        new SpringAiAlibabaToolCallback(
+            tool,
+            request,
+            new SpringAiAlibabaRuntimeBridge.RunBudget(2),
+            (type, data) -> emitted.add(new RunEvent(1, type, java.time.Instant.now(), data)),
+            ignored -> {});
+
+    var encoded =
+        callback.call(
+            "{\"tags\":[\"run\"],\"level\":\"hard\",\"score\":2}",
+            new org.springframework.ai.chat.model.ToolContext(
+                Map.of(
+                    SpringAiAlibabaRuntimeBridge.TRUSTED_CONTEXT_KEY,
+                    request.toolExecutionContext())));
+
+    org.junit.jupiter.api.Assertions.assertTrue(encoded.contains("2026-08-05"));
+    var resultEvent =
+        emitted.stream()
+            .filter(event -> event.type() == RunEvent.Type.TOOL_RESULT)
+            .findFirst()
+            .orElseThrow();
+    org.junit.jupiter.api.Assertions.assertSame(output, resultEvent.data().get("result"));
+    org.junit.jupiter.api.Assertions.assertEquals(encoded, resultEvent.data().get("encodedResult"));
+  }
+
   private static RunEvent terminal(List<RunEvent> events) {
     return events.get(events.size() - 1);
   }

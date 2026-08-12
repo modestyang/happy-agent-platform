@@ -1,6 +1,7 @@
 package happy.jayden.yang.agentbuilder.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.math.BigDecimal;
@@ -155,6 +156,21 @@ class ToolSchemaBoundaryTest {
                 object(Map.of("name", string("bad\ud800description")), List.of("name"), false)));
   }
 
+  @Test
+  void omitsOptionalNullToolOutputPropertiesBeforeValidation() {
+    var schema =
+        object(
+            Map.of(
+                "nickname", string("昵称"),
+                "birthYear", property("integer", "出生年份", Map.of())),
+            List.of("nickname"),
+            false);
+
+    assertEquals(
+        "{\"nickname\":\"验收用户\"}",
+        ToolSchemaCodec.encode(new OptionalProfile("验收用户", null), schema));
+  }
+
   private static Map<String, Object> string(String description) {
     return property("string", description, Map.of());
   }
@@ -177,4 +193,6 @@ class ToolSchemaBoundaryTest {
     result.put("additionalProperties", additionalProperties);
     return result;
   }
+
+  private record OptionalProfile(String nickname, Integer birthYear) {}
 }

@@ -7,7 +7,7 @@
 ## 配置
 
 - Provider key：`minimax`
-- Endpoint：`https://api.minimaxi.com/v1`
+- Endpoint：`https://api.minimax.io/v1`
 - Model key：`minimax-m3`
 - API model：`MiniMax-M3`
 - 能力：文本、多轮对话、工具调用、结构化输出、图片理解
@@ -23,4 +23,3 @@
 ## 验证
 
 先用测试证明目录种子和不可变快照选择，再实现。重启后通过管理页面保存密钥、把 `fitness.coach` 切换到 `minimax-m3` 并发布，最后从真实页面验证对话、目标报告、三餐建议与饮食图片识别。
-

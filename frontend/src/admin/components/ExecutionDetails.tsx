@@ -3,6 +3,11 @@ import { Check, CircleAlert, Clock3, LoaderCircle, ShieldCheck, Sparkles, Wrench
 import type { TraceEvent } from '../api';
 import { groupTraceEvents } from './traceEvents';
 
+function payloadText(payload: Record<string, unknown> | undefined) {
+  if (!payload) return '';
+  return JSON.stringify(payload, null, 2);
+}
+
 export function ExecutionDetails({ events, defaultOpen = false }: { events: TraceEvent[]; defaultOpen?: boolean }) {
   const items = groupTraceEvents(events);
   if (!items.length) return null;
@@ -14,7 +19,7 @@ export function ExecutionDetails({ events, defaultOpen = false }: { events: Trac
         const Icon = item.kind === 'tool' ? Wrench : item.kind === 'approval' ? ShieldCheck : item.status === 'failed' ? CircleAlert : item.status === 'running' ? LoaderCircle : item.status === 'waiting' ? Clock3 : Check;
         return <article key={item.key} className={`admin-execution__item is-${item.status}`}>
           <span><Icon className={item.status === 'running' ? 'is-spin' : ''} /></span>
-          <div><strong>{item.label}</strong>{item.detail && item.detail !== item.label && <p>{item.detail}</p>}</div>
+          <div><strong>{item.label}</strong>{item.detail && item.detail !== item.label && <p>{item.detail}</p>}{item.payload && <details className="admin-execution__payload"><summary>查看上下文与数据</summary><pre>{payloadText(item.payload)}</pre></details>}</div>
           <time>{new Date(item.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>
         </article>;
       })}

@@ -214,7 +214,9 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         });
   }
 
-  /** Captures the exact non-conversational report dependencies with the Agent release. */
+  /**
+   * Captures every executable dependency so a published run never re-reads mutable catalog rows.
+   */
   private Map<String, Object> publishedConfiguration(AgentDraftView draft) {
     var configuration = new LinkedHashMap<String, Object>(read(write(draft), OBJECT_MAP));
     var provider = publishedComponent("PROVIDER", draft.providerKey());
@@ -226,6 +228,9 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     runtime.put("prompt", prompt.asSnapshot());
     var credential = publishedCredential(draft.providerKey());
     if (credential != null) runtime.put("credential", credential.asSnapshot());
+    runtime.put("skills", draft.skillKeys().stream().map(this::publishedSkill).toList());
+    runtime.put("hooks", draft.hookKeys().stream().map(this::publishedHook).toList());
+    runtime.put("memory", publishedMemory(draft.memoryKey()).asSnapshot());
     configuration.put(CURRENT_GOAL_RUNTIME, runtime);
     configuration.put(AGENT_RUNTIME, runtime);
     return configuration;
@@ -298,6 +303,77 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     return values.isEmpty() ? null : values.get(0);
   }
 
+  private PublishedComponent publishedSkill(String key) {
+    var values =
+        jdbc.query(
+            "SELECT revision,status,description,when_to_use,when_not_to_use,content,required_tool_keys::text"
+                + " FROM agent_skills WHERE skill_key=?",
+            (rs, row) ->
+                new PublishedComponent(
+                    key,
+                    rs.getInt("revision"),
+                    lifecycle(rs.getString("status")),
+                    Map.of(
+                        "description",
+                        rs.getString("description"),
+                        "whenToUse",
+                        rs.getString("when_to_use"),
+                        "whenNotToUse",
+                        rs.getString("when_not_to_use"),
+                        "content",
+                        rs.getString("content"),
+                        "requiredToolKeys",
+                        safeReadStringList(
+                            rs.getString("required_tool_keys"), "skill.required_tool_keys", key))),
+            key);
+    return requiredPublished(values, "技能");
+  }
+
+  private PublishedComponent publishedHook(String key) {
+    var values =
+        jdbc.query(
+            "SELECT revision,status,description,phase,mandatory,runtime_ready FROM agent_hooks WHERE hook_key=?",
+            (rs, row) ->
+                new PublishedComponent(
+                    key,
+                    rs.getInt("revision"),
+                    lifecycle(rs.getString("status")),
+                    Map.of(
+                        "description", rs.getString("description"),
+                        "phase", rs.getString("phase"),
+                        "mandatory", rs.getBoolean("mandatory"),
+                        "runtimeReady", rs.getBoolean("runtime_ready"))),
+            key);
+    return requiredPublished(values, "Hook");
+  }
+
+  private PublishedComponent publishedMemory(String key) {
+    var values =
+        jdbc.query(
+            "SELECT revision,status,description,retention_hours,max_tokens FROM agent_memories WHERE memory_key=?",
+            (rs, row) ->
+                new PublishedComponent(
+                    key,
+                    rs.getInt("revision"),
+                    lifecycle(rs.getString("status")),
+                    Map.of(
+                        "description", rs.getString("description"),
+                        "retentionHours", rs.getInt("retention_hours"),
+                        "maxTokens", rs.getInt("max_tokens"))),
+            key);
+    return requiredPublished(values, "Memory");
+  }
+
+  private static PublishedComponent requiredPublished(
+      List<PublishedComponent> values, String componentName) {
+    if (values.isEmpty()) throw new NotFound("发布依赖" + componentName + "不存在");
+    var component = values.get(0);
+    if (!"AVAILABLE".equals(component.status())) {
+      throw new IllegalStateException("发布依赖" + componentName + "不可用");
+    }
+    return component;
+  }
+
   @Override
   public Optional<RunView> run(UUID runId) {
     return jdbc
@@ -310,21 +386,15 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
   }
 
   /**
-   * Projects the current process's Skill/Hook handlers into the workbench catalog.
+   * Projects process-owned Hook handlers into the workbench catalog.
    *
-   * <p>The database remains operator-editable, but an {@code AVAILABLE} flag cannot outlive a
-   * missing in-process handler. We intentionally leave every other component type untouched so
-   * startup does not overwrite administrator-maintained catalog metadata.
+   * <p>Skills are declarative prompt/runtime inputs captured in the published Agent snapshot, so a
+   * manually created Skill must not be disabled merely because it has no Java handler. Hooks remain
+   * process-owned executable behavior and therefore still require a registered handler.
    */
   public void reconcileRuntimeCapabilities(RuntimeCapabilityRegistry runtimeCapabilities) {
     java.util.Objects.requireNonNull(runtimeCapabilities, "runtimeCapabilities");
-    jdbc.queryForList("SELECT skill_key FROM agent_skills", String.class)
-        .forEach(
-            key ->
-                jdbc.update(
-                    "UPDATE agent_skills SET runtime_ready=? WHERE skill_key=?",
-                    runtimeCapabilities.hasHandler("SKILL", key),
-                    key));
+    jdbc.update("UPDATE agent_skills SET runtime_ready=TRUE");
     jdbc.queryForList("SELECT hook_key FROM agent_hooks", String.class)
         .forEach(
             key ->
@@ -336,7 +406,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
 
   void seedDefaults() {
     jdbc.update(
-        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','瘦瘦健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','minimax','minimax-m3','fitness.coach.prompt','[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.plan.generate\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,8) ON CONFLICT(agent_key) DO NOTHING");
+        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','花爷健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','minimax','minimax-m3','fitness.coach.prompt','[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.goal.current.query\",\"fitness.training.constraints.query\",\"fitness.body.latest.query\",\"fitness.workout.summary.query\",\"fitness.workout.schedule.query\",\"fitness.exercise.candidates.query\",\"fitness.exercise.catalog.search\",\"fitness.exercise.details.query\",\"fitness.plan.save\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,16) ON CONFLICT(agent_key) DO NOTHING");
     seedComponent(
         "FRAMEWORK",
         "agentscope",
@@ -364,7 +434,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "MiniMax",
         "MiniMax OpenAI 兼容模型服务",
         "AVAILABLE",
-        Map.of("endpoint", "https://api.minimaxi.com/v1"));
+        Map.of("endpoint", "https://api.minimax.io/v1"));
     seedComponent(
         "MODEL",
         "qwen-plus",
@@ -401,7 +471,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
     seedComponent(
         "PROMPT",
         "fitness.coach.prompt",
-        "瘦瘦系统提示词",
+        "花爷系统提示词",
         "健身陪伴场景的角色、边界与输出约束",
         "AVAILABLE",
         Map.of(
@@ -410,8 +480,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
             "variables",
             List.of("user_context", "current_goal"),
             "template",
-            "你是“瘦瘦 AI 花爷”，用户的 AI 健身陪伴。请使用中文，语气亲切、自然、可执行。"
-                + "基于用户输入、当前目标和已授权数据提供建议；不确定时明确说明，不夸大效果。"));
+            "你是“花爷”，用户的 AI 健身陪伴。请使用中文，语气亲切、自然、可执行。" + "基于用户输入、当前目标和已授权数据提供建议；不确定时明确说明，不夸大效果。"));
     seedComponent(
         "PROMPT",
         DEFAULT_PROMPT,
@@ -469,11 +538,32 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
     seedComponent(
         "TOOL",
-        "fitness.plan.generate",
-        "生成训练计划建议",
-        "生成当前目标的训练计划建议，不直接写入数据库",
+        "fitness.exercise.candidates.query",
+        "筛选训练计划候选动作",
+        "按用户经验、器械和冲击限制返回有界候选动作",
         "AVAILABLE",
         Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
+    seedComponent(
+        "TOOL",
+        "fitness.exercise.catalog.search",
+        "搜索动作目录",
+        "按名称或目标部位搜索动作库，供动作问答和人工探索使用",
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
+    seedComponent(
+        "TOOL",
+        "fitness.exercise.details.query",
+        "读取动作详情",
+        "批量读取已选动作的步骤、常见错误和参考参数",
+        "AVAILABLE",
+        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
+    seedComponent(
+        "TOOL",
+        "fitness.plan.save",
+        "保存训练计划",
+        "提交 Agent 已编排的训练计划，并在用户确认后写入",
+        "AVAILABLE",
+        Map.of("risk", "MEDIUM", "sideEffect", "WRITE", "source", "LOCAL_BEAN"));
     seedComponent(
         "SKILL",
         "fitness.plan.skill",
@@ -482,7 +572,15 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         "DRAFT",
         Map.of(
             "requiredTools",
-            List.of("fitness.profile.query", "fitness.workout.query", "fitness.plan.generate")));
+            List.of(
+                "fitness.goal.current.query",
+                "fitness.training.constraints.query",
+                "fitness.body.latest.query",
+                "fitness.workout.summary.query",
+                "fitness.workout.schedule.query",
+                "fitness.exercise.candidates.query",
+                "fitness.exercise.details.query",
+                "fitness.plan.save")));
     seedComponent(
         "SKILL",
         "fitness.meal.skill",

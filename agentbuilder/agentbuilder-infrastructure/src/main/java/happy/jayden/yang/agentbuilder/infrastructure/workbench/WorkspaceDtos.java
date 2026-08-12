@@ -2,6 +2,7 @@ package happy.jayden.yang.agentbuilder.infrastructure.workbench;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -101,10 +102,16 @@ public final class WorkspaceDtos {
   }
 
   public record TraceEvent(
-      long sequence, String type, String title, String detail, Instant occurredAt) {
+      long sequence,
+      String type,
+      String title,
+      String detail,
+      Map<String, Object> payload,
+      Instant occurredAt) {
     public TraceEvent {
       if (sequence < 0) throw new IllegalArgumentException("sequence");
       Objects.requireNonNull(type, "type");
+      payload = Map.copyOf(Objects.requireNonNull(payload, "payload"));
       Objects.requireNonNull(occurredAt, "occurredAt");
     }
   }
@@ -126,6 +133,17 @@ public final class WorkspaceDtos {
       Objects.requireNonNull(status, "status");
       Objects.requireNonNull(startedAt, "startedAt");
       Objects.requireNonNull(lastMessageAt, "lastMessageAt");
+    }
+  }
+
+  public record ConversationPage(
+      List<ConversationSummary> items, int page, int size, boolean hasNext) {
+    public ConversationPage {
+      items = List.copyOf(Objects.requireNonNull(items, "items"));
+      if (page < 0) throw new IllegalArgumentException("page must be at least 0");
+      if (size < 1 || size > 100) {
+        throw new IllegalArgumentException("size must be between 1 and 100");
+      }
     }
   }
 

@@ -1,14 +1,15 @@
 package happy.jayden.yang.fitness;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import happy.jayden.yang.agentbuilder.FitnessSkillRegistry;
-import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
+import happy.jayden.yang.agentbuilder.infrastructure.workbench.PublishedAgentPlaygroundRuntime;
 import happy.jayden.yang.fitness.infrastructure.JdbcAgentProviderStatus;
+import happy.jayden.yang.fitness.infrastructure.JdbcFitnessAgentReadStore;
 import happy.jayden.yang.fitness.infrastructure.JdbcFitnessStore;
+import happy.jayden.yang.fitness.infrastructure.JdbcFitnessUserDirectory;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
+import happy.jayden.yang.fitness.service.FitnessAgentQueryService;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessPorts.AgentProviderStatus;
-import happy.jayden.yang.fitness.service.FitnessPorts.AiConversation;
 import happy.jayden.yang.fitness.service.FitnessPorts.CurrentGoalReportGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.DailyMealPlanGenerationPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.FitnessStore;
@@ -16,6 +17,7 @@ import happy.jayden.yang.fitness.service.FitnessPorts.MealRecognitionPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.MediaUploadPort;
 import happy.jayden.yang.fitness.service.FitnessPorts.PasswordVerifier;
 import happy.jayden.yang.fitness.service.FitnessPorts.TransactionRunner;
+import happy.jayden.yang.fitness.service.NutritionTargetEstimator;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -27,6 +29,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -40,6 +43,29 @@ public class FitnessExperienceConfig {
   JdbcFitnessStore fitnessStore(
       @Qualifier("fitnessDataSource") DataSource dataSource, ObjectMapper objectMapper) {
     return new JdbcFitnessStore(dataSource, objectMapper);
+  }
+
+  @Bean
+  @DependsOn("fitnessFlyway")
+  JdbcFitnessUserDirectory fitnessUserDirectory(
+      @Qualifier("fitnessDataSource") DataSource dataSource) {
+    return new JdbcFitnessUserDirectory(dataSource);
+  }
+
+  @Bean
+  @DependsOn("fitnessFlyway")
+  JdbcFitnessAgentReadStore fitnessAgentReadStore(
+      @Qualifier("fitnessDataSource") DataSource dataSource, ObjectMapper objectMapper) {
+    return new JdbcFitnessAgentReadStore(dataSource, objectMapper);
+  }
+
+  @Bean
+  FitnessAgentQueryService fitnessAgentQueryService(JdbcFitnessAgentReadStore store) {
+    return new FitnessAgentQueryService(
+        store,
+        new NutritionTargetEstimator(),
+        java.time.Clock.systemUTC(),
+        java.time.ZoneId.of("Asia/Shanghai"));
   }
 
   @Bean
@@ -62,21 +88,6 @@ public class FitnessExperienceConfig {
         return encoder.encode(rawPassword);
       }
     };
-  }
-
-  @Bean
-  AiConversation aiConversation(
-      FitnessStore store,
-      @Qualifier("agentDataSource") DataSource dataSource,
-      ObjectMapper objectMapper,
-      FitnessSkillRegistry capabilities,
-      ObjectProvider<ToolRegistry> toolRegistry,
-      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
-          String masterKeyFile) {
-    // Resolve the registry only when a run starts. Tool registrations themselves depend on the
-    // Fitness application service, which depends on this conversation port.
-    return new AgentRuntimeConversation(
-        store, dataSource, objectMapper, masterKeyFile, capabilities, toolRegistry::getObject);
   }
 
   @Bean
@@ -112,11 +123,18 @@ public class FitnessExperienceConfig {
 
   @Bean
   DailyMealPlanGenerationPort dailyMealPlanGenerationPort(
-      @Qualifier("agentDataSource") DataSource agentDataSource,
-      ObjectMapper mapper,
-      @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
-          String masterKeyFile) {
-    return new MealPlanGenerationRuntime(agentDataSource, mapper, masterKeyFile);
+      ObjectMapper mapper, ObjectProvider<PublishedAgentPlaygroundRuntime> runtime) {
+    return new MealPlanGenerationRuntime(
+        mapper,
+        request ->
+            runtime
+                .getObject()
+                .runTask(
+                    request.agentKey(),
+                    request.userId(),
+                    request.requiredSkillKey(),
+                    request.input())
+                .output());
   }
 
   @Bean
@@ -133,7 +151,6 @@ public class FitnessExperienceConfig {
       FitnessStore store,
       PasswordVerifier passwordVerifier,
       AgentProviderStatus providerStatus,
-      AiConversation aiConversation,
       MediaUploadPort mediaUploadPort,
       DailyMealPlanGenerationPort dailyMealPlanGenerationPort,
       CurrentGoalReportGenerationPort currentGoalReportGenerationPort,
@@ -152,7 +169,6 @@ public class FitnessExperienceConfig {
         store,
         passwordVerifier,
         providerStatus,
-        aiConversation,
         mediaUploadPort,
         dailyMealPlanGenerationPort,
         currentGoalReportGenerationPort,
@@ -166,8 +182,20 @@ public class FitnessExperienceConfig {
 
   @Bean
   DailyMealPlanGenerationWorker dailyMealPlanGenerationWorker(
-      FitnessApplicationService application) {
-    return new DailyMealPlanGenerationWorker(application);
+      FitnessApplicationService application,
+      @Qualifier("dailyMealPlanTaskExecutor") java.util.concurrent.Executor executor) {
+    return new DailyMealPlanGenerationWorker(application, executor);
+  }
+
+  @Bean(name = "dailyMealPlanTaskExecutor", defaultCandidate = false)
+  ThreadPoolTaskExecutor dailyMealPlanTaskExecutor(
+      @Value("${happy.fitness.meal-plan.concurrency:3}") int concurrency) {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(concurrency);
+    executor.setMaxPoolSize(concurrency);
+    executor.setQueueCapacity(0);
+    executor.setThreadNamePrefix("daily-meal-plan-");
+    return executor;
   }
 
   @Bean
@@ -182,8 +210,10 @@ public class FitnessExperienceConfig {
   }
 
   @Bean
-  FitnessTools fitnessTools(FitnessApplicationService fitnessApplicationService) {
-    return new FitnessTools(fitnessApplicationService);
+  FitnessTools fitnessTools(
+      FitnessApplicationService fitnessApplicationService,
+      FitnessAgentQueryService fitnessAgentQueryService) {
+    return new FitnessTools(fitnessApplicationService, fitnessAgentQueryService);
   }
 
   @Bean

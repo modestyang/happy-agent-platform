@@ -152,6 +152,7 @@ export type TraceEvent = {
   type: string;
   title: string;
   detail: string;
+  payload: Record<string, unknown>;
   occurredAt: string;
 };
 
@@ -179,6 +180,7 @@ export type RunTrace = {
 export type ConversationSummary = {
   conversationId: string;
   userId: string;
+  username: string;
   agentKey: string;
   title: string;
   status: string;
@@ -186,6 +188,13 @@ export type ConversationSummary = {
   lastMessageAt: string;
   messageCount: number;
   runCount: number;
+};
+
+export type ConversationPage = {
+  items: ConversationSummary[];
+  page: number;
+  size: number;
+  hasNext: boolean;
 };
 
 export type ConversationMessage = {
@@ -198,7 +207,7 @@ export type ConversationMessage = {
 };
 
 export type ConversationDetail = {
-  conversation: ConversationSummary;
+  conversation: Omit<ConversationSummary, 'username'>;
   messages: ConversationMessage[];
   runs: RunSummary[];
 };
@@ -222,10 +231,6 @@ const admin = {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
   logout: () => request<void>('/api/admin/auth/logout', { method: 'POST' }),
-  debugMessage: (agentKey: string, message: string) =>
-    request<{ message: string }>('/api/admin/playground/messages', {
-      method: 'POST', body: JSON.stringify({ agentKey, message }),
-    }),
   createPlaygroundRun: (agentKey: string, input: string, idempotencyKey: string) =>
     request<{ runId: string; sessionId?: string; status: string }>('/api/v1/admin/playground/runs', {
       method: 'POST',
@@ -298,7 +303,13 @@ const admin = {
     return request<RunPage>(`/api/admin/runs?${search.toString()}`);
   },
   runTrace: (runId: string) => request<RunTrace>(`/api/admin/runs/${runId}`),
-  listConversations: () => request<ConversationSummary[]>('/api/admin/traces/conversations?page=0&size=30'),
+  listConversations: (query: string, page: number, size: number) => {
+    const search = new URLSearchParams();
+    if (query) search.set('query', query);
+    search.set('page', String(page));
+    search.set('size', String(size));
+    return request<ConversationPage>(`/api/admin/traces/conversations?${search.toString()}`);
+  },
   conversationTrace: (conversationId: string) =>
     request<ConversationDetail>(`/api/admin/traces/conversations/${encodeURIComponent(conversationId)}`),
 };

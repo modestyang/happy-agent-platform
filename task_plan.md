@@ -1,5 +1,32 @@
 # Happy Agent Platform implementation plan
 
+## 2026-08-12 训练播放器媒体、计时与语音修复（当前阶段）
+
+### Goal
+
+修复计划页与训练过程中的动作图片轮播、训练准备倒计时节奏、训练中逐秒提示音，并为语音指导增加可选择的声音风格；保持真实动作资源、训练状态和现有页面流程不被替换。
+
+### Phases
+
+1. [complete] 只读复现计划页、训练播放器、计时与音频现状，定位五项问题的根因和现有数据边界。
+2. [complete] 逐项确认语音风格能力范围与移动端验收标准，比较实现方案并取得设计确认。
+3. [complete] 固化设计规格与 TDD 实施计划。
+4. [complete] 按失败测试实现共享媒体轮播、单调时钟倒计时、节拍音和语音风格选择。
+5. [complete] 执行定向回归、类型检查、Lint、生产构建与本地移动端环境核验；真实设备音色验收待账号具备可进入的训练计划。
+
+### Constraints
+
+- 当前工作区包含其他任务的大量未提交修改，必须保留并避免覆盖。
+- 不新增或升级依赖，除非用户另行确认。
+- 不改数据库 migration，除非现有模型无法保存必要偏好且用户另行确认。
+- 计划页与训练页复用同一动作媒体规则，计时显示与音频必须由同一时钟事实驱动。
+
+### Verification
+
+- 训练相关 5 个测试文件共 56/56 通过；TypeScript、ESLint、生产构建和 `git diff --check` 通过。
+- 全量前端测试 127/128 通过；唯一失败为并行改动中的 `MealRecommendationPage.test.tsx` 重试状态断言，单独运行可复现，本轮未修改该模块。
+- 本地账号没有可进入的训练计划，因此未创建测试业务数据；真实设备声音观感保留为有计划数据后的手工验收项。
+
 ## Goal
 
 在正式项目中，以 `/Users/modest/IdeaProjects/fitness` 为只读视觉参考，完成 Today、Plans、瘦瘦、Exercises、Profile 五个移动端页面的结构、视觉与交互升级；保持正式后端 API 和数据链路不被 demo 逻辑替换。
@@ -27,6 +54,12 @@
 
 | Error | Attempt | Resolution |
 |---|---:|---|
+| TypeScript DOM 类型没有声明 `CSSStyleDeclaration.textSizeAdjust` | 1 | 改用标准 `getPropertyValue('text-size-adjust')` 读取计算样式 |
+| 定向 Vitest 路径包含 `frontend/`，prefix 切换目录后未找到文件 | 1 | 改用 `src/App.test.tsx`，不重复错误命令 |
+| 首个 computed-style 断言在未注入 CSS 的 jsdom 中直接通过 | 1 | 删除无效断言，改为显式加载真实 `app.css` 并断言其计算后行为 |
+| CSS 行为测试使用 `import.meta.url` 时被 Vitest 转换为非 file URL | 1 | 与现有测试一致，从 frontend 工作目录读取 `src/app.css` |
+| 从仓库根目录直接调用 ESLint 未发现 frontend 配置 | 1 | 将工作目录切到 `frontend` 后只 lint `src/App.test.tsx` |
+| 本地浏览器后端不支持 `networkidle` 等待状态 | 1 | 页面已打开，改用受支持的 `load` 后获取 DOM 快照 |
 | 首次读取输出被 node_modules 清单截断 | 1 | 改用定向文件读取与排除 node_modules |
 | 从 `frontend` 目录读取后端相对路径失败 | 1 | 记录基准测试结果，后续统一从仓库根目录读取后端文件 |
 | 首轮完整检查中 TypeScript 不接受 Vitest 单参数 mock 的第二参数索引 | 1 | 在测试内部把调用记录显式收窄为带可选 `RequestInit` 的元组 |
@@ -284,3 +317,148 @@
 |---|---:|---|
 | 首次追加计划时引用了不存在的旧步骤文本 | 1 | 读取文件尾部后按当前章节锚点追加，保留已有计划内容 |
 | 第二次打开外部参考时 JavaScript 对象引号错误 | 1 | 修正工具参数后一次成功读取官方 issue 与百炼文档，不重复错误调用 |
+
+## 2026-08-11 手机输入框自动缩放验收修复
+
+### Goal
+
+消除 iPhone 等手机浏览器聚焦体重目标及其他表单输入框时触发的页面自动放大，同时保留用户主动缩放能力。
+
+### Phases
+
+1. [complete] 定位 viewport、移动端输入字号与目标表单的实际样式根因。
+2. [complete] 先添加可复现的最小回归测试，再实施单点样式修复。
+3. [complete] 只运行相关前端测试、类型/格式检查并做一轮改动代码审查。
+4. [complete] 按用户要求重新部署本地栈，并在手机视口验证聚焦行为。
+
+### Constraints
+
+- 不禁用 pinch-to-zoom，不使用 `user-scalable=no` 或过小 `maximum-scale`。
+- 不修改本轮无关的现有未提交代码。
+- 不执行全量 Maven/前端测试或完整验收，仅做定向验证与部署冒烟。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+
+## 2026-08-11 AI 聊天缩放与自动跟随修复
+
+### Goal
+
+消除手机端 AI 聊天输入聚焦时的页面自动放大，并让新消息、流式回复和恢复中的回复自动跟随到对话底部。
+
+### Phases
+
+1. [complete] 核对聊天输入的最终 CSS、消息状态更新路径与真实滚动容器。
+2. [complete] 先添加两个最小失败用例，分别覆盖聊天输入字号和新回复滚动。
+3. [complete] 实施最小修复并运行相关前端测试、类型检查和定向 lint。
+4. [complete] 做一轮只针对本次改动的代码审查；不部署、不做完整验收。
+
+### Constraints
+
+- 保留用户主动缩放，不修改 viewport 为禁止缩放。
+- 自动跟随只作用于 AI 对话页，不改其他页面滚动逻辑。
+- 不触碰工作区内其他既有未提交改动。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+
+## 2026-08-11 首页适配、独立目标报告与饮食中文化
+
+### Goal
+
+让首页核心组件在常见手机视口内完整展示；将目标报告从 AI 对话中拆为独立页面；查清饮食推荐的 Agent/模型调用链并确保面向用户的推荐只输出中文。
+
+### Phases
+
+1. [complete] 复现并定位首页溢出、报告路由耦合及饮食推荐语言来源。
+2. [complete] 先添加最小失败用例，覆盖独立报告入口、首页布局约束和中文生成指令。
+3. [complete] 实施最小范围的前端布局/路由与后端提示词修复。
+4. [complete] 让已持久化的英文 READY 推荐在进入饮食页后自动重新生成。
+5. [complete] 运行定向测试、类型/格式检查并做一轮改动代码审查；不部署、不做完整验收。
+
+### Constraints
+
+- 不修改 API 契约、依赖、数据库 migration 或部署配置。
+- 不触碰工作区内其他既有未提交改动。
+- 报告沿用现有数据和卡片内容，只改变信息架构与页面承载方式。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| starter 单模块测试缺少 reactor 依赖类 | 1 | 改用 `-pl starter -am` 并关闭其他模块无匹配测试失败。 |
+| 全仓 Spotless 被无关 `ToolSchemaCodec.java` import 顺序阻塞 | 1 | 保留用户改动，改跑本轮 Java 所在 starter 模块 Spotless。 |
+| 首页 701px 高度断点卡片内容裁切 | 1 | 审查时将首页紧凑断点独立提高到 820px，播放器仍保留 700px。 |
+| 已持久化英文 READY 推荐不会被新提示词自动替换 | 1 | 非中文 READY 结果进入饮食页时自动重入既有持久任务与轮询，中文 READY 仍直接复用。 |
+
+## 2026-08-12 指定 Skill 的三餐 Agent 后台任务
+
+### Goal
+
+把每日三餐从固定提示词直调模型改为 `fitness.coach` 的独立后台 Agent 任务，并严格指定 `fitness.meal.skill`；结合档案、训练、饮食、反馈和近期推荐生成结构化中文三餐，同时暂停连续 14 天未使用应用的用户，支持回访按需恢复、启动补偿和有界并发处理。
+
+### Phases
+
+1. [complete] 恢复现有未提交 Harness/Trace、三餐任务和调度上下文，固定不新增 migration 的实现边界。
+2. [complete] TDD 增加发布 Agent 后台任务入口：只装载指定 Skill 及其声明的 Tool，缺失即失败且不使用聊天记忆。
+3. [complete] TDD 将三餐运行时改为消费后台 Agent JSON，并把推荐逻辑收拢到 `fitness.meal.skill`。
+4. [deferred] 按用户最新要求，本轮不修改或新增 Tool 清单/契约；Tool 上下文优化另开一轮。
+5. [complete] TDD 实现 14 天活跃筛选、首页回访按需恢复、启动补偿与 3 路有界 Worker。
+6. [complete] 运行相关测试、Spotless、编译检查并执行一轮改动代码审查。
+7. [complete] 更新并发布真实 `fitness.meal.skill`，重新部署，完成定时/回访/真实 Agent 三餐验收。
+
+### Constraints
+
+- 后台任务固定 `agentKey=fitness.coach`、`requiredSkillKey=fitness.meal.skill`；Skill、必要 Tool 或发布快照缺失时失败关闭。
+- 推荐策略与 JSON 输出协议由 Skill 承载；Java 只负责可信任务信封、权限、调度、严格结果校验和持久化。
+- 后台任务使用独立内部会话标识且不加载聊天记忆，不出现在健身用户 AI 对话中。
+- 连续 14 天没有打开应用的用户不再进入每日生成名单；重新打开后更新活动时间并仅在当天计划缺失时入队。
+- 使用现有 `users.updated_at`，不新增或修改数据库 migration。
+- 保留工作区全部既有未提交改动；不创建 commit。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| TDD Skill 引用的 `writing-good-tests.md` 不在 Skill 根目录 | 1 | 在 `skills/test-driven-development/` 子目录定位并完整读取，不重复错误路径。 |
+| 后台任务首轮 GREEN 把 Skill 快照修订号读取为 `revision` | 1 | 核对 `PublishedComponent.asSnapshot()` 后改读真实字段 `version`，不修改发布快照契约。 |
+| 新增动态上下文 Tool 会提前改变 Tool 清单/契约 | 1 | 用户明确要求 Tool 后续单独优化，已完整撤回新 Tool、查询 DTO 与绑定，当前 Tool 逻辑保持不变。 |
+| 专用 Executor 抑制 Spring Boot 默认 `applicationTaskExecutor` | 1 | 将专用 Bean 标记为 `defaultCandidate=false`，保留 Qualifier 注入且不影响 Boot 默认执行器。 |
+| AgentScope 自动注入 `wait_async_results` 导致后台任务请求人工确认 | 1 | 后台模式已禁用异步 Tool 和子 Agent，因此在构建后移除该 Harness 内部辅助 Tool；业务 Tool 清单与契约不变。 |
+
+## 2026-08-12 首页密度、聊天宽度与花爷命名修复
+
+### Goal
+
+消除高屏手机上首页四张快捷卡被剩余空间强行拉长的问题，并在首页加入紧凑的体重变化趋势；让 AI Markdown、表格及长文本始终限制在手机聊天容器内；把所有面向用户的 AI 名称从“瘦瘦”统一为“花爷”；为体重趋势、动作示意和报告图表等需要查看细节的场景提供点击放大。
+
+### Phases
+
+1. [complete] 根据用户截图复现并定位首页 Grid 拉伸、聊天横向溢出、残留名称及现有趋势/动作图实现。
+2. [complete] 提交并确认首页趋势、通用 UI 基础层、可放大场景和 A2UI-inspired renderer registry 设计。
+3. [complete] 按 TDD 增加失败用例，再实施最小 CSS、趋势图、放大查看与文案修复。
+4. [complete] 运行相关前端测试、类型检查、格式检查和一轮改动代码审查；不部署。
+
+### Constraints
+
+- 保持现有暖色、圆角、卡片化视觉语言，不进行范围外重设计。
+- 首页允许内容高度自然收紧；优先消除空白，不再以“必须填满全部视口”为目标。
+- 聊天正文、代码与长链接不得撑宽页面；Markdown 表格保持二维结构，只允许表格组件自身横向滑动，并支持弹出浮层完整查看。
+- 只修改面向用户的 AI 品牌文案，不修改技术标识 `fitness.coach`、数据库键或 API 契约。
+- 放大能力只覆盖承载数据或动作细节的视觉内容；头像、图标、装饰性插画和普通卡片不放大。
+- 首页趋势图复用 bootstrap 中已有体重记录，数据不足时提供克制的空状态，不新增 API。
+- Markdown 表格浮层与趋势/动作视觉查看器共享遮罩、关闭和键盘交互，但表格使用独立的滚动布局、粘性表头和首列。
+- 本轮不部署、不跑全量验收、不调整 Tool 逻辑。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 独立审查发现结构化确认卡缺少回调、焦点约束、状态关联与运行时降级边界 | 1 | 按 confirmationId 透传可信动作和提交/终态状态，补焦点循环与背景 inert，未知或畸形 block 安全降级且不遮蔽 legacy 审批。 |
+| 放大表格通过 portal 脱离 `.md` 后丢失二维布局规则 | 1 | 将表格宽度、边框与 nowrap 规则归属到 `.data-table-viewport`，并用 portal 后计算样式回归测试覆盖。 |
+| 全 reactor Spotless 被工作区内无关 Fitness/Starter 旧格式阻断 | 1 | 不改动无关文件；本轮涉及的 agentbuilder-service 与 agentbuilder-infrastructure 模块 Spotless 单独通过。 |
+| 9 文件并发 Vitest 首轮因机器负载使后台总览异步断言超过默认等待时间 | 1 | 单测文件单独通过；最终使用 `--maxWorkers=1` 重跑同一相关套件，88/88 通过，未修改产品代码规避超时。 |

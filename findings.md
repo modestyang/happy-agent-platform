@@ -140,3 +140,120 @@
 - 用户提供的 AgentScope 2.0.6 文档属于 Python SDK，示例导入为 `agentscope.message`。其“完整 Message + 增量 Event”“一次 reply 的事件可重建一个 Assistant Msg”“Block start/delta/end”“ToolCall/ToolResult 状态机”适合作为 Core 协议参考，但 Python API 不能直接用于 Java 模块。
 - AgentScope Java 2.0.2 原生具备 HarnessAgent、强类型 ContentBlock/AgentEvent、Context Compaction、Permission、Memory、Skill 与 Middleware；Core 应统一跨框架产品语义，AgentScope Adapter 应复用这些 Harness 设施而不是重复实现。
 - AgentScope 的 Block Type 是统一目标模型，不是所有 Provider 都能无损填充的保证；未知字段名、正文内 `<think>`、不完整兼容或 Connector 未支持的原生协议仍会退化为 TextBlock 或丢失扩展信息。
+
+## 2026-08-11 手机输入框自动缩放验收修复
+
+- `frontend/index.html` 已使用 `width=device-width, initial-scale=1.0`，且没有禁用用户缩放；viewport 本身不是异常来源。
+- `frontend/src/app.css` 的 `button, input, select { font: inherit; }` 让控件继承父级 `label` 的字号；通用 label 为 12px，首次目标 `.onboarding-card label` 为 11px。
+- 首次目标体重控件没有独立字号，因此手机 Safari 聚焦小于 16px 的表单控件时会触发页面自动放大；同一模式也影响登录、记录、搜索和聊天输入。
+- 修复方向应是将移动端可编辑控件的实际字号统一到至少 16px，并保留现有 viewport 的主动缩放能力；不应通过禁止缩放掩盖问题。
+- 所有健身端页面都位于 `.phone` 容器中，而 `/admin` 不使用该容器；用 `.phone :is(input, select, textarea)` 设定 16px 可以覆盖登录、首次目标、抽屉、搜索、聊天及个人资料表单，同时不改变桌面管理后台。
+- 当前 `.composer input`、`.onboarding-card input` 和 `.training-profile-form input` 有更高特异度的 11–12px/继承规则；修复规则需放在这些规则之后或使用足够明确的移动端作用域，避免被后续覆盖。
+- `App.test.tsx` 已真实渲染首次目标页；可直接对目标体重控件的 computed style 断言 16px，测试生产 DOM 与加载后的真实 CSS，不新增源文本正则测试。
+- Vitest 默认转换组件中的 CSS import 但未把样式注入当前 jsdom；直接读取渲染控件的 computed style 得到浏览器默认 16px，无法捕获生产 CSS 的 11px 覆盖。回归测试必须把真实 `app.css` 内容作为 `<style>` 注入测试 DOM，再检查首次目标结构下的计算字号。
+- 部署后在 390×844 真实页面打开身材记录抽屉：体重输入框计算字号为 16px；聚焦前后 `visualViewport.scale` 都是 1，`visualViewport.width` 与 `innerWidth` 都保持 390px。
+- 页面使用的 viewport 仍为 `width=device-width, initial-scale=1.0`，没有加入 `user-scalable=no`；浏览器控制台 error 为 0。
+
+## 2026-08-11 AI 聊天缩放与自动跟随修复
+
+- `AiPage` 的所有用户消息、assistant 占位消息和每个 SSE 事件都会更新 `messages`，但组件没有滚动 ref 或跟随消息变化的 effect，因此提交、流式增量和恢复消息都不会主动滚到底部。
+- DOM 结构是 `.ai-page` → `.ai-scroll` → `.conversation`，输入区 `.fixed-composer` 与 `.ai-scroll` 同级；需要核对 CSS 后把滚动动作绑定到真实可滚动节点，而不是 `window`。
+- 上轮 `.phone :is(input, select, textarea)` 位于 `.composer input { font-size: 12px; }` 之后，按相同特异度应得到 16px；用户仍观察到放大，需用当前聊天页实际计算样式进一步确认，而不能假定仍是同一根因。
+- 当前 390×844 运行页面的聊天输入实际计算字号是 16px，聚焦前后 `visualViewport.scale` 都为 1，页面及 `.ai-scroll` 横向宽度也没有溢出；因此现有通用 16px 规则在 Chromium 生效，用户看到的放大更可能是 iOS Safari 的自动文字调整，而非当前规则仍被 `.composer input` 覆盖。
+- 真实长会话中 `.ai-scroll` 的 `scrollHeight=2570`、`clientHeight=534`，但进入页面后 `scrollTop=0`，直接复现了“没有跟随到底部”；这也确认 `.ai-scroll` 是应操作的滚动节点。
+- `.ai-page` 当前计算 `text-size-adjust: auto` 且没有 WebKit 专用值；在不禁用 pinch-to-zoom 的前提下，应把聊天页自动文字调整固定为 100%，并把 `.composer input` 自身明确为 16px，避免依赖文件末尾的通用覆盖规则。
+- 自动跟随应直接写 `.ai-scroll.scrollTop = .ai-scroll.scrollHeight`，依赖 `messages`（覆盖用户消息、assistant 占位和每个 SSE 增量）并兼顾 error/sending 状态；不调用 window 滚动，也不影响其他页面。
+
+## 2026-08-11 首页适配、独立目标报告与饮食中文化
+
+- 首页原布局由 102px 问候区、目标卡、两行每张最小 166px 的快捷卡和 118px 底部留白叠加，在较矮手机上必然让 `.page` 产生纵向滚动。
+- 首页改为不滚动的三行 Grid，快捷区占用剩余高度；820px 以下启用紧凑排版。浏览器测量 390×667 与 320×568 时页面 `scrollHeight === clientHeight`，四张卡均位于底栏上方且自身无内容溢出。
+- 初版 700px 紧凑断点在 701px 高度出现卡片内部裁切；代码审查将首页断点独立调整为 820px，并实测 701px 和 821px 两侧均无裁切。
+- 首页目标箭头和报告卡原本都导航到 `/ai?report=current`；`AiPage` 根据查询参数生成报告并把 `CurrentGoalReportCard` 插在 `.ai-scroll` 顶部，导致报告与聊天信息架构耦合。
+- 新路由 `/report/current` 独立负责报告入队、轮询、失败重试、记录和生成计划动作；AI 页已移除全部报告状态与渲染逻辑。
+- 三餐推荐不是普通聊天：HTTP/05:30 调度只持久化任务，`DailyMealPlanGenerationWorker` 领取租约后调用 `MealPlanGenerationRuntime`。
+- `MealPlanGenerationRuntime` 通过 `PublishedFitnessAgentRuntime` 读取已发布 `fitness.coach` 的不可变 Provider、模型与凭据快照，然后直调 OpenAI-compatible `/chat/completions`，以严格 JSON Schema 接收早餐/午餐/晚餐并持久化。
+- 英文输出根因是三餐专用 system prompt 完全使用英文且没有中文约束，解析器也只校验 JSON 结构。现已明确要求 `items.name` 与 `reason` 使用简体中文，并拒绝缺少汉字的用户文案。
+- 对已经持久化的英文 READY 推荐，饮食页会自动调用原生成接口；服务只把缺少中文用户文案的 READY 任务重置为 GENERATING，worker 成功后原子覆盖三餐内容，正常中文 READY 不会重复调用模型。
+
+## 2026-08-12 指定 Skill 的三餐 Agent 后台任务
+
+- 当前 05:30 只有一个全局 Spring 定时器，不会为每个用户创建定时器；它遍历 `activeUserIds()` 并按用户/日期写入唯一的持久任务。
+- `activeUserIds()` 目前只判断 `users.status='ACTIVE'`，所以长期不用的账户仍会每天消耗一次模型调用。
+- `users.updated_at` 已存在且适合记录最近应用访问；在 bootstrap 时触碰该字段即可覆盖登录后持续使用，无需新增 migration。
+- 回访按需恢复必须只入队“当天不存在”的计划；失败计划仍由显式重试入口处理，避免每次 bootstrap 无限重试并重复消耗 Token。
+- 当前三餐运行时绕过 Harness，固定 system prompt 后直调 `/chat/completions`；反馈数据由服务预先塞入请求，训练档案和历史推荐未参与。
+- 已发布 Agent 快照包含 Skill 的内容、revision 和 `requiredToolKeys`，但 `PublishedAgentPlaygroundRuntime` 当前把所有绑定 Skill、所有 Agent Tool 和聊天记忆一起传入 `RunRequest`。
+- 两个框架 Adapter 都只消费 `RunRequest.skills()`；因此后台入口可以在运行时层精确裁剪为一个 Skill，并从该 Skill 快照解析必要 Tool，做到确定性装载而非提示词暗示。
+- 后台任务可使用派生内部会话键记录 Run/Trace，同时 Run 仍标记真实 `fitness.coach`；这样保留 agentVersion/Skill 事件审计，又不会进入用户 `fitness.coach` 聊天会话。
+- 当前 `fitness.meal.query` 只返回最近 5 次实际餐食和当天推荐，`fitness.workout.query` 只返回当天计划和累计完成次数；用户已要求本轮不调整 Tool 逻辑，这部分上下文增强留到后续 Tool 清单优化。
+- 当前 Worker 每 500ms 同步领取并运行一条任务；模型调用最长 45 秒。生产实现应使用队列容量为 0、默认 3 线程的专用执行器，避免无限排队并保持 Provider 并发可控。
+- 专用 `ThreadPoolTaskExecutor` 如果作为普通默认候选 Bean 注册，会使 Spring Boot 不再自动创建 `applicationTaskExecutor`，从而阻断既有 AI 流任务；使用 `defaultCandidate=false` 后可按 Qualifier 注入三餐 Worker，同时保留 Boot 默认执行器。
+- 首次真实后台运行暴露 AgentScope Harness 会自动注入 `wait_async_results`；该任务已显式关闭异步 Tool 和子 Agent，模型误调用它只会产生无法满足的人工确认。运行时在 Agent 构建后移除这个内部辅助 Tool，四个已发布业务 Tool 及其输入输出均未变化。
+- 本地发布的 `fitness.meal.skill` 为 revision 2，`fitness.coach` 为 version 10。真实运行 `5071be2d-dc20-43fe-ab9f-553d6446ebd7` 成功装载指定 Skill，只调用原有四个只读 Tool，并返回三餐简体中文 JSON。
+- 390×844 手机视口从“今天还没有饮食建议”点击生成后进入轮询，最终自动展示早餐、午餐和晚餐；对应持久任务为 READY，页面无需手动刷新。
+
+## 2026-08-12 首页密度、聊天宽度与花爷命名修复
+
+- 用户截图中的首页约为 945×2048 像素比例；目标卡高度正常，但两行快捷卡被平均拉到约 540 像素，标题与底部摘要之间出现大面积无意义空白。问题特征与此前“快捷区占满剩余视口”的 Grid 自适应策略一致。
+- 聊天截图中 assistant 消息卡自身已接近手机内容宽度，但 Markdown 表格的最小内容宽度超过卡片，右侧列与普通段落一起被裁出屏幕，说明溢出源在消息/Markdown 子元素而非输入框。
+- 用户可见页头和输入占位已显示“花爷”，但回复正文仍可能出现“瘦瘦”；需要同时排查静态前端文案、Agent prompt/Skill 默认文案与测试夹具，技术键名不应替换。
+- 本轮视觉方向保持现有温暖、玩具感卡片语言，但从“填满屏幕”改为“紧凑信息密度”：快捷卡由固定/自然高度承载，不用空白制造视觉重量。
+- 首页根因已定位：`.home-page` 第三行使用 `minmax(0, 1fr)`，`.home-actions` 的两行也使用 `repeat(2, minmax(0, 1fr))`，因此所有目标卡以下的剩余高度都会被四张快捷卡均分；在高屏手机上必然形成截图中的超高空卡。
+- 聊天宽度根因已定位：`.message` 只有 `max-width: 87%`，缺少 `min-width: 0`/明确可用宽度；`.message-body` 也没有宽度收缩边界，而 Markdown 表格单元格设置了 `white-space: nowrap`。表格的固有最小宽度会反向撑大 flex item，导致整条 assistant 消息超出屏幕。
+- 现有 `.md table { display:block; overflow-x:auto; width:100% }` 本意是局部横向滚动，但父级 flex item 未允许收缩，且单元格禁止换行，所以局部滚动容器无法先缩到消息宽度。
+- 当前前端导航、页头、占位和报告摘要已经使用“花爷”；残留主要出现在 Agent 工作台初始化/基线 Prompt 的“瘦瘦健身教练”“瘦瘦系统提示词”“瘦瘦 AI 花爷”，模型回复中的“瘦瘦”很可能来自仍在发布快照中的系统提示词，而不是前端渲染文案。
+- 用户补充：首页需要增加体重变化趋势图，并希望合理选择需要点击放大的视觉内容。初步边界为体重趋势、动作示意和报告数据图；头像、功能图标、装饰性吉祥物与纯色卡片没有放大价值。
+- 项目已有可复用的 `WeightSparkline`，直接消费 bootstrap 的 `bodyRecords`，所以首页趋势无需新增接口；无记录时组件已有明确空状态。
+- 现有高信息视觉共四类：`WeightSparkline` 体重曲线、当前目标报告的体重/训练量图、`ExerciseVisual` 的真实动作图片或 SVG 姿势图、饮食识别的用户照片预览。`BodyActivation` 是低密度部位概览，放大收益较低；列表里的 compact 动作缩略图已有“进入详情”行为，不应叠加放大手势。
+- 合理放大边界：个人页与首页体重趋势、报告页两张趋势图、动作详情/训练计划/跟练页的非 compact 动作图、饮食照片预览支持全屏；动作库 compact 缩略图保持进入详情，吉祥物/头像/图标不支持放大。
+- 放大能力适合由一个可复用、可访问的全屏查看器承载，支持关闭按钮、遮罩点击和 Escape；图表与 SVG 直接复用原组件内容，不把它们转换成位图。
+- 浏览器实测确认首页拉伸随视口高度线性加剧：390×844 时四张快捷卡各高 168.25px；430×932 时各高 212.25px。目标卡和问候区高度保持不变，全部额外高度都被 `.home-actions` 的两个 `1fr` 行吸收，根因假设成立。
+- 首页修复不能继续让快捷卡承载剩余空间。更稳妥的是将页面内容改为自然高度/顶部对齐，快捷卡行使用内容驱动的紧凑固定范围；新增体重趋势作为独立横向信息条，不把趋势塞进目标卡或某张快捷卡。
+- 430×932 聊天页实测 `.conversation` 可用宽度为 392px，但其 `scrollWidth` 已达到 406px；`.ai-scroll` 的横向 overflow 计算为 `auto`。即使当前恢复会话没有表格，普通消息结构已经产生 14px 横向溢出，验证父级收缩约束确实不足。
+- `.message--assistant` 当前 `min-width:auto`，`.message-body` 同样为 `min-width:auto` 且 `max-width:none`；修复应在消息 flex item 和正文两级都补 `min-width:0`/明确最大宽度，同时把 `.ai-scroll` 固定为 `overflow-x:hidden`。Markdown 表格自身可以保留局部滚动，但普通段落、列表、代码和链接必须换行。
+- 用户明确不接受把 Markdown 表格所有单元格强制换行，因为会破坏行列对应关系。正确交互是：消息正文保持屏幕宽度，表格作为独立 UI 组件局部横向滑动，并提供放大按钮进入浮层查看完整表格。
+- 表格浮层应保留二维结构和单元格内容，使用更大可视区域、粘性表头与首列、独立横纵滚动；内联表格增加边缘渐隐/滑动提示，避免用户误以为整个页面可以左右拖动。
+
+## A2UI 与通用 Agent UI 组件协议评估
+
+- A2UI 的核心思想与本项目后续方向高度相关：Agent 不生成 HTML/JSX，而是发送可校验的声明式组件树、数据模型更新和命名 Action；客户端只渲染白名单 Catalog 中的组件，因此能保持视觉一致性与安全边界。
+- 值得借鉴的不是立刻完整接入 A2UI SDK，而是四个协议边界：版本化组件 Catalog、UI 描述与数据分离、命名 Action 回传、渲染前 Schema 校验/未知组件降级。
+- A2UI 组件以稳定 ID 组织，可增量更新 Surface；这与当前持久 SSE Run Event 很契合，但项目目前只需要对话消息内的有限卡片，不值得马上引入完整 Surface 生命周期、通用表达式求值和跨端传输协议。
+- 官方当前状态为 v0.9.1 production/current、v1.0 candidate；项目仓库仍标注 early-stage public preview，并明确还在推进规范稳定和更多官方 renderer。现在把它作为设计参考比直接绑定候选协议更稳妥。
+- A2UI v1.0 支持 renderer/agent Catalog capability 交换、命名 action、`actionResponse`、自定义 Catalog 与跨 Catalog 混用；Catalog 自身用 JSON Schema 约束组件和函数，正好能避免 Agent 任意构造前端代码。
+- 官方 renderer 指南建议用 `web_core` 承担约 3000 行 Surface 状态、消息处理与 Schema 校验；如果未来真的需要跨 Agent/跨客户端的任意 UI Surface，再评估正式接入。当前只做有限业务卡片时直接引入会扩大协议和状态复杂度。
+- 项目现有 Core 已有 framework-neutral `ResponseBlock` 和有序 `RunEvent`，前端 SSE 也已区分 TEXT、RUN_EVENT、APPROVAL；因此不应再造一套平行传输。通用 UI 描述应作为新的受控内容块/组件事件接到现有 reply/run 流中。
+- 当前 `AgentRunMessage` 把 Markdown、进度和训练计划确认卡硬编码在一个组件中；继续增加详情卡、趋势图会形成分支膨胀。应拆为“消息状态归约器 + 组件注册表 + 通用壳层/浮层 + 领域组件”。
+- A2UI 的 Surface/DataModel 对当前单条聊天回复偏重，但它的 Catalog 对应项目中的组件注册表，Action 对应现有确认接口，稳定 component id 对应现有 blockId；可以做一个兼容其思想、但不宣称协议兼容的轻量子集。
+- 更关键的发现：`public-v1.yaml` 已经预留 `AiContentBlock` 判别联合，包含 TEXT、GOAL_SUMMARY、WORKOUT_PLAN、EXERCISE_DETAIL、MEAL_PLAN、MEAL_RECOGNITION、BODY_TREND、CURRENT_GOAL_REPORT、CONFIRMATION，并已有 `STRUCTURED_COMPONENT` SSE 事件。项目其实已经有自己的领域 Catalog，只是运行时投影和前端 renderer 尚未真正接通。
+- 因此不应再发明新的通用 `UiBlock` 协议。应把现有 `AiContentBlock` 作为唯一传输契约，前端建立按 `kind` 注册的 renderer；需要通用表格时按 contract-first 新增 `DATA_TABLE` block，而详情、趋势、确认继续使用强类型领域 block。
+- 现有 `ComponentEventData` 只有 messageId + block，若以后需要对同一卡片流式更新，应增加稳定 componentId/operation（UPSERT/REMOVE）后再支持，而不是靠数组顺序猜测。当前第一阶段可以只追加完整 block，避免提前实现完整 Surface 状态机。
+# 2026-08-12 训练播放器媒体、计时与语音修复
+
+- 用户报告五项现象：计划页图片不轮播、训练准备倒计时过快、训练页图片不轮播、中段缺少逐秒节拍音、语音包无法选择风格。
+- 任务至少包含两个共享边界：动作媒体展示，以及训练时钟/音频调度；语音风格选择可能进一步涉及浏览器 SpeechSynthesis 能力或服务端音频资源。
+- 当前前端与训练相关文件已有其他未提交修改，后续必须先读真实 diff，再决定最小编辑面。
+- 初步定位到共享媒体组件 `frontend/src/components/ExerciseVisual.tsx`：它按传入 `step` 选择单张 `imageUrls`，组件内部没有自动轮播时钟；计划页 compact 使用默认 step，因此始终停在首图。
+- 跟练语音集中在 `frontend/src/workout/voiceGuidance.ts`；当前转换提示只为准备阶段、动作/休息结束前 3 秒生成语音数字，没有独立的逐秒节拍音通道，也没有声音风格模型。
+- 现有 `App.test.tsx` 已覆盖跟练打开、语音不支持、退出取消等行为，可在同一测试边界补失败用例，不需要另造页面测试框架。
+- `ExerciseVisual` 的图片选择规则是 `imageUrls[step - 1] ?? imageUrls[0]`；计划页传 `compact` 且不传 `step`，所以稳定停在第 1 张。训练页若传固定 session step，同样不会按动作节奏自动切换。
+- `voiceGuidance.ts` 当前完全依赖浏览器 Web Speech API，固定 `lang='zh-CN'`、`rate=1`，接口没有 voice/style 参数，也没有 `getVoices()` 选择逻辑。
+- 当前声音是语音队列：准备阶段读 3/2/1，动作和休息阶段只在剩余 3 秒读数字；中间没有 Web Audio/HTMLAudio 的短促节拍音，因此用户听到大段静音与代码一致。
+- 既有假时钟测试只验证“3 秒准备后进入 2 秒动作”，没有验证真实墙钟下准备数字每个至少显示约 1 秒；必须继续审计 App 中 interval effect 的依赖和重建频率。
+# 2026-08-12 训练播放器媒体、计时与语音修复（补充调查）
+
+- `workoutSession.ts` 的纯状态机一次推进只递减 1 秒，3 次推进后才从准备阶段进入训练；“读秒过快”更可能发生在 `App.tsx` 的计时器注册、清理或重复调度层。
+- 训练计划接口与集成测试已经证明单个动作可返回 4 张 `imageUrls`，无需为轮播新增数据库字段或接口。
+- 当前样式只有单张动作图容器，没有轮播指示、切帧或无动画偏好处理。
+- 语音引擎固定使用 `zh-CN`、`rate=1`，接口未暴露 `voice` / `pitch` / `getVoices()`；目前无法选择或持久化语音风格。
+- `WorkoutPlayer` 当前每 1000ms 推进一步，effect 依赖 `paused` 与 `session.phase`，清理函数也存在；静态检查暂未发现显式的双 interval，需要用真实页面/可控时钟复现并检查首秒边界。
+- 训练中的动作图片并非按秒切换，而是写死为 `(setIndex % 4) + 1`：同一组训练期间永远停在同一张，只有组数变化才换图。
+- 训练预览与计划页都没有传入动态 `step`，因此默认固定显示第 1 张。
+- 当前工作树中 `App.tsx` 与 `ExerciseVisual.tsx` 已有未提交修改，后续实施必须先区分并保留用户/其他任务的改动。
+- 当前本地账号今天与本周一均无可进入的训练计划，浏览器暂时无法直接复现倒计时；需要继续检查其他日期或依赖可控时钟的组件测试。
+- 用户已确认至少存在“语音 3、2、1 挤在一起”的问题。结合现有 FIFO 语音队列，根因是较长的开场播报占用通道时，后续数字持续入队；开场结束后积压数字会无间隔连续播放。
+- 倒计时语音应采用“只保留当前有效提示”的时效策略，而不是普通播报所用的完整 FIFO；过期秒数必须丢弃，不能补播。
+- `ExerciseVisual.tsx` 已含其他任务新增的可展开媒体容器改动；轮播必须在该结构上增量实现，不能回退或覆盖 `ExpandableSurface variant="media"`。
+- `App.test.tsx` 与 `app.css` 有大量并行改动。为降低冲突，新逻辑优先放入独立的 workout 单元测试与组件测试，只在 `WorkoutPlayer`、`PlanPage` 调用点和末端样式区做最小增量。
+- 当前 App 集成测试已经覆盖训练进入、暂停、完成、StrictMode 语音去重和静音/跳过；新测试应聚焦“过期倒计时不补播”“动作帧随秒数往返”“预设参数与持久化”“每秒节拍”和“每个数字至少展示 1 秒”。

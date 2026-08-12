@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createVoiceEngine,
   isVoiceSupported,
+  readVoiceStyle,
+  saveVoiceStyle,
   voiceCueForTransition,
   type SpeechSynthesisLike,
+  type VoiceUtterance,
 } from './voiceGuidance';
 import { advanceWorkoutSession, createWorkoutSession, startWorkoutSession, type WorkoutSessionState } from './workoutSession';
 
@@ -40,21 +43,21 @@ describe('voice guidance', () => {
     const cues = collectCues(createWorkoutSession([exercise, bridge]));
 
     expect(cues).toEqual([
-      { id: 'countdown:3', text: '训练准备，3', interrupt: false },
-      { id: 'countdown:2', text: '2', interrupt: false },
-      { id: 'countdown:1', text: '1', interrupt: false },
+      { id: 'countdown:3', text: '3', interrupt: false, policy: 'LATEST' },
+      { id: 'countdown:2', text: '2', interrupt: false, policy: 'LATEST' },
+      { id: 'countdown:1', text: '1', interrupt: false, policy: 'LATEST' },
       { id: 'exercise:0:set:0', text: '深蹲，第 1 组', interrupt: false },
-      { id: 'exercise:0:set:0:countdown:3', text: '3', interrupt: false },
-      { id: 'exercise:0:set:0:countdown:2', text: '2', interrupt: false },
-      { id: 'exercise:0:set:0:countdown:1', text: '1', interrupt: false },
+      { id: 'exercise:0:set:0:countdown:3', text: '3', interrupt: false, policy: 'LATEST' },
+      { id: 'exercise:0:set:0:countdown:2', text: '2', interrupt: false, policy: 'LATEST' },
+      { id: 'exercise:0:set:0:countdown:1', text: '1', interrupt: false, policy: 'LATEST' },
       { id: 'rest:exercise:0:0:30', text: '休息 30 秒', interrupt: false },
-      { id: 'rest:exercise:0:0:countdown:3', text: '3', interrupt: false },
-      { id: 'rest:exercise:0:0:countdown:2', text: '2', interrupt: false },
-      { id: 'rest:exercise:0:0:countdown:1', text: '1', interrupt: false },
+      { id: 'rest:exercise:0:0:countdown:3', text: '3', interrupt: false, policy: 'LATEST' },
+      { id: 'rest:exercise:0:0:countdown:2', text: '2', interrupt: false, policy: 'LATEST' },
+      { id: 'rest:exercise:0:0:countdown:1', text: '1', interrupt: false, policy: 'LATEST' },
       { id: 'exercise:1:set:0', text: '臀桥，第 1 组', interrupt: false },
-      { id: 'exercise:1:set:0:countdown:3', text: '3', interrupt: false },
-      { id: 'exercise:1:set:0:countdown:2', text: '2', interrupt: false },
-      { id: 'exercise:1:set:0:countdown:1', text: '1', interrupt: false },
+      { id: 'exercise:1:set:0:countdown:3', text: '3', interrupt: false, policy: 'LATEST' },
+      { id: 'exercise:1:set:0:countdown:2', text: '2', interrupt: false, policy: 'LATEST' },
+      { id: 'exercise:1:set:0:countdown:1', text: '1', interrupt: false, policy: 'LATEST' },
       { id: 'completed', text: '训练完成，今天辛苦啦', interrupt: false },
     ]);
     expect(new Set(cues.map((cue) => cue.id)).size).toBe(cues.length);
@@ -73,6 +76,19 @@ describe('voice guidance', () => {
     expect(speech.cancel).not.toHaveBeenCalled();
     speech.utterances[0]?.onend?.();
     expect(speech.utterances.map((utterance) => utterance.text)).toEqual(['一', '二']);
+  });
+
+  it('drops an obsolete countdown cue before it can be replayed from the queue', () => {
+    const speech = speechDouble();
+    const engine = createVoiceEngine(speech, (text) => ({ text }));
+
+    engine.speak({ id: 'exercise', text: '深蹲，第一组', interrupt: false });
+    engine.speak({ id: 'countdown:3', text: '3', interrupt: false, policy: 'LATEST' });
+    engine.speak({ id: 'countdown:2', text: '2', interrupt: false, policy: 'LATEST' });
+    speech.utterances[0]?.onend?.();
+
+    expect(speech.utterances.map((utterance) => utterance.text)).toEqual(['深蹲，第一组', '2']);
+    expect(speech.cancel).not.toHaveBeenCalled();
   });
 
   it('unlocks in the user gesture and only cancels for mute, skip, or exit', () => {
@@ -122,6 +138,41 @@ describe('voice guidance', () => {
     engine.speak({ id: 'exercise:0:set:0', text: '深蹲，第 1 组', interrupt: false });
 
     expect(speech.utterances.map((utterance) => utterance.text)).toEqual(['深蹲，第 1 组', '深蹲，第 1 组']);
+  });
+
+  it('applies a matching local Chinese voice and tuning for each voice style', () => {
+    const femaleVoice = { name: 'Tingting', lang: 'zh-CN' };
+    const maleVoice = { name: 'Yunxi', lang: 'zh-CN' };
+    const speech = speechDouble();
+    speech.getVoices = () => [maleVoice, femaleVoice];
+    const utterances: VoiceUtterance[] = [];
+    const engine = createVoiceEngine(speech, (text) => {
+      const utterance = { text };
+      utterances.push(utterance);
+      return utterance;
+    });
+
+    engine.setStyle('GENTLE_FEMALE');
+    engine.speak({ id: 'gentle', text: '保持呼吸', interrupt: false });
+    expect(utterances[0]).toMatchObject({ voice: femaleVoice, lang: 'zh-CN', rate: 0.92, pitch: 1.08 });
+    speech.utterances[0]?.onend?.();
+
+    engine.setStyle('MAGNETIC_MALE');
+    engine.speak({ id: 'magnetic', text: '继续训练', interrupt: false });
+    expect(utterances[1]).toMatchObject({ voice: maleVoice, lang: 'zh-CN', rate: 0.88, pitch: 0.82 });
+  });
+
+  it('persists a valid local voice style and rejects an unknown stored value', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    saveVoiceStyle('MAGNETIC_MALE', storage);
+    expect(readVoiceStyle(storage)).toBe('MAGNETIC_MALE');
+    values.set('happy-agent.workout-voice-style', 'UNKNOWN');
+    expect(readVoiceStyle(storage)).toBe('SYSTEM');
   });
 
   it('has a safe no-op engine when Web Speech is unavailable', () => {

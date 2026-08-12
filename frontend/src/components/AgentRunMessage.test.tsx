@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentRunMessage, parseSseFrames, type AgentRunUiMessage } from './AgentRunMessage';
+import { AgentRunMessage, applyAgentRunEvent, parseSseFrames, type AgentRunUiMessage } from './AgentRunMessage';
 
 describe('AgentRunMessage', () => {
   it('parses fragmented durable SSE frames without losing markdown deltas', () => {
@@ -16,7 +16,7 @@ describe('AgentRunMessage', () => {
     const message: AgentRunUiMessage = {
       role: 'assistant',
       content: '## 你的计划',
-      progress: ['正在整理可执行的建议'],
+      progress: ['正在整理建议'],
       approval: {
         approvalId: 'approval-1',
         status: 'REQUESTED',
@@ -25,8 +25,142 @@ describe('AgentRunMessage', () => {
       },
     };
     render(<AgentRunMessage message={message} onDecision={decide} />);
-    expect(screen.getByText('思考与执行').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('处理进度').closest('details')).not.toHaveAttribute('open');
     fireEvent.click(screen.getByRole('button', { name: '确认并保存' }));
     expect(decide).toHaveBeenCalledWith('approval-1', 'APPROVE');
+  });
+
+  it('hides provider thinking and reduces internal events to fixed business stages', () => {
+    const events = [
+      { type: 'RUN_STATE', data: { status: 'RUNNING', summary: '已建立运行上下文' } },
+      { type: 'RUN_EVENT', data: { eventType: 'SKILL_LOADED', skillKey: 'fitness.plan.skill' } },
+      { type: 'RUN_EVENT', data: { eventType: 'BLOCK_STARTED', blockId: 'think-1', type: 'THINKING' } },
+      { type: 'RUN_EVENT', data: { eventType: 'BLOCK_DELTA', blockId: 'think-1', delta: 'I should inspect tool arguments' } },
+      { type: 'RUN_EVENT', data: { eventType: 'TOOL_STARTED', toolKey: 'fitness.exercise.search' } },
+      { type: 'RUN_EVENT', data: { eventType: 'MODEL_CALL_COMPLETED' } },
+    ];
+    const completed = events.reduce(
+      (message, event) => applyAgentRunEvent(message, event),
+      { role: 'assistant', content: '' } as AgentRunUiMessage,
+    );
+
+    expect(completed.progress).toEqual([
+      '正在理解你的需求',
+      '正在查看相关记录',
+      '正在整理建议',
+    ]);
+    render(<AgentRunMessage message={completed} />);
+    expect(screen.queryByText('思考过程')).not.toBeInTheDocument();
+    expect(screen.queryByText(/fitness\./)).not.toBeInTheDocument();
+    expect(screen.queryByText('I should inspect tool arguments')).not.toBeInTheDocument();
+  });
+
+  it('does not duplicate text when an adapter emits both block and legacy deltas', () => {
+    const blockStarted = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      { type: 'RUN_EVENT', data: { eventType: 'BLOCK_STARTED', blockId: 'text-1', type: 'TEXT' } },
+    );
+    const blockDelta = applyAgentRunEvent(
+      blockStarted,
+      { type: 'RUN_EVENT', data: { eventType: 'BLOCK_DELTA', blockId: 'text-1', delta: '训练计划已准备好' } },
+    );
+    const completed = applyAgentRunEvent(
+      blockDelta,
+      { type: 'TEXT_DELTA', data: { delta: '训练计划已准备好' } },
+    );
+
+    expect(completed.content).toBe('训练计划已准备好');
+  });
+
+  it('renders structured content blocks projected by the existing event contract', () => {
+    const completed = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      { type: 'STRUCTURED_COMPONENT', data: { messageId: 'message-1', block: { kind: 'TEXT', markdown: '**保持节奏**' } } },
+    );
+
+    render(<AgentRunMessage message={completed} />);
+
+    expect(screen.getByText('保持节奏')).toBeInTheDocument();
+  });
+
+  it('keeps typed trend blocks when reducing structured component events', () => {
+    const completed = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      { type: 'STRUCTURED_COMPONENT', data: { messageId: 'message-2', block: { kind: 'BODY_TREND', metric: 'WAIST', unit: 'cm', points: [{ measuredAt: '2026-08-08T08:00:00+08:00', value: 71.2 }] } } },
+    );
+
+    render(<AgentRunMessage message={completed} />);
+
+    expect(screen.getByRole('img', { name: '腰围趋势，共 1 条记录' })).toBeInTheDocument();
+  });
+
+  it('adapts structured confirmation actions to the trusted approval handler', () => {
+    const decide = vi.fn();
+    const completed = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      { type: 'STRUCTURED_COMPONENT', data: { messageId: 'message-3', block: { kind: 'CONFIRMATION', confirmationId: 'approval-2', title: '保存计划', message: '保存到本周计划？', confirmLabel: '保存', cancelLabel: '取消' } } },
+    );
+
+    render(<AgentRunMessage message={completed} onDecision={decide} />);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(decide).toHaveBeenCalledWith('approval-2', 'APPROVE');
+  });
+
+  it('shows the safe fallback for unknown structured component events', () => {
+    const completed = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      { type: 'STRUCTURED_COMPONENT', data: { messageId: 'message-4', block: { kind: 'REMOTE_WIDGET', html: '<script>bad()</script>' } } },
+    );
+
+    render(<AgentRunMessage message={completed} />);
+
+    expect(screen.getByText('暂不支持这类内容')).toBeInTheDocument();
+    expect(document.querySelector('script')).toBeNull();
+  });
+
+  it('locks a structured confirmation while its decision is submitting', () => {
+    const message: AgentRunUiMessage = {
+      role: 'assistant',
+      content: '',
+      blocks: [{ kind: 'CONFIRMATION', confirmationId: 'approval-3', title: '保存计划', message: '保存到本周计划？', confirmLabel: '保存', cancelLabel: '取消' }],
+      deciding: true,
+      decidingApprovalId: 'approval-3',
+    };
+
+    render(<AgentRunMessage message={message} onDecision={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled();
+  });
+
+  it('replaces matching structured confirmation actions with one terminal status', () => {
+    const requested = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      { type: 'STRUCTURED_COMPONENT', data: { block: { kind: 'CONFIRMATION', confirmationId: 'approval-4', title: '保存计划', message: '保存到本周计划？', confirmLabel: '保存', cancelLabel: '取消' } } },
+    );
+    const approved = applyAgentRunEvent(requested, {
+      type: 'APPROVAL',
+      data: { approvalId: 'approval-4', status: 'APPROVED', title: '保存计划' },
+    });
+
+    render(<AgentRunMessage message={approved} onDecision={vi.fn()} />);
+
+    expect(screen.getAllByText('已确认并保存')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a valid legacy approval when a matching structured confirmation is malformed', () => {
+    const message: AgentRunUiMessage = {
+      role: 'assistant',
+      content: '',
+      blocks: [{ kind: 'CONFIRMATION', confirmationId: 'approval-5' }],
+      approval: { approvalId: 'approval-5', status: 'REQUESTED', title: '保存训练计划' },
+    };
+
+    render(<AgentRunMessage message={message} onDecision={vi.fn()} />);
+
+    expect(screen.getByText('暂不支持这类内容')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认并保存' })).toBeEnabled();
   });
 });

@@ -1,8 +1,11 @@
 package happy.jayden.yang.agentbuilder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import happy.jayden.yang.agentbuilder.core.runtime.AgentFrameworkRegistry;
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeCapabilityRegistry;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
+import happy.jayden.yang.agentbuilder.framework.adapter.agentscope.AgentScopeAdapter;
+import happy.jayden.yang.agentbuilder.framework.adapter.springai.SpringAiAlibabaAdapter;
 import happy.jayden.yang.agentbuilder.infrastructure.auth.JdbcAdminAuthStore;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcHookRepository;
 import happy.jayden.yang.agentbuilder.infrastructure.catalog.JdbcModelRepository;
@@ -18,6 +21,7 @@ import happy.jayden.yang.agentbuilder.infrastructure.workbench.PublishedAgentPla
 import happy.jayden.yang.agentbuilder.service.auth.AdminAuthService;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminResourceService;
 import happy.jayden.yang.agentbuilder.service.workbench.AdminWorkbenchService;
+import happy.jayden.yang.fitness.infrastructure.JdbcFitnessUserDirectory;
 import happy.jayden.yang.fitness.infrastructure.agent.FitnessTools;
 import java.nio.file.Path;
 import java.util.List;
@@ -99,13 +103,23 @@ public class AdminWorkbenchConfig {
   }
 
   @Bean
+  AdminConversationTraceService adminConversationTraceService(
+      JdbcRunTraceRepository traces, JdbcFitnessUserDirectory users) {
+    return new AdminConversationTraceService(traces, users);
+  }
+
+  @Bean
   PublishedAgentPlaygroundRuntime publishedAgentPlaygroundRuntime(
       @Qualifier("agentDataSource") DataSource dataSource,
       ObjectMapper mapper,
       JdbcRunTraceRepository traces,
+      AgentFrameworkRegistry frameworks,
+      ToolRegistry tools,
+      FitnessSkillRegistry hookExecutor,
       @Value("${happy.agent.workbench.master-key-file:./deploy/secrets/agent-master-key}")
           String masterKeyFile) {
-    return new PublishedAgentPlaygroundRuntime(dataSource, mapper, Path.of(masterKeyFile), traces);
+    return new PublishedAgentPlaygroundRuntime(
+        dataSource, mapper, Path.of(masterKeyFile), traces, frameworks, tools, hookExecutor);
   }
 
   @Bean
@@ -116,6 +130,12 @@ public class AdminWorkbenchConfig {
   @Bean
   ToolRegistry toolRegistry(SpringToolCatalogScanner scanner, FitnessTools fitnessTools) {
     return new DefaultToolRegistry(scanner.scanRegistrations(List.of(fitnessTools)));
+  }
+
+  @Bean
+  AgentFrameworkRegistry agentFrameworkRegistry() {
+    return new AgentFrameworkRegistry(
+        List.of(new AgentScopeAdapter(), new SpringAiAlibabaAdapter()));
   }
 
   // Kept as typed catalog adapters for the existing persistence surface.

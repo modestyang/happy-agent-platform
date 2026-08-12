@@ -10,7 +10,7 @@ const recommendation = (mealType: MealRecommendation['mealType'], status = 'READ
   id: mealType,
   recommendationDate: '2026-08-06',
   mealType,
-  items: [{ name: mealType, estimatedKcal: 400 }],
+  items: [{ name: '推荐餐', estimatedKcal: 400 }],
   reason: '均衡',
   status,
   generatedAt: '2026-08-06T05:30:00+08:00',

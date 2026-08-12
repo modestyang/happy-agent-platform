@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera, Plus, RotateCcw, Trash2 } from 'lucide-react';
 
 import { api } from '../api';
+import { ExpandableSurface } from './ContentSurface';
 
 export type Food = { name: string; estimatedKcal: number };
 export type MealRecognitionState =
@@ -21,6 +22,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [manualFallback, setManualFallback] = useState(false);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const lastFile = useRef<File | undefined>(undefined);
   const recognitionKeys = useRef<{ ticket: string; job: string } | undefined>(undefined);
   const recordKey = useRef<string | undefined>(undefined);
@@ -28,6 +30,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
   const locked = state.status === 'UPLOADING' || state.status === 'RECOGNIZING';
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  useEffect(() => setPreviewFailed(false), [previewUrl]);
 
   useEffect(() => {
     if (state.status !== 'RECOGNIZING') return;
@@ -50,6 +53,7 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
   async function startRecognition(file: File) {
     setError('');
     setManualFallback(false);
+    setPreviewFailed(false);
     if (!ALLOWED_TYPES.has(file.type)) { setError('仅支持 JPEG、PNG 或 WebP 图片。'); return; }
     if (file.size > MAX_BYTES) { setError('图片不能超过 10 MB。'); return; }
     recognitionKeys.current = { ticket: idempotencyKey(), job: idempotencyKey() };
@@ -100,7 +104,9 @@ export function MealRecordForm({ onSaved }: { onSaved: () => Promise<void> | voi
   return <form className="meal-record-form" onSubmit={save} aria-label="饮食记录表单">
     <label>餐次<select aria-label="餐次" value={mealType} onChange={(event) => setMealType(event.target.value)} disabled={locked}><option value="BREAKFAST">早餐</option><option value="LUNCH">午餐</option><option value="DINNER">晚餐</option><option value="SNACK">加餐</option></select></label>
     <label className="meal-photo-picker">拍照识别<input aria-label="拍照识别" type="file" accept="image/jpeg,image/png,image/webp" disabled={locked} onChange={(event) => { const file = event.target.files?.[0]; if (file) void startRecognition(file); }} /><span><Camera /> 选择饮食照片</span></label>
-    {previewUrl && <img className="meal-photo-preview" src={previewUrl} alt="已选择的饮食照片" />}
+    {previewUrl && (previewFailed
+      ? <p className="meal-photo-fallback" role="status">照片预览加载失败，请重新选择。</p>
+      : <ExpandableSurface variant="media" className="meal-photo-surface" label="饮食照片" title="饮食照片详情" expandedChildren={<img className="meal-photo-preview meal-photo-preview--expanded" src={previewUrl} alt="已选择的饮食照片" onError={() => setPreviewFailed(true)} />}><img className="meal-photo-preview" src={previewUrl} alt="已选择的饮食照片" onError={() => setPreviewFailed(true)} /></ExpandableSurface>)}
     {state.status === 'UPLOADING' && <p className="notice">正在上传照片，暂时锁定编辑区…</p>}
     {state.status === 'RECOGNIZING' && <p className="notice">正在识别食物，暂时锁定编辑区…</p>}
     {state.status === 'FAILED' && !manualFallback && <div className="error"><p>{state.message}</p><button type="button" className="soft-button" onClick={() => lastFile.current && void startRecognition(lastFile.current)}><RotateCcw /> 重试</button><button type="button" className="soft-button" onClick={() => setManualFallback(true)}>改为手动填写</button></div>}

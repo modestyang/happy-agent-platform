@@ -2,6 +2,7 @@ package happy.jayden.yang.agentbuilder.infrastructure.workbench;
 
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationDetail;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationMessage;
+import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationPage;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunPage;
 import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.RunQuery;
@@ -11,15 +12,19 @@ import static happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceD
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.dao.DuplicateKeyException;
@@ -36,6 +41,11 @@ public final class JdbcRunTraceRepository {
 
   private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
   private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+  private static final String CONVERSATION_SUMMARY_SELECT =
+      "SELECT c.conversation_id, c.user_id, c.agent_key, c.title, c.status, c.started_at, c.last_message_at,"
+          + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
+          + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
+          + " FROM agent_conversations c";
   private final JdbcTemplate jdbc;
 
   public JdbcRunTraceRepository(DataSource dataSource) {
@@ -108,6 +118,48 @@ public final class JdbcRunTraceRepository {
             .findFirst();
     if (existing.isPresent()) return existing.get();
 
+    return createConversation(userId, agentKey, now);
+  }
+
+  /** Closes the current conversation so the caller can intentionally start without prior memory. */
+  public ConversationSummary startNewConversation(UUID userId, String agentKey, Instant now) {
+    jdbc.update(
+        "UPDATE agent_conversations SET status='CLOSED', closed_at=? WHERE user_id=? AND agent_key=?"
+            + " AND status='ACTIVE'",
+        Timestamp.from(now),
+        userId,
+        agentKey);
+    return createConversation(userId, agentKey, now);
+  }
+
+  /**
+   * Finds a backend-owned active conversation after closing it when its activity window elapsed.
+   */
+  public Optional<ConversationSummary> findActiveConversation(
+      UUID conversationId, UUID userId, String agentKey, Instant now) {
+    Instant activityCutoff = now.minus(Duration.ofHours(24));
+    jdbc.update(
+        "UPDATE agent_conversations SET status='CLOSED', closed_at=?"
+            + " WHERE conversation_id=? AND status='ACTIVE' AND last_message_at < ?",
+        Timestamp.from(now),
+        conversationId,
+        Timestamp.from(activityCutoff));
+    return jdbc
+        .query(
+            "SELECT conversation_id, user_id, agent_key, title, status, started_at, last_message_at,"
+                + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
+                + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
+                + " FROM agent_conversations c WHERE conversation_id=? AND user_id=? AND agent_key=?"
+                + " AND status='ACTIVE'",
+            (rs, row) -> mapConversationSummary(rs),
+            conversationId,
+            userId,
+            agentKey)
+        .stream()
+        .findFirst();
+  }
+
+  private ConversationSummary createConversation(UUID userId, String agentKey, Instant now) {
     UUID conversationId = UUID.randomUUID();
     try {
       jdbc.update(
@@ -158,17 +210,47 @@ public final class JdbcRunTraceRepository {
         bounded);
   }
 
-  public List<ConversationSummary> listRecentConversationSummaries(int page, int size) {
-    int boundedSize = size <= 0 ? 20 : Math.min(size, 100);
-    int offset = Math.max(page, 0) * boundedSize;
-    return jdbc.query(
-        "SELECT c.conversation_id, c.user_id, c.agent_key, c.title, c.status, c.started_at, c.last_message_at,"
-            + " (SELECT count(*) FROM agent_conversation_messages m WHERE m.conversation_id=c.conversation_id) AS message_count,"
-            + " (SELECT count(*) FROM agent_runs r WHERE r.conversation_id=c.conversation_id) AS run_count"
-            + " FROM agent_conversations c ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
-        (rs, row) -> mapConversationSummary(rs),
-        boundedSize,
-        offset);
+  public ConversationPage listRecentConversationSummaries(int page, int size) {
+    return listConversationSummaries("", new ArrayList<>(), page, size);
+  }
+
+  public ConversationPage listConversationSummariesByIdentifier(
+      UUID identifier, int page, int size) {
+    Objects.requireNonNull(identifier, "identifier");
+    return listConversationSummaries(
+        " WHERE c.user_id=? OR c.conversation_id=?",
+        new ArrayList<>(List.of(identifier, identifier)),
+        page,
+        size);
+  }
+
+  public ConversationPage listConversationSummariesByUserIds(
+      Set<UUID> userIds, int page, int size) {
+    Objects.requireNonNull(userIds, "userIds");
+    if (userIds.isEmpty()) return new ConversationPage(List.of(), page, size, false);
+    String placeholders = String.join(",", Collections.nCopies(userIds.size(), "?"));
+    return listConversationSummaries(
+        " WHERE c.user_id IN (" + placeholders + ")", new ArrayList<>(userIds), page, size);
+  }
+
+  private ConversationPage listConversationSummaries(
+      String where, List<Object> args, int page, int size) {
+    if (page < 0) throw new IllegalArgumentException("page must be at least 0");
+    if (size < 1 || size > 100) {
+      throw new IllegalArgumentException("size must be between 1 and 100");
+    }
+    args.add(size + 1);
+    args.add(Math.multiplyExact((long) page, size));
+    List<ConversationSummary> rows =
+        jdbc.query(
+            CONVERSATION_SUMMARY_SELECT
+                + where
+                + " ORDER BY c.last_message_at DESC, c.conversation_id DESC LIMIT ? OFFSET ?",
+            (rs, row) -> mapConversationSummary(rs),
+            args.toArray());
+    boolean hasNext = rows.size() > size;
+    List<ConversationSummary> items = hasNext ? rows.subList(0, size) : rows;
+    return new ConversationPage(items, page, size, hasNext);
   }
 
   public Optional<ConversationDetail> findConversation(UUID conversationId) {
@@ -208,7 +290,7 @@ public final class JdbcRunTraceRepository {
               Timestamp completed = rs.getTimestamp("completed_at");
               List<TraceEvent> events =
                   jdbc.query(
-                      "SELECT sequence, event_type, title, detail, occurred_at"
+                      "SELECT sequence, event_type, title, detail, payload::text, occurred_at"
                           + " FROM agent_run_events WHERE run_id = ? ORDER BY sequence",
                       (eventRs, eventRow) -> mapEvent(eventRs),
                       id);
@@ -293,15 +375,64 @@ public final class JdbcRunTraceRepository {
   }
 
   public void appendEvent(UUID runId, long sequence, String type, String title, String detail) {
+    appendEvent(runId, sequence, type, title, detail, Map.of(), Instant.now());
+  }
+
+  /**
+   * Persists the complete neutral event payload so Trace can reconstruct a run without inference.
+   */
+  public void appendEvent(UUID runId, RunEvent event) {
+    Objects.requireNonNull(event, "event");
+    appendEvent(
+        runId,
+        event.sequence(),
+        event.type().name(),
+        event.type().name(),
+        traceDetail(event),
+        event.data(),
+        event.occurredAt());
+  }
+
+  /** Appends a service-owned lifecycle event after a framework stream has paused. */
+  public void appendLifecycleEvent(UUID runId, String type, Map<String, ?> payload) {
+    Long next =
+        jdbc.queryForObject(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_run_events WHERE run_id=?",
+            Long.class,
+            runId);
+    appendEvent(
+        runId,
+        Objects.requireNonNull(next, "next sequence"),
+        type,
+        type,
+        "",
+        payload,
+        Instant.now());
+  }
+
+  public void appendEvent(
+      UUID runId, long sequence, String type, String title, String detail, Map<String, ?> payload) {
+    appendEvent(runId, sequence, type, title, detail, payload, Instant.now());
+  }
+
+  private void appendEvent(
+      UUID runId,
+      long sequence,
+      String type,
+      String title,
+      String detail,
+      Map<String, ?> payload,
+      Instant occurredAt) {
     jdbc.update(
-        "INSERT INTO agent_run_events (run_id, sequence, event_type, title, detail, occurred_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO agent_run_events (run_id, sequence, event_type, title, detail, payload, occurred_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?::jsonb, ?)",
         runId,
         sequence,
         type,
         title,
         detail,
-        Timestamp.from(Instant.now()));
+        json(payload),
+        Timestamp.from(occurredAt));
   }
 
   public StreamEvent appendStreamEvent(UUID runId, String type, Map<String, ?> data) {
@@ -404,7 +535,7 @@ public final class JdbcRunTraceRepository {
         approvalId, runId, userId, toolCallId, toolKey, title, map(payload), "REQUESTED");
   }
 
-  public ApprovalRecord decideApproval(
+  public ApprovalDecisionResult decideApproval(
       UUID runId, UUID approvalId, UUID userId, String decision, String idempotencyKey) {
     if (!("APPROVE".equals(decision) || "REJECT".equals(decision))) {
       throw new IllegalArgumentException("decision must be APPROVE or REJECT");
@@ -432,7 +563,7 @@ public final class JdbcRunTraceRepository {
     String status = "APPROVE".equals(decision) ? "APPROVED" : "REJECTED";
     if (!"REQUESTED".equals(row.status())) {
       if (status.equals(row.status()) && Objects.equals(idempotencyKey, row.decisionKey())) {
-        return approval(approvalId, runId, row);
+        return new ApprovalDecisionResult(approval(approvalId, runId, row), false);
       }
       throw new IllegalStateException("approval already decided");
     }
@@ -445,15 +576,17 @@ public final class JdbcRunTraceRepository {
             runId,
             approvalId);
     if (changed != 1) throw new IllegalStateException("approval decision raced");
-    return new ApprovalRecord(
-        approvalId,
-        runId,
-        row.userId(),
-        row.toolCallId(),
-        row.toolKey(),
-        row.title(),
-        map(row.arguments()),
-        status);
+    return new ApprovalDecisionResult(
+        new ApprovalRecord(
+            approvalId,
+            runId,
+            row.userId(),
+            row.toolCallId(),
+            row.toolKey(),
+            row.title(),
+            map(row.arguments()),
+            status),
+        true);
   }
 
   public Optional<ApprovalRecord> findApproval(UUID runId, UUID approvalId) {
@@ -545,7 +678,16 @@ public final class JdbcRunTraceRepository {
         rs.getString("event_type"),
         rs.getString("title"),
         rs.getString("detail"),
+        map(rs.getString("payload")),
         rs.getTimestamp("occurred_at").toInstant());
+  }
+
+  private static String traceDetail(RunEvent event) {
+    Object blockId = event.data().get("blockId");
+    if (blockId != null) return "block=" + blockId;
+    Object toolName = event.data().get("toolName");
+    if (toolName != null) return "tool=" + toolName;
+    return "";
   }
 
   private static ConversationSummary mapConversationSummary(ResultSet rs) throws SQLException {
@@ -629,6 +771,9 @@ public final class JdbcRunTraceRepository {
       String title,
       Map<String, Object> arguments,
       String status) {}
+
+  /** Distinguishes a replayed idempotent decision from the first durable decision. */
+  public record ApprovalDecisionResult(ApprovalRecord approval, boolean newlyDecided) {}
 
   private record ApprovalRow(
       UUID userId,

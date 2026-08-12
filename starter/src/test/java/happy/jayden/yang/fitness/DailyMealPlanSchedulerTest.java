@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.scheduling.annotation.Scheduled;
 
 class DailyMealPlanSchedulerTest {
@@ -21,5 +22,15 @@ class DailyMealPlanSchedulerTest {
     Scheduled scheduled = method.getAnnotation(Scheduled.class);
     assertThat(scheduled.cron()).isEqualTo("${happy.fitness.meal-plan.cron:0 30 5 * * *}");
     assertThat(scheduled.zone()).isEqualTo("Asia/Shanghai");
+  }
+
+  @Test
+  void startupRunsTheSameReconciliationForMissedSchedules() throws Exception {
+    AtomicInteger calls = new AtomicInteger();
+    DailyMealPlanScheduler scheduler = new DailyMealPlanScheduler(calls::incrementAndGet);
+
+    ((ApplicationRunner) scheduler).run(null);
+
+    assertThat(calls).hasValue(1);
   }
 }

@@ -41,7 +41,37 @@ public final class FitnessDtos {
   public record CreateGoalRequest(String name, BigDecimal targetWeightJin, LocalDate targetDate) {}
 
   public record FirstSetupRequest(
-      BigDecimal weightJin, BigDecimal waistCm, BigDecimal targetWeightJin, LocalDate targetDate) {}
+      BigDecimal weightJin,
+      BigDecimal waistCm,
+      BigDecimal targetWeightJin,
+      LocalDate targetDate,
+      TrainingProfileInput trainingProfile) {}
+
+  public record TrainingProfileInput(
+      String biologicalSex,
+      Integer birthYear,
+      BigDecimal heightCm,
+      String experienceLevel,
+      List<String> trainingVenues,
+      List<String> availableEquipment,
+      List<Integer> trainingWeekdays,
+      Integer sessionMinutes,
+      List<String> trainingRestrictions,
+      String coachingTone,
+      List<String> nutritionPreferences) {}
+
+  public record TrainingProfileDto(
+      String biologicalSex,
+      Integer birthYear,
+      BigDecimal heightCm,
+      String experienceLevel,
+      List<String> trainingVenues,
+      List<String> availableEquipment,
+      List<Integer> trainingWeekdays,
+      Integer sessionMinutes,
+      List<String> trainingRestrictions,
+      String coachingTone,
+      List<String> nutritionPreferences) {}
 
   public record BodyRecordDto(
       UUID id, Instant recordedAt, BigDecimal weightJin, BigDecimal waistCm) {}
@@ -388,10 +418,6 @@ public final class FitnessDtos {
 
   public record AiStatusDto(boolean configured, String reason) {}
 
-  public record AiMessageRequest(String message) {}
-
-  public record AiMessageResponse(String message) {}
-
   public record BootstrapData(
       UserDto user,
       GoalState goal,
@@ -400,7 +426,29 @@ public final class FitnessDtos {
       List<MealRecommendationDto> mealRecommendations,
       PlanDto plan,
       List<ExerciseDto> exercises,
-      long completedWorkoutCount) {}
+      long completedWorkoutCount,
+      TrainingProfileDto trainingProfile) {
+    public BootstrapData(
+        UserDto user,
+        GoalState goal,
+        List<BodyRecordDto> bodyRecords,
+        List<MealDto> meals,
+        List<MealRecommendationDto> mealRecommendations,
+        PlanDto plan,
+        List<ExerciseDto> exercises,
+        long completedWorkoutCount) {
+      this(
+          user,
+          goal,
+          bodyRecords,
+          meals,
+          mealRecommendations,
+          plan,
+          exercises,
+          completedWorkoutCount,
+          null);
+    }
+  }
 
   public record OnboardingDto(String state) {}
 
@@ -415,7 +463,8 @@ public final class FitnessDtos {
       List<ExerciseDto> exercises,
       long completedWorkoutCount,
       ReportDto report,
-      AiStatusDto ai) {}
+      AiStatusDto ai,
+      TrainingProfileDto trainingProfile) {}
 
   public record LoginAccount(UUID userId, String nickname, String passwordHash) {}
 }

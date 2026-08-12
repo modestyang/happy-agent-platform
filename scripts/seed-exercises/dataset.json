@@ -10,11 +10,28 @@
       "targetArea": "臀腿",
       "sets": 4,
       "seconds": 30,
-      "steps": ["双脚与肩同宽站立，背部挺直", "屈髋后坐下蹲至大腿平行地面", "爆发蹬地向上跳起", "前脚掌轻柔落地，顺势下蹲缓冲"],
-      "errors": ["落地时膝盖内扣", "落地僵直不做缓冲", "下蹲过浅影响发力"],
-      "muscleGroups": ["股四头肌", "臀大肌", "小腿三头肌"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双脚与肩同宽站立，背部挺直",
+        "屈髋后坐下蹲至大腿平行地面",
+        "爆发蹬地向上跳起",
+        "前脚掌轻柔落地，顺势下蹲缓冲"
+      ],
+      "errors": [
+        "落地时膝盖内扣",
+        "落地僵直不做缓冲",
+        "下蹲过浅影响发力"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌",
+        "小腿三头肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "SQUAT",
+      "impactLevel": "HIGH"
     },
     {
       "slug": "walking-lunge",
@@ -23,11 +40,27 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 45,
-      "steps": ["站立收腹，双手叉腰或自然下垂", "向前迈一大步，重心垂直下沉", "前腿大腿平行地面，后膝轻触地面", "后腿蹬地向前，换侧继续行进"],
-      "errors": ["前膝内扣或过度前顶", "躯干明显前倾", "步幅过小变成小碎步"],
-      "muscleGroups": ["股四头肌", "臀大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "站立收腹，双手叉腰或自然下垂",
+        "向前迈一大步，重心垂直下沉",
+        "前腿大腿平行地面，后膝轻触地面",
+        "后腿蹬地向前，换侧继续行进"
+      ],
+      "errors": [
+        "前膝内扣或过度前顶",
+        "躯干明显前倾",
+        "步幅过小变成小碎步"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "LUNGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "single-leg-glute-bridge",
@@ -36,11 +69,28 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧屈膝，一条腿抬起伸直", "支撑脚脚跟发力踩实地面", "顶髋抬臀至肩髋膝成一条直线", "顶端停顿一秒后控制下落"],
-      "errors": ["骨盆左右歪斜旋转", "用腰椎代偿顶髋", "下落过快失去控制"],
-      "muscleGroups": ["臀大肌", "腘绳肌", "核心肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧屈膝，一条腿抬起伸直",
+        "支撑脚脚跟发力踩实地面",
+        "顶髋抬臀至肩髋膝成一条直线",
+        "顶端停顿一秒后控制下落"
+      ],
+      "errors": [
+        "骨盆左右歪斜旋转",
+        "用腰椎代偿顶髋",
+        "下落过快失去控制"
+      ],
+      "muscleGroups": [
+        "臀大肌",
+        "腘绳肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HINGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "glute-kickback",
@@ -49,11 +99,26 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["四点跪撑，手腕在肩膀正下方", "收紧核心，保持背部平直", "一腿屈膝向后上方抬起", "顶端挤压臀部后缓慢还原"],
-      "errors": ["腰部塌陷", "借力甩腿", "颈部前伸低头"],
-      "muscleGroups": ["臀大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "四点跪撑，手腕在肩膀正下方",
+        "收紧核心，保持背部平直",
+        "一腿屈膝向后上方抬起",
+        "顶端挤压臀部后缓慢还原"
+      ],
+      "errors": [
+        "腰部塌陷",
+        "借力甩腿",
+        "颈部前伸低头"
+      ],
+      "muscleGroups": [
+        "臀大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "goblet-squat",
@@ -62,11 +127,27 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 45,
-      "steps": ["双手托住壶铃竖直置于胸前", "双脚略宽于肩，脚尖微向外", "屈髋后坐下蹲至大腿平行", "脚跟发力站起，收紧臀部"],
-      "errors": ["下蹲时膝盖内扣", "含胸弓背", "脚跟抬起重心前移"],
-      "muscleGroups": ["股四头肌", "臀大肌"],
-      "equipment": ["壶铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手托住壶铃竖直置于胸前",
+        "双脚略宽于肩，脚尖微向外",
+        "屈髋后坐下蹲至大腿平行",
+        "脚跟发力站起，收紧臀部"
+      ],
+      "errors": [
+        "下蹲时膝盖内扣",
+        "含胸弓背",
+        "脚跟抬起重心前移"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "壶铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "SQUAT",
+      "impactLevel": "LOW"
     },
     {
       "slug": "dumbbell-lunge",
@@ -75,11 +156,27 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 45,
-      "steps": ["双手各持一只哑铃垂于体侧", "向前迈一步，重心垂直下蹲", "前腿发力蹬地回到站立", "换另一侧交替进行"],
-      "errors": ["身体左右摇晃", "后膝直接砸向地面", "步幅过大失去平衡"],
-      "muscleGroups": ["股四头肌", "臀大肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双手各持一只哑铃垂于体侧",
+        "向前迈一步，重心垂直下蹲",
+        "前腿发力蹬地回到站立",
+        "换另一侧交替进行"
+      ],
+      "errors": [
+        "身体左右摇晃",
+        "后膝直接砸向地面",
+        "步幅过大失去平衡"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "LUNGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-romanian-deadlift",
@@ -88,11 +185,28 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 45,
-      "steps": ["双手持哑铃置于大腿前侧", "膝盖微屈固定，屈髋向后推臀", "哑铃沿腿前下放至小腿中部", "收紧臀部伸髋回到站立"],
-      "errors": ["弓背弯腰", "屈膝过多变成深蹲", "哑铃远离身体前飘"],
-      "muscleGroups": ["腘绳肌", "臀大肌", "竖脊肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双手持哑铃置于大腿前侧",
+        "膝盖微屈固定，屈髋向后推臀",
+        "哑铃沿腿前下放至小腿中部",
+        "收紧臀部伸髋回到站立"
+      ],
+      "errors": [
+        "弓背弯腰",
+        "屈膝过多变成深蹲",
+        "哑铃远离身体前飘"
+      ],
+      "muscleGroups": [
+        "腘绳肌",
+        "臀大肌",
+        "竖脊肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HINGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "barbell-squat",
@@ -101,11 +215,28 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["杠铃置于斜方肌上，双手略宽于肩握杠", "出杠后退，双脚与肩同宽站立", "屈髋屈膝下蹲至大腿低于平行", "脚跟蹬地站起，全程背部挺直"],
-      "errors": ["膝盖内扣", "塌腰或弓背", "重心前移导致脚跟抬起"],
-      "muscleGroups": ["股四头肌", "臀大肌", "腘绳肌"],
-      "equipment": ["杠铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "杠铃置于斜方肌上，双手略宽于肩握杠",
+        "出杠后退，双脚与肩同宽站立",
+        "屈髋屈膝下蹲至大腿低于平行",
+        "脚跟蹬地站起，全程背部挺直"
+      ],
+      "errors": [
+        "膝盖内扣",
+        "塌腰或弓背",
+        "重心前移导致脚跟抬起"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌",
+        "腘绳肌"
+      ],
+      "equipment": [
+        "杠铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "SQUAT",
+      "impactLevel": "LOW"
     },
     {
       "slug": "barbell-deadlift",
@@ -114,11 +245,29 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["杠铃贴近小腿，双脚与髋同宽", "握杠后沉肩挺胸，背部绷紧", "伸髋伸膝同步发力拉起杠铃", "顶端锁定后屈髋控制下放"],
-      "errors": ["弓腰拉起", "杠铃离腿前飘", "顶端过度后仰挤压腰椎"],
-      "muscleGroups": ["竖脊肌", "臀大肌", "腘绳肌", "股四头肌"],
-      "equipment": ["杠铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "杠铃贴近小腿，双脚与髋同宽",
+        "握杠后沉肩挺胸，背部绷紧",
+        "伸髋伸膝同步发力拉起杠铃",
+        "顶端锁定后屈髋控制下放"
+      ],
+      "errors": [
+        "弓腰拉起",
+        "杠铃离腿前飘",
+        "顶端过度后仰挤压腰椎"
+      ],
+      "muscleGroups": [
+        "竖脊肌",
+        "臀大肌",
+        "腘绳肌",
+        "股四头肌"
+      ],
+      "equipment": [
+        "杠铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HINGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "barbell-hip-thrust",
@@ -127,11 +276,28 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 45,
-      "steps": ["上背部靠在凳沿，杠铃置于髋部", "双脚踩实地面，收下巴目视前方", "顶髋向上至躯干与大腿成直线", "顶端停顿一秒后控制下落"],
-      "errors": ["腰椎过伸代偿", "膝盖内扣", "下落触地反弹借力"],
-      "muscleGroups": ["臀大肌", "腘绳肌"],
-      "equipment": ["杠铃", "训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "上背部靠在凳沿，杠铃置于髋部",
+        "双脚踩实地面，收下巴目视前方",
+        "顶髋向上至躯干与大腿成直线",
+        "顶端停顿一秒后控制下落"
+      ],
+      "errors": [
+        "腰椎过伸代偿",
+        "膝盖内扣",
+        "下落触地反弹借力"
+      ],
+      "muscleGroups": [
+        "臀大肌",
+        "腘绳肌"
+      ],
+      "equipment": [
+        "杠铃",
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HINGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-calf-raise",
@@ -140,11 +306,26 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手持哑铃站立，前脚掌可垫在台阶上", "脚踝发力将身体向上顶起", "顶端充分收缩小腿肌肉", "缓慢下落至脚跟低于台阶"],
-      "errors": ["下落过快没有控制", "膝盖弯曲借力", "动作幅度不足"],
-      "muscleGroups": ["小腿三头肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手持哑铃站立，前脚掌可垫在台阶上",
+        "脚踝发力将身体向上顶起",
+        "顶端充分收缩小腿肌肉",
+        "缓慢下落至脚跟低于台阶"
+      ],
+      "errors": [
+        "下落过快没有控制",
+        "膝盖弯曲借力",
+        "动作幅度不足"
+      ],
+      "muscleGroups": [
+        "小腿三头肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "plank",
@@ -153,11 +334,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["前臂撑地，手肘在肩膀正下方", "身体从头到脚成一条直线", "收紧腹部与臀部", "保持自然呼吸到结束"],
-      "errors": ["塌腰或翘臀", "憋气", "手肘位置过于靠前"],
-      "muscleGroups": ["腹直肌", "核心肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "前臂撑地，手肘在肩膀正下方",
+        "身体从头到脚成一条直线",
+        "收紧腹部与臀部",
+        "保持自然呼吸到结束"
+      ],
+      "errors": [
+        "塌腰或翘臀",
+        "憋气",
+        "手肘位置过于靠前"
+      ],
+      "muscleGroups": [
+        "腹直肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "CORE_STABILITY",
+      "impactLevel": "LOW"
     },
     {
       "slug": "side-plank",
@@ -166,11 +363,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 30,
-      "steps": ["侧卧，前臂撑在肩膀正下方", "发力抬起髋部，身体成一条直线", "上侧手臂向上伸展", "保持呼吸，两侧交替进行"],
-      "errors": ["髋部下沉", "身体前后倾倒", "耸肩缩脖"],
-      "muscleGroups": ["腹斜肌", "核心肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "侧卧，前臂撑在肩膀正下方",
+        "发力抬起髋部，身体成一条直线",
+        "上侧手臂向上伸展",
+        "保持呼吸，两侧交替进行"
+      ],
+      "errors": [
+        "髋部下沉",
+        "身体前后倾倒",
+        "耸肩缩脖"
+      ],
+      "muscleGroups": [
+        "腹斜肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "CORE_STABILITY",
+      "impactLevel": "LOW"
     },
     {
       "slug": "crunch",
@@ -179,11 +392,26 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧屈膝，双手轻扶耳侧", "收下巴，用上腹力量卷起肩胛", "顶端停顿感受腹部收缩", "缓慢下落不借惯性"],
-      "errors": ["双手抱头拉脖子", "腰部离地变成仰卧起坐", "下落失控砸回地面"],
-      "muscleGroups": ["腹直肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "仰卧屈膝，双手轻扶耳侧",
+        "收下巴，用上腹力量卷起肩胛",
+        "顶端停顿感受腹部收缩",
+        "缓慢下落不借惯性"
+      ],
+      "errors": [
+        "双手抱头拉脖子",
+        "腰部离地变成仰卧起坐",
+        "下落失控砸回地面"
+      ],
+      "muscleGroups": [
+        "腹直肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "CORE_FLEXION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "reverse-crunch",
@@ -192,11 +420,26 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧，双手放于体侧或臀下", "屈膝抬腿至大腿垂直地面", "下腹发力将骨盆卷离地面", "控制还原，双脚不触地"],
-      "errors": ["甩腿借力", "下放时腰部拱起", "颈部紧张用力"],
-      "muscleGroups": ["腹直肌"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧，双手放于体侧或臀下",
+        "屈膝抬腿至大腿垂直地面",
+        "下腹发力将骨盆卷离地面",
+        "控制还原，双脚不触地"
+      ],
+      "errors": [
+        "甩腿借力",
+        "下放时腰部拱起",
+        "颈部紧张用力"
+      ],
+      "muscleGroups": [
+        "腹直肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "CORE_FLEXION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "lying-leg-raise",
@@ -205,11 +448,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧，双手垫于臀下或抓住凳沿", "双腿伸直并拢缓慢上举", "举至接近垂直后控制下放", "脚跟接近地面即再次上举"],
-      "errors": ["下放时腰部拱起", "屈膝甩动借力", "速度过快"],
-      "muscleGroups": ["腹直肌", "髋屈肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧，双手垫于臀下或抓住凳沿",
+        "双腿伸直并拢缓慢上举",
+        "举至接近垂直后控制下放",
+        "脚跟接近地面即再次上举"
+      ],
+      "errors": [
+        "下放时腰部拱起",
+        "屈膝甩动借力",
+        "速度过快"
+      ],
+      "muscleGroups": [
+        "腹直肌",
+        "髋屈肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "CORE_FLEXION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "russian-twist",
@@ -218,11 +477,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["坐姿屈膝，上半身向后倾约45度", "双脚可抬离地面增加难度", "双手合十向身体一侧旋转", "停顿后转向另一侧"],
-      "errors": ["弓背含胸", "只动手臂不转躯干", "憋气"],
-      "muscleGroups": ["腹斜肌", "腹直肌"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "坐姿屈膝，上半身向后倾约45度",
+        "双脚可抬离地面增加难度",
+        "双手合十向身体一侧旋转",
+        "停顿后转向另一侧"
+      ],
+      "errors": [
+        "弓背含胸",
+        "只动手臂不转躯干",
+        "憋气"
+      ],
+      "muscleGroups": [
+        "腹斜肌",
+        "腹直肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "ROTATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "dead-bug",
@@ -231,11 +506,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧，双臂指向天花板，双腿屈膝抬起", "收紧腹部，让腰背贴紧地面", "对侧手臂与腿缓慢向远处伸展", "回到起点后换另一侧"],
-      "errors": ["腰部离地拱起", "动作过快", "屏住呼吸"],
-      "muscleGroups": ["核心肌群", "腹直肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "仰卧，双臂指向天花板，双腿屈膝抬起",
+        "收紧腹部，让腰背贴紧地面",
+        "对侧手臂与腿缓慢向远处伸展",
+        "回到起点后换另一侧"
+      ],
+      "errors": [
+        "腰部离地拱起",
+        "动作过快",
+        "屏住呼吸"
+      ],
+      "muscleGroups": [
+        "核心肌群",
+        "腹直肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "CORE_STABILITY",
+      "impactLevel": "LOW"
     },
     {
       "slug": "flutter-kicks",
@@ -244,11 +535,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 30,
-      "steps": ["仰卧，双手垫于臀下", "双腿伸直抬离地面约30度", "小幅快速交替上下打水", "全程保持腰部贴紧地面"],
-      "errors": ["腰部拱起", "摆动幅度过大", "低头憋气"],
-      "muscleGroups": ["腹直肌", "髋屈肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧，双手垫于臀下",
+        "双腿伸直抬离地面约30度",
+        "小幅快速交替上下打水",
+        "全程保持腰部贴紧地面"
+      ],
+      "errors": [
+        "腰部拱起",
+        "摆动幅度过大",
+        "低头憋气"
+      ],
+      "muscleGroups": [
+        "腹直肌",
+        "髋屈肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "CORE_FLEXION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "superman",
@@ -257,11 +564,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["俯卧，双臂向前伸直", "同时抬起双臂与双腿", "顶端收缩下背部与臀部", "缓慢下放还原"],
-      "errors": ["抬得过高挤压腰椎", "猛然甩起借力", "颈部过度后仰"],
-      "muscleGroups": ["竖脊肌", "臀大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "俯卧，双臂向前伸直",
+        "同时抬起双臂与双腿",
+        "顶端收缩下背部与臀部",
+        "缓慢下放还原"
+      ],
+      "errors": [
+        "抬得过高挤压腰椎",
+        "猛然甩起借力",
+        "颈部过度后仰"
+      ],
+      "muscleGroups": [
+        "竖脊肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "CORE_STABILITY",
+      "impactLevel": "LOW"
     },
     {
       "slug": "cat-cow",
@@ -270,11 +593,27 @@
       "targetArea": "核心",
       "sets": 3,
       "seconds": 40,
-      "steps": ["四点跪撑，手腕在肩膀正下方", "吸气塌腰抬头，脊柱向下沉", "呼气弓背低头，腹部向内收紧", "缓慢流畅地交替两个姿势"],
-      "errors": ["动作过快失去控制", "手肘锁死", "全程耸肩"],
-      "muscleGroups": ["竖脊肌", "核心肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "四点跪撑，手腕在肩膀正下方",
+        "吸气塌腰抬头，脊柱向下沉",
+        "呼气弓背低头，腹部向内收紧",
+        "缓慢流畅地交替两个姿势"
+      ],
+      "errors": [
+        "动作过快失去控制",
+        "手肘锁死",
+        "全程耸肩"
+      ],
+      "muscleGroups": [
+        "竖脊肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "MOBILITY",
+      "impactLevel": "LOW"
     },
     {
       "slug": "push-up",
@@ -284,11 +623,28 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手略宽于肩撑地，身体成一条直线", "屈肘下放至胸口接近地面", "胸部发力推起身体", "全程核心收紧不塌腰"],
-      "errors": ["塌腰或撅臀", "下放幅度不足", "肘部过度外张"],
-      "muscleGroups": ["胸大肌", "肱三头肌", "三角肌前束"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手略宽于肩撑地，身体成一条直线",
+        "屈肘下放至胸口接近地面",
+        "胸部发力推起身体",
+        "全程核心收紧不塌腰"
+      ],
+      "errors": [
+        "塌腰或撅臀",
+        "下放幅度不足",
+        "肘部过度外张"
+      ],
+      "muscleGroups": [
+        "胸大肌",
+        "肱三头肌",
+        "三角肌前束"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "incline-push-up",
@@ -297,11 +653,27 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手撑在稳固的凳沿或桌边，略宽于肩", "身体从头到脚保持一条直线", "屈肘下放，胸口靠近支撑面", "发力推起回到起点"],
-      "errors": ["塌腰", "支撑面晃动不稳", "耸肩"],
-      "muscleGroups": ["胸大肌", "肱三头肌"],
-      "equipment": ["训练凳"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手撑在稳固的凳沿或桌边，略宽于肩",
+        "身体从头到脚保持一条直线",
+        "屈肘下放，胸口靠近支撑面",
+        "发力推起回到起点"
+      ],
+      "errors": [
+        "塌腰",
+        "支撑面晃动不稳",
+        "耸肩"
+      ],
+      "muscleGroups": [
+        "胸大肌",
+        "肱三头肌"
+      ],
+      "equipment": [
+        "训练凳"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "decline-push-up",
@@ -310,11 +682,28 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双脚置于凳上，双手撑地", "身体成一条直线，核心收紧", "屈肘下放至胸口接近地面", "上胸发力推起身体"],
-      "errors": ["腰部下沉", "双脚滑落", "速度过快失去控制"],
-      "muscleGroups": ["胸大肌", "三角肌前束", "肱三头肌"],
-      "equipment": ["训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双脚置于凳上，双手撑地",
+        "身体成一条直线，核心收紧",
+        "屈肘下放至胸口接近地面",
+        "上胸发力推起身体"
+      ],
+      "errors": [
+        "腰部下沉",
+        "双脚滑落",
+        "速度过快失去控制"
+      ],
+      "muscleGroups": [
+        "胸大肌",
+        "三角肌前束",
+        "肱三头肌"
+      ],
+      "equipment": [
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "wide-push-up",
@@ -323,11 +712,26 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手明显宽于肩撑地", "身体从头到脚成一条直线", "屈肘下放，感受胸部拉伸", "胸部发力推起还原"],
-      "errors": ["塌腰", "下放太浅", "肩部前伸代偿"],
-      "muscleGroups": ["胸大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手明显宽于肩撑地",
+        "身体从头到脚成一条直线",
+        "屈肘下放，感受胸部拉伸",
+        "胸部发力推起还原"
+      ],
+      "errors": [
+        "塌腰",
+        "下放太浅",
+        "肩部前伸代偿"
+      ],
+      "muscleGroups": [
+        "胸大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-bench-press",
@@ -336,11 +740,29 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 45,
-      "steps": ["仰卧凳上，双手持哑铃置于胸部两侧", "双脚踩实地面，肩胛向后收紧", "垂直向上推起哑铃至手臂微屈", "控制下放至大臂略低于凳面"],
-      "errors": ["腰部过度拱起离凳", "顶端哑铃相撞", "下放失控砸落"],
-      "muscleGroups": ["胸大肌", "肱三头肌", "三角肌前束"],
-      "equipment": ["哑铃", "训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧凳上，双手持哑铃置于胸部两侧",
+        "双脚踩实地面，肩胛向后收紧",
+        "垂直向上推起哑铃至手臂微屈",
+        "控制下放至大臂略低于凳面"
+      ],
+      "errors": [
+        "腰部过度拱起离凳",
+        "顶端哑铃相撞",
+        "下放失控砸落"
+      ],
+      "muscleGroups": [
+        "胸大肌",
+        "肱三头肌",
+        "三角肌前束"
+      ],
+      "equipment": [
+        "哑铃",
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-fly",
@@ -349,11 +771,27 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 45,
-      "steps": ["仰卧凳上，哑铃举至胸部正上方", "手肘保持微屈并固定角度", "缓慢向两侧打开至胸部充分拉伸", "胸部发力沿原路线合拢"],
-      "errors": ["手肘角度忽大忽小", "下放过深拉伤肩部", "借力甩起"],
-      "muscleGroups": ["胸大肌"],
-      "equipment": ["哑铃", "训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧凳上，哑铃举至胸部正上方",
+        "手肘保持微屈并固定角度",
+        "缓慢向两侧打开至胸部充分拉伸",
+        "胸部发力沿原路线合拢"
+      ],
+      "errors": [
+        "手肘角度忽大忽小",
+        "下放过深拉伤肩部",
+        "借力甩起"
+      ],
+      "muscleGroups": [
+        "胸大肌"
+      ],
+      "equipment": [
+        "哑铃",
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "barbell-bench-press",
@@ -362,11 +800,29 @@
       "targetArea": "胸部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧凳上，握距略宽于肩", "起杠后杠铃位于胸部正上方", "下放至杠铃轻触胸口", "垂直向上推起至手臂伸直"],
-      "errors": ["腰部离凳拱起", "杠铃下放弹胸借力", "握距过窄"],
-      "muscleGroups": ["胸大肌", "肱三头肌", "三角肌前束"],
-      "equipment": ["杠铃", "训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "仰卧凳上，握距略宽于肩",
+        "起杠后杠铃位于胸部正上方",
+        "下放至杠铃轻触胸口",
+        "垂直向上推起至手臂伸直"
+      ],
+      "errors": [
+        "腰部离凳拱起",
+        "杠铃下放弹胸借力",
+        "握距过窄"
+      ],
+      "muscleGroups": [
+        "胸大肌",
+        "肱三头肌",
+        "三角肌前束"
+      ],
+      "equipment": [
+        "杠铃",
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "pull-up",
@@ -375,11 +831,27 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["正握单杠，握距略宽于肩", "沉肩，收紧背部肌肉", "背部发力将下巴拉过杠面", "控制下放至手臂接近伸直"],
-      "errors": ["甩摆借力", "下放过快", "耸肩缩脖"],
-      "muscleGroups": ["背阔肌", "肱二头肌"],
-      "equipment": ["单杠"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "正握单杠，握距略宽于肩",
+        "沉肩，收紧背部肌肉",
+        "背部发力将下巴拉过杠面",
+        "控制下放至手臂接近伸直"
+      ],
+      "errors": [
+        "甩摆借力",
+        "下放过快",
+        "耸肩缩脖"
+      ],
+      "muscleGroups": [
+        "背阔肌",
+        "肱二头肌"
+      ],
+      "equipment": [
+        "单杠"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "VERTICAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "band-assisted-pull-up",
@@ -388,11 +860,28 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["弹力带上端挂在单杠上，脚踩住带中段", "正握单杠，沉肩收背", "背部发力将身体向上拉起", "顶端停顿后控制下放"],
-      "errors": ["完全依赖弹力带弹起", "身体前后摆动", "下放不控制"],
-      "muscleGroups": ["背阔肌", "肱二头肌"],
-      "equipment": ["弹力带", "单杠"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "弹力带上端挂在单杠上，脚踩住带中段",
+        "正握单杠，沉肩收背",
+        "背部发力将身体向上拉起",
+        "顶端停顿后控制下放"
+      ],
+      "errors": [
+        "完全依赖弹力带弹起",
+        "身体前后摆动",
+        "下放不控制"
+      ],
+      "muscleGroups": [
+        "背阔肌",
+        "肱二头肌"
+      ],
+      "equipment": [
+        "弹力带",
+        "单杠"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "VERTICAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "inverted-row",
@@ -401,11 +890,28 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["仰卧在低杠或稳固桌沿下方，双手握住边缘", "身体绷直成一条斜线", "背部发力将胸口拉向杠", "缓慢下放还原"],
-      "errors": ["塌腰撅臀", "只用手臂发力", "下放过快"],
-      "muscleGroups": ["背阔肌", "斜方肌", "肱二头肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "仰卧在低杠或稳固桌沿下方，双手握住边缘",
+        "身体绷直成一条斜线",
+        "背部发力将胸口拉向杠",
+        "缓慢下放还原"
+      ],
+      "errors": [
+        "塌腰撅臀",
+        "只用手臂发力",
+        "下放过快"
+      ],
+      "muscleGroups": [
+        "背阔肌",
+        "斜方肌",
+        "肱二头肌"
+      ],
+      "equipment": [
+        "单杠"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "one-arm-db-row",
@@ -414,11 +920,28 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 45,
-      "steps": ["一手和同侧膝盖撑在凳上，背部平直", "另一手持哑铃自然下垂", "背部发力将哑铃划向髋部", "顶端停顿后控制下放"],
-      "errors": ["躯干旋转借力", "耸肩", "下放失控"],
-      "muscleGroups": ["背阔肌", "斜方肌"],
-      "equipment": ["哑铃", "训练凳"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "一手和同侧膝盖撑在凳上，背部平直",
+        "另一手持哑铃自然下垂",
+        "背部发力将哑铃划向髋部",
+        "顶端停顿后控制下放"
+      ],
+      "errors": [
+        "躯干旋转借力",
+        "耸肩",
+        "下放失控"
+      ],
+      "muscleGroups": [
+        "背阔肌",
+        "斜方肌"
+      ],
+      "equipment": [
+        "哑铃",
+        "训练凳"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-bent-over-row",
@@ -427,11 +950,28 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 45,
-      "steps": ["屈髋俯身约45度，背部挺直", "双手持哑铃自然下垂", "双肘贴近身体向后上方划起", "顶端挤压肩胛后缓慢下放"],
-      "errors": ["弓背", "挺身借力", "手肘外张过多"],
-      "muscleGroups": ["背阔肌", "斜方肌", "竖脊肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "屈髋俯身约45度，背部挺直",
+        "双手持哑铃自然下垂",
+        "双肘贴近身体向后上方划起",
+        "顶端挤压肩胛后缓慢下放"
+      ],
+      "errors": [
+        "弓背",
+        "挺身借力",
+        "手肘外张过多"
+      ],
+      "muscleGroups": [
+        "背阔肌",
+        "斜方肌",
+        "竖脊肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HORIZONTAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "barbell-bent-over-row",
@@ -440,11 +980,28 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["握距略宽于肩，屈髋俯身", "保持背部挺直，核心收紧", "将杠铃划向下腹部", "顶端收缩背部后控制下放"],
-      "errors": ["弓腰", "身体上下晃动借力", "杠铃触地反弹"],
-      "muscleGroups": ["背阔肌", "斜方肌", "竖脊肌"],
-      "equipment": ["杠铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "握距略宽于肩，屈髋俯身",
+        "保持背部挺直，核心收紧",
+        "将杠铃划向下腹部",
+        "顶端收缩背部后控制下放"
+      ],
+      "errors": [
+        "弓腰",
+        "身体上下晃动借力",
+        "杠铃触地反弹"
+      ],
+      "muscleGroups": [
+        "背阔肌",
+        "斜方肌",
+        "竖脊肌"
+      ],
+      "equipment": [
+        "杠铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HORIZONTAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "back-extension",
@@ -453,11 +1010,27 @@
       "targetArea": "背部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["俯卧垫上，双手轻扶耳侧", "收紧下背部将胸口抬离地面", "顶端停顿，目视地面", "缓慢下放还原"],
-      "errors": ["抬得过高挤压腰椎", "猛然甩起", "颈部后仰"],
-      "muscleGroups": ["竖脊肌", "臀大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "俯卧垫上，双手轻扶耳侧",
+        "收紧下背部将胸口抬离地面",
+        "顶端停顿，目视地面",
+        "缓慢下放还原"
+      ],
+      "errors": [
+        "抬得过高挤压腰椎",
+        "猛然甩起",
+        "颈部后仰"
+      ],
+      "muscleGroups": [
+        "竖脊肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HINGE",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-shoulder-press",
@@ -466,11 +1039,28 @@
       "targetArea": "肩部",
       "sets": 3,
       "seconds": 45,
-      "steps": ["坐姿或站立，哑铃置于肩膀两侧", "核心收紧，肋骨不外翻", "垂直向上推起哑铃", "控制下放至耳朵两侧高度"],
-      "errors": ["腰椎过伸后仰", "哑铃向前倾倒", "下放过低"],
-      "muscleGroups": ["三角肌前束", "三角肌中束", "肱三头肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "坐姿或站立，哑铃置于肩膀两侧",
+        "核心收紧，肋骨不外翻",
+        "垂直向上推起哑铃",
+        "控制下放至耳朵两侧高度"
+      ],
+      "errors": [
+        "腰椎过伸后仰",
+        "哑铃向前倾倒",
+        "下放过低"
+      ],
+      "muscleGroups": [
+        "三角肌前束",
+        "三角肌中束",
+        "肱三头肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "VERTICAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "arnold-press",
@@ -479,11 +1069,27 @@
       "targetArea": "肩部",
       "sets": 3,
       "seconds": 45,
-      "steps": ["哑铃置于肩前，掌心朝向自己", "向上推起的同时向外旋转手腕", "顶端掌心朝前，手臂伸直", "反向旋转，控制下放还原"],
-      "errors": ["旋转过猛", "腰部后仰借力", "下放失控"],
-      "muscleGroups": ["三角肌前束", "三角肌中束"],
-      "equipment": ["哑铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "哑铃置于肩前，掌心朝向自己",
+        "向上推起的同时向外旋转手腕",
+        "顶端掌心朝前，手臂伸直",
+        "反向旋转，控制下放还原"
+      ],
+      "errors": [
+        "旋转过猛",
+        "腰部后仰借力",
+        "下放失控"
+      ],
+      "muscleGroups": [
+        "三角肌前束",
+        "三角肌中束"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "VERTICAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "lateral-raise",
@@ -492,11 +1098,26 @@
       "targetArea": "肩部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手持哑铃垂于体侧", "手肘微屈，肩部发力向两侧抬起", "抬至与肩同高，小指略高于拇指", "缓慢下放不摆动"],
-      "errors": ["借力甩起", "抬得过高导致耸肩", "下放过快"],
-      "muscleGroups": ["三角肌中束"],
-      "equipment": ["哑铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手持哑铃垂于体侧",
+        "手肘微屈，肩部发力向两侧抬起",
+        "抬至与肩同高，小指略高于拇指",
+        "缓慢下放不摆动"
+      ],
+      "errors": [
+        "借力甩起",
+        "抬得过高导致耸肩",
+        "下放过快"
+      ],
+      "muscleGroups": [
+        "三角肌中束"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "front-raise",
@@ -505,11 +1126,26 @@
       "targetArea": "肩部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手持哑铃置于大腿前侧", "手臂微屈向前上方抬起", "抬至与肩同高后停顿", "缓慢下放还原"],
-      "errors": ["身体后仰借力", "交替甩动哑铃", "抬过头顶"],
-      "muscleGroups": ["三角肌前束"],
-      "equipment": ["哑铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手持哑铃置于大腿前侧",
+        "手臂微屈向前上方抬起",
+        "抬至与肩同高后停顿",
+        "缓慢下放还原"
+      ],
+      "errors": [
+        "身体后仰借力",
+        "交替甩动哑铃",
+        "抬过头顶"
+      ],
+      "muscleGroups": [
+        "三角肌前束"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "rear-delt-fly",
@@ -518,11 +1154,28 @@
       "targetArea": "肩部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["坐姿俯身，胸口贴近大腿", "双手持哑铃垂于肩膀下方", "手肘微屈向两侧打开", "抬至与肩同高后缓慢下放"],
-      "errors": ["挺身借力", "手肘过度弯曲", "抬得过高夹肩胛"],
-      "muscleGroups": ["三角肌后束", "斜方肌"],
-      "equipment": ["哑铃", "训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "坐姿俯身，胸口贴近大腿",
+        "双手持哑铃垂于肩膀下方",
+        "手肘微屈向两侧打开",
+        "抬至与肩同高后缓慢下放"
+      ],
+      "errors": [
+        "挺身借力",
+        "手肘过度弯曲",
+        "抬得过高夹肩胛"
+      ],
+      "muscleGroups": [
+        "三角肌后束",
+        "斜方肌"
+      ],
+      "equipment": [
+        "哑铃",
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "band-pull-apart",
@@ -531,11 +1184,27 @@
       "targetArea": "肩部",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手握住弹力带与肩同宽，手臂向前伸直", "保持手臂伸直不耸肩", "肩胛后收将带子向两侧拉开", "缓慢控制回到起点"],
-      "errors": ["耸肩", "手肘弯曲", "放回过快"],
-      "muscleGroups": ["三角肌后束", "斜方肌"],
-      "equipment": ["弹力带"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手握住弹力带与肩同宽，手臂向前伸直",
+        "保持手臂伸直不耸肩",
+        "肩胛后收将带子向两侧拉开",
+        "缓慢控制回到起点"
+      ],
+      "errors": [
+        "耸肩",
+        "手肘弯曲",
+        "放回过快"
+      ],
+      "muscleGroups": [
+        "三角肌后束",
+        "斜方肌"
+      ],
+      "equipment": [
+        "弹力带"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PULL",
+      "impactLevel": "LOW"
     },
     {
       "slug": "db-bicep-curl",
@@ -544,11 +1213,26 @@
       "targetArea": "手臂",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手持哑铃垂于体侧，掌心朝前", "大臂贴紧身体固定不动", "屈肘将哑铃举向肩部", "顶端收缩后缓慢下放"],
-      "errors": ["甩摆借力", "大臂前移", "下放过快"],
-      "muscleGroups": ["肱二头肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手持哑铃垂于体侧，掌心朝前",
+        "大臂贴紧身体固定不动",
+        "屈肘将哑铃举向肩部",
+        "顶端收缩后缓慢下放"
+      ],
+      "errors": [
+        "甩摆借力",
+        "大臂前移",
+        "下放过快"
+      ],
+      "muscleGroups": [
+        "肱二头肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "hammer-curl",
@@ -557,11 +1241,28 @@
       "targetArea": "手臂",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手持哑铃，掌心相对", "大臂固定贴紧身体", "屈肘向上举起哑铃", "顶端停顿后控制下放"],
-      "errors": ["身体后仰借力", "手肘前移", "下放依靠惯性"],
-      "muscleGroups": ["肱二头肌", "肱肌", "前臂肌群"],
-      "equipment": ["哑铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "双手持哑铃，掌心相对",
+        "大臂固定贴紧身体",
+        "屈肘向上举起哑铃",
+        "顶端停顿后控制下放"
+      ],
+      "errors": [
+        "身体后仰借力",
+        "手肘前移",
+        "下放依靠惯性"
+      ],
+      "muscleGroups": [
+        "肱二头肌",
+        "肱肌",
+        "前臂肌群"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "barbell-curl",
@@ -570,11 +1271,26 @@
       "targetArea": "手臂",
       "sets": 3,
       "seconds": 40,
-      "steps": ["反握杠铃与肩同宽，身体站直", "大臂固定于体侧", "屈肘将杠铃举至胸前", "缓慢下放至手臂接近伸直"],
-      "errors": ["腰部前后摆动借力", "握距过窄", "下放失控"],
-      "muscleGroups": ["肱二头肌"],
-      "equipment": ["杠铃"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "反握杠铃与肩同宽，身体站直",
+        "大臂固定于体侧",
+        "屈肘将杠铃举至胸前",
+        "缓慢下放至手臂接近伸直"
+      ],
+      "errors": [
+        "腰部前后摆动借力",
+        "握距过窄",
+        "下放失控"
+      ],
+      "muscleGroups": [
+        "肱二头肌"
+      ],
+      "equipment": [
+        "杠铃"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "bench-dip",
@@ -583,11 +1299,27 @@
       "targetArea": "手臂",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手撑在身后凳沿，指尖朝前", "双腿前伸，臀部悬空", "屈肘下放身体至大臂接近水平", "肱三头肌发力撑起身体"],
-      "errors": ["肩部前耸", "下放过深压迫肩关节", "双腿蹬地借力"],
-      "muscleGroups": ["肱三头肌", "胸大肌"],
-      "equipment": ["训练凳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双手撑在身后凳沿，指尖朝前",
+        "双腿前伸，臀部悬空",
+        "屈肘下放身体至大臂接近水平",
+        "肱三头肌发力撑起身体"
+      ],
+      "errors": [
+        "肩部前耸",
+        "下放过深压迫肩关节",
+        "双腿蹬地借力"
+      ],
+      "muscleGroups": [
+        "肱三头肌",
+        "胸大肌"
+      ],
+      "equipment": [
+        "训练凳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "VERTICAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "close-grip-push-up",
@@ -596,11 +1328,27 @@
       "targetArea": "手臂",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手窄距撑地，位于胸部正下方", "身体从头到脚成一条直线", "屈肘贴近身体缓慢下放", "肱三头肌发力推起"],
-      "errors": ["手肘外张", "塌腰", "下放幅度太浅"],
-      "muscleGroups": ["肱三头肌", "胸大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双手窄距撑地，位于胸部正下方",
+        "身体从头到脚成一条直线",
+        "屈肘贴近身体缓慢下放",
+        "肱三头肌发力推起"
+      ],
+      "errors": [
+        "手肘外张",
+        "塌腰",
+        "下放幅度太浅"
+      ],
+      "muscleGroups": [
+        "肱三头肌",
+        "胸大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "slug": "overhead-tricep-extension",
@@ -609,11 +1357,26 @@
       "targetArea": "手臂",
       "sets": 3,
       "seconds": 40,
-      "steps": ["双手共握一只哑铃举过头顶", "大臂贴近耳朵保持垂直", "屈肘将哑铃向颈后缓慢下放", "肱三头肌发力向上伸直手臂"],
-      "errors": ["大臂外张", "腰椎过伸", "下放过低失控"],
-      "muscleGroups": ["肱三头肌"],
-      "equipment": ["哑铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "双手共握一只哑铃举过头顶",
+        "大臂贴近耳朵保持垂直",
+        "屈肘将哑铃向颈后缓慢下放",
+        "肱三头肌发力向上伸直手臂"
+      ],
+      "errors": [
+        "大臂外张",
+        "腰椎过伸",
+        "下放过低失控"
+      ],
+      "muscleGroups": [
+        "肱三头肌"
+      ],
+      "equipment": [
+        "哑铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "jumping-jack",
@@ -622,11 +1385,28 @@
       "targetArea": "心肺",
       "sets": 4,
       "seconds": 30,
-      "steps": ["站立，双手自然垂于体侧", "跳起分腿落地，同时双手在头上击掌", "再次跳起并拢双腿还原", "保持轻快节奏连续进行"],
-      "errors": ["落地过重", "膝盖内扣", "手臂甩动不伸直"],
-      "muscleGroups": ["股四头肌", "小腿三头肌", "三角肌中束"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "站立，双手自然垂于体侧",
+        "跳起分腿落地，同时双手在头上击掌",
+        "再次跳起并拢双腿还原",
+        "保持轻快节奏连续进行"
+      ],
+      "errors": [
+        "落地过重",
+        "膝盖内扣",
+        "手臂甩动不伸直"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "小腿三头肌",
+        "三角肌中束"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "LOCOMOTION",
+      "impactLevel": "MEDIUM"
     },
     {
       "slug": "jump-rope",
@@ -635,11 +1415,27 @@
       "targetArea": "心肺",
       "sets": 4,
       "seconds": 40,
-      "steps": ["握住绳柄，绳长调至腋下高度", "前脚掌着地，膝盖保持微屈", "手腕发力摇绳，小幅跳跃", "保持均匀的呼吸节奏"],
-      "errors": ["跳得过高浪费体力", "全脚掌砸地", "手臂大幅摆动摇绳"],
-      "muscleGroups": ["小腿三头肌", "股四头肌"],
-      "equipment": ["跳绳"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "握住绳柄，绳长调至腋下高度",
+        "前脚掌着地，膝盖保持微屈",
+        "手腕发力摇绳，小幅跳跃",
+        "保持均匀的呼吸节奏"
+      ],
+      "errors": [
+        "跳得过高浪费体力",
+        "全脚掌砸地",
+        "手臂大幅摆动摇绳"
+      ],
+      "muscleGroups": [
+        "小腿三头肌",
+        "股四头肌"
+      ],
+      "equipment": [
+        "跳绳"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "LOCOMOTION",
+      "impactLevel": "MEDIUM"
     },
     {
       "slug": "tuck-jump",
@@ -648,11 +1444,28 @@
       "targetArea": "心肺",
       "sets": 4,
       "seconds": 30,
-      "steps": ["站立与肩同宽，微屈髋预蹲", "爆发向上跳起", "空中收膝靠近胸口", "前脚掌轻柔落地缓冲"],
-      "errors": ["落地僵直", "连续过快失去控制", "弓背收膝"],
-      "muscleGroups": ["股四头肌", "臀大肌", "核心肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "ADVANCED"
+      "steps": [
+        "站立与肩同宽，微屈髋预蹲",
+        "爆发向上跳起",
+        "空中收膝靠近胸口",
+        "前脚掌轻柔落地缓冲"
+      ],
+      "errors": [
+        "落地僵直",
+        "连续过快失去控制",
+        "弓背收膝"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "ADVANCED",
+      "movementPattern": "LOCOMOTION",
+      "impactLevel": "HIGH"
     },
     {
       "slug": "split-jump",
@@ -661,11 +1474,27 @@
       "targetArea": "心肺",
       "sets": 4,
       "seconds": 30,
-      "steps": ["从弓步姿势开始", "爆发跳起，空中交换双腿", "前脚掌轻柔落地回到弓步", "保持躯干直立连续进行"],
-      "errors": ["落地时膝盖内扣", "弓步过浅", "躯干前倾"],
-      "muscleGroups": ["股四头肌", "臀大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "ADVANCED"
+      "steps": [
+        "从弓步姿势开始",
+        "爆发跳起，空中交换双腿",
+        "前脚掌轻柔落地回到弓步",
+        "保持躯干直立连续进行"
+      ],
+      "errors": [
+        "落地时膝盖内扣",
+        "弓步过浅",
+        "躯干前倾"
+      ],
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "ADVANCED",
+      "movementPattern": "LUNGE",
+      "impactLevel": "HIGH"
     },
     {
       "slug": "inchworm",
@@ -674,11 +1503,28 @@
       "targetArea": "心肺",
       "sets": 3,
       "seconds": 40,
-      "steps": ["站立，屈髋双手撑到地面", "双腿尽量保持伸直", "双手交替向前爬至平板支撑", "再向后爬回站立姿势"],
-      "errors": ["弓腰爬行", "速度过快", "平板位塌腰"],
-      "muscleGroups": ["核心肌群", "腘绳肌", "肩部肌群"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "站立，屈髋双手撑到地面",
+        "双腿尽量保持伸直",
+        "双手交替向前爬至平板支撑",
+        "再向后爬回站立姿势"
+      ],
+      "errors": [
+        "弓腰爬行",
+        "速度过快",
+        "平板位塌腰"
+      ],
+      "muscleGroups": [
+        "核心肌群",
+        "腘绳肌",
+        "肩部肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "LOCOMOTION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "kettlebell-swing",
@@ -687,11 +1533,28 @@
       "targetArea": "心肺",
       "sets": 4,
       "seconds": 40,
-      "steps": ["壶铃置于身前，屈髋单手抓起", "后摆壶铃穿过双腿之间", "伸髋爆发将壶铃摆至肩膀高度", "控制回落，换手或连续进行"],
-      "errors": ["用手臂力量上抬", "下摆时弓背", "顶端腰椎过伸"],
-      "muscleGroups": ["臀大肌", "腘绳肌", "核心肌群"],
-      "equipment": ["壶铃"],
-      "difficulty": "INTERMEDIATE"
+      "steps": [
+        "壶铃置于身前，屈髋单手抓起",
+        "后摆壶铃穿过双腿之间",
+        "伸髋爆发将壶铃摆至肩膀高度",
+        "控制回落，换手或连续进行"
+      ],
+      "errors": [
+        "用手臂力量上抬",
+        "下摆时弓背",
+        "顶端腰椎过伸"
+      ],
+      "muscleGroups": [
+        "臀大肌",
+        "腘绳肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "壶铃"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "HINGE",
+      "impactLevel": "MEDIUM"
     },
     {
       "slug": "fire-hydrant",
@@ -699,11 +1562,27 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["四点跪撑，手腕在肩膀正下方", "保持膝盖弯曲90度，一腿向体侧打开", "抬至与髋同高，感受臀部外侧发力", "缓慢放回，全程不塌腰"],
-      "errors": ["腰部下塌", "骨盆明显翻转", "手臂弯曲借力"],
-      "muscleGroups": ["臀中肌", "臀大肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "四点跪撑，手腕在肩膀正下方",
+        "保持膝盖弯曲90度，一腿向体侧打开",
+        "抬至与髋同高，感受臀部外侧发力",
+        "缓慢放回，全程不塌腰"
+      ],
+      "errors": [
+        "腰部下塌",
+        "骨盆明显翻转",
+        "手臂弯曲借力"
+      ],
+      "muscleGroups": [
+        "臀中肌",
+        "臀大肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     },
     {
       "slug": "clamshell",
@@ -711,11 +1590,27 @@
       "targetArea": "臀腿",
       "sets": 3,
       "seconds": 40,
-      "steps": ["侧卧，髋膝约90度弯曲，双脚并拢", "头部枕在下侧手臂，上侧手扶髋", "保持双脚接触，上侧膝盖向上打开", "顶端停顿后缓慢合拢"],
-      "errors": ["骨盆向后倒", "双脚分开", "打开过快借力"],
-      "muscleGroups": ["臀中肌", "臀部深层稳定肌"],
-      "equipment": ["徒手"],
-      "difficulty": "BEGINNER"
+      "steps": [
+        "侧卧，髋膝约90度弯曲，双脚并拢",
+        "头部枕在下侧手臂，上侧手扶髋",
+        "保持双脚接触，上侧膝盖向上打开",
+        "顶端停顿后缓慢合拢"
+      ],
+      "errors": [
+        "骨盆向后倒",
+        "双脚分开",
+        "打开过快借力"
+      ],
+      "muscleGroups": [
+        "臀中肌",
+        "臀部深层稳定肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "ISOLATION",
+      "impactLevel": "LOW"
     }
   ],
   "demoUpgrades": [
@@ -723,25 +1618,69 @@
       "uuid": "60000000-0000-0000-0000-000000000001",
       "slug": "squat",
       "sourceId": "Bodyweight_Squat",
-      "targetArea": "臀腿"
+      "targetArea": "臀腿",
+      "muscleGroups": [
+        "股四头肌",
+        "臀大肌",
+        "腘绳肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "SQUAT",
+      "impactLevel": "LOW"
     },
     {
       "uuid": "60000000-0000-0000-0000-000000000002",
       "slug": "knee-push-up",
       "sourceId": null,
-      "targetArea": "胸部"
+      "targetArea": "胸部",
+      "muscleGroups": [
+        "胸大肌",
+        "肱三头肌",
+        "三角肌前束"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HORIZONTAL_PUSH",
+      "impactLevel": "LOW"
     },
     {
       "uuid": "60000000-0000-0000-0000-000000000003",
       "slug": "mountain-climbers",
       "sourceId": "Mountain_Climbers",
-      "targetArea": "核心"
+      "targetArea": "核心",
+      "muscleGroups": [
+        "核心肌群",
+        "髋屈肌群",
+        "股四头肌"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "INTERMEDIATE",
+      "movementPattern": "LOCOMOTION",
+      "impactLevel": "MEDIUM"
     },
     {
       "uuid": "60000000-0000-0000-0000-000000000004",
       "slug": "glute-bridge",
       "sourceId": "Butt_Lift_Bridge",
-      "targetArea": "臀腿"
+      "targetArea": "臀腿",
+      "muscleGroups": [
+        "臀大肌",
+        "腘绳肌",
+        "核心肌群"
+      ],
+      "equipment": [
+        "徒手"
+      ],
+      "difficulty": "BEGINNER",
+      "movementPattern": "HINGE",
+      "impactLevel": "LOW"
     }
   ]
 }

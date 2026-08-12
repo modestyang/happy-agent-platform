@@ -10,12 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import happy.jayden.yang.StarterApplication;
+import happy.jayden.yang.fitness.infrastructure.JdbcFitnessUserDirectory;
 import jakarta.servlet.http.Cookie;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.Set;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.MethodOrderer;
@@ -71,6 +73,10 @@ class AdminWorkbenchIntegrationTest {
   @Qualifier("agentDataSource")
   private DataSource agentDataSource;
 
+  @Autowired
+  @Qualifier("fitnessDataSource")
+  private DataSource fitnessDataSource;
+
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
     registry.add("happy.datasource.fitness.url", POSTGRES::getJdbcUrl);
@@ -124,7 +130,7 @@ class AdminWorkbenchIntegrationTest {
     String update =
         """
         {
-          "name":"瘦瘦健身教练",
+          "name":"花爷健身教练",
           "description":"由管理台保存的真实草稿",
           "frameworkKey":"agentscope",
           "providerKey":"bailian",
@@ -188,7 +194,7 @@ class AdminWorkbenchIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"name":"瘦瘦","description":"冲突测试","frameworkKey":"agentscope","providerKey":"bailian","modelKey":"qwen-plus","promptKey":"fitness.coach.prompt","toolKeys":[],"skillKeys":[],"hookKeys":[],"memoryKey":"fitness.daily-memory","temperature":0.5,"maxToolCalls":8}
+                    {"name":"花爷","description":"冲突测试","frameworkKey":"agentscope","providerKey":"bailian","modelKey":"qwen-plus","promptKey":"fitness.coach.prompt","toolKeys":[],"skillKeys":[],"hookKeys":[],"memoryKey":"fitness.daily-memory","temperature":0.5,"maxToolCalls":8}
                     """))
         .andExpect(status().isConflict())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
@@ -197,21 +203,40 @@ class AdminWorkbenchIntegrationTest {
 
   @Test
   @Order(5)
-  void developerCanReachRealDebugRuntimeWithoutFitnessCookie() throws Exception {
-    mvc.perform(
-            post("/api/admin/playground/messages")
-                .cookie(adminLogin("admin", "admin123"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agentKey\":\"fitness.coach\",\"message\":\"请给我一条训练建议\"}"))
-        .andExpect(status().isServiceUnavailable());
+  void fitnessUserDirectorySearchesUsernamesAndTreatsWildcardsLiterally() {
+    var jdbc = new JdbcTemplate(fitnessDataSource);
+    UUID alice = UUID.randomUUID();
+    UUID literal = UUID.randomUUID();
+    UUID wildcardLookalike = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname)"
+            + " VALUES (?,?, 'ACTIVE', ?, 'unused', ?)",
+        alice,
+        "local:trace-alice",
+        "TraceAlice",
+        "Trace Alice");
+    jdbc.update(
+        "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname)"
+            + " VALUES (?,?, 'ACTIVE', ?, 'unused', ?)",
+        literal,
+        "local:literal-percent-underscore",
+        "literal%_trace",
+        "Literal");
+    jdbc.update(
+        "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname)"
+            + " VALUES (?,?, 'ACTIVE', ?, 'unused', ?)",
+        wildcardLookalike,
+        "local:literal-lookalike",
+        "literalXXtrace",
+        "Lookalike");
+    var directory = new JdbcFitnessUserDirectory(fitnessDataSource);
 
-    mvc.perform(
-            post("/api/admin/playground/messages")
-                .cookie(adminLogin("admin", "admin123"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"message\":\"请给我一条训练建议\"}"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    assertThat(directory.searchUserIds("alice")).containsExactly(alice);
+    assertThat(directory.searchUserIds("%_")).containsExactly(literal);
+    assertThat(directory.findUsernames(Set.of(alice, literal)))
+        .containsExactlyInAnyOrderEntriesOf(
+            java.util.Map.of(alice, "TraceAlice", literal, "literal%_trace"));
+    assertThat(directory.findUsernames(Set.of())).isEmpty();
   }
 
   @Test
@@ -220,6 +245,14 @@ class AdminWorkbenchIntegrationTest {
     UUID userId = UUID.randomUUID();
     UUID conversationId = UUID.randomUUID();
     UUID runId = UUID.randomUUID();
+    new JdbcTemplate(fitnessDataSource)
+        .update(
+            "INSERT INTO users(user_id,external_subject,status,username,password_hash,nickname)"
+                + " VALUES (?,?, 'ACTIVE', ?, 'unused', ?)",
+            userId,
+            "local:trace-search-alice",
+            "trace-search-alice",
+            "Trace Search Alice");
     var jdbc = new JdbcTemplate(agentDataSource);
     jdbc.update(
         "INSERT INTO agent_conversations(conversation_id,user_id,agent_key,title,status,started_at,last_message_at) VALUES (?,?,?,'晚饭怎么安排','ACTIVE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
@@ -238,10 +271,37 @@ class AdminWorkbenchIntegrationTest {
         runId);
 
     Cookie session = adminLogin("admin", "admin123");
-    mvc.perform(get("/api/admin/traces/conversations").cookie(session))
+    mvc.perform(
+            get("/api/admin/traces/conversations")
+                .queryParam("query", "search-alice")
+                .queryParam("page", "0")
+                .queryParam("size", "10")
+                .cookie(session))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].conversationId").value(conversationId.toString()))
-        .andExpect(jsonPath("$[0].messageCount").value(1));
+        .andExpect(jsonPath("$.items[0].conversationId").value(conversationId.toString()))
+        .andExpect(jsonPath("$.items[0].userId").value(userId.toString()))
+        .andExpect(jsonPath("$.items[0].username").value("trace-search-alice"))
+        .andExpect(jsonPath("$.items[0].messageCount").value(1))
+        .andExpect(jsonPath("$.page").value(0))
+        .andExpect(jsonPath("$.size").value(10))
+        .andExpect(jsonPath("$.hasNext").value(false));
+    mvc.perform(
+            get("/api/admin/traces/conversations")
+                .queryParam("query", userId.toString())
+                .cookie(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].conversationId").value(conversationId.toString()));
+    mvc.perform(
+            get("/api/admin/traces/conversations")
+                .queryParam("query", conversationId.toString())
+                .cookie(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].conversationId").value(conversationId.toString()));
+    mvc.perform(
+            get("/api/admin/traces/conversations")
+                .queryParam("query", "x".repeat(161))
+                .cookie(session))
+        .andExpect(status().isBadRequest());
     mvc.perform(
             get("/api/admin/traces/conversations/{conversationId}", conversationId).cookie(session))
         .andExpect(status().isOk())

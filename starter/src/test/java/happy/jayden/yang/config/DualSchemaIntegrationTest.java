@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,7 +112,47 @@ class DualSchemaIntegrationTest {
     assertThat(
             fitnessJdbc.queryForObject(
                 "select count(*) from fitness.fitness_schema_history", Long.class))
-        .isEqualTo(13L);
+        .isEqualTo(16L);
+    assertThat(
+            fitnessJdbc.queryForObject(
+                "select count(*) from information_schema.columns where table_schema='fitness' "
+                    + "and table_name='exercises' and column_name in "
+                    + "('muscle_groups','equipment','difficulty','movement_pattern','impact_level')",
+                Long.class))
+        .isEqualTo(5L);
+    assertThat(
+            fitnessJdbc.queryForObject(
+                "select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid "
+                    + "join pg_namespace n on n.oid=t.relnamespace "
+                    + "where n.nspname='fitness' and t.relname='exercises' "
+                    + "and c.conname in ('exercises_muscle_groups_selection_check',"
+                    + "'exercises_equipment_selection_check','exercises_difficulty_selection_check',"
+                    + "'exercises_movement_pattern_selection_check','exercises_impact_level_selection_check')",
+                Long.class))
+        .isEqualTo(5L);
+
+    fitnessJdbc.update(
+        "insert into fitness.exercises(exercise_id,name,target_area,sets,seconds,steps,errors,image_urls) "
+            + "values (?, '未标注动作', '核心', 3, 30, '[]', '[]', '[]')",
+        UUID.randomUUID());
+    assertThatThrownBy(
+            () ->
+                fitnessJdbc.update(
+                    "insert into fitness.exercises(exercise_id,name,target_area,sets,seconds,steps,errors,image_urls,"
+                        + "muscle_groups,equipment,difficulty,movement_pattern,impact_level) "
+                        + "values (?, '非法难度', '核心', 3, 30, '[]', '[]', '[]', "
+                        + "'[\"核心肌群\"]', '[\"徒手\"]', 'EXPERT', 'CORE_STABILITY', 'LOW')",
+                    UUID.randomUUID()))
+        .hasMessageContaining("exercises_difficulty_selection_check");
+    assertThatThrownBy(
+            () ->
+                fitnessJdbc.update(
+                    "insert into fitness.exercises(exercise_id,name,target_area,sets,seconds,steps,errors,image_urls,"
+                        + "muscle_groups,equipment,difficulty,movement_pattern,impact_level) "
+                        + "values (?, '空肌群', '核心', 3, 30, '[]', '[]', '[]', "
+                        + "'[]', '[\"徒手\"]', 'BEGINNER', 'CORE_STABILITY', 'LOW')",
+                    UUID.randomUUID()))
+        .hasMessageContaining("exercises_muscle_groups_selection_check");
   }
 
   @Test

@@ -5,10 +5,13 @@ import {
   Clock3, Dumbbell, Flame, Home, LogOut, Medal, MessageCirclePlus, Play, Plus, Salad,
   Search, Send, Sparkles, Target, Trophy, UserRound, Utensils, WandSparkles, X,
 } from 'lucide-react';
-import { ApiError, api } from './api';
-import { AgentRunMessage, consumeAgentRunStream, type AgentRunEvent, type AgentRunUiMessage, type RunApproval } from './components/AgentRunMessage';
+import { ApiError, api, type TrainingProfile, type TrainingProfileInput } from './api';
+import type { CurrentGoalReport } from './api/generated/public';
+import { newClientId } from './clientId';
+import { AgentRunMessage, applyAgentRunEvent, consumeAgentRunStream, type AgentRunEvent, type AgentRunUiMessage } from './components/AgentRunMessage';
 import { CurrentGoalReportCard } from './components/CurrentGoalReport';
 import { useCurrentGoalReportPolling } from './components/CurrentGoalReportPolling';
+import { ExpandableSurface } from './components/ContentSurface';
 import { ExerciseVisual } from './components/ExerciseVisual';
 import { MealRecommendationPage, mealTimingLabel, nextMealRecommendation, recommendationKcal, type MealRecommendation } from './components/MealRecommendationPage';
 import { MealRecordForm } from './components/MealRecordForm';
@@ -31,14 +34,48 @@ type Dashboard = {
   completedWorkoutCount?: number;
   report?: { status: string; score: number; conclusion: string; metrics: { label: string; value: string; comparison?: string }[]; actions: string[] };
   ai: { configured: boolean; reason?: string };
+  trainingProfile?: TrainingProfile;
 };
 
 type RecordTab = 'body' | 'meal';
 type ChatMessage = AgentRunUiMessage;
 
 const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
-const tones = ['温暖直接', '轻松逗趣', '冷静专业'];
-const preferenceOptions = ['中式家常', '少跳跃', '晚餐清淡', '温和提醒'];
+const coachingToneOptions = [
+  { value: 'WARM_DIRECT', label: '温暖直接' },
+  { value: 'LIGHT_HEARTED', label: '轻松逗趣' },
+  { value: 'CALM_PROFESSIONAL', label: '冷静专业' },
+] as const;
+const sexOptions = [
+  { value: 'FEMALE', label: '女性' },
+  { value: 'MALE', label: '男性' },
+  { value: 'NOT_DISCLOSED', label: '不愿透露' },
+] as const;
+const experienceOptions = [
+  { value: 'BEGINNER', label: '新手' },
+  { value: 'INTERMEDIATE', label: '有规律训练' },
+  { value: 'ADVANCED', label: '进阶训练' },
+] as const;
+const venueOptions = [
+  { value: 'HOME', label: '家里' },
+  { value: 'GYM', label: '健身房' },
+  { value: 'OUTDOOR', label: '户外' },
+  { value: 'OTHER', label: '其他' },
+] as const;
+const weekdayOptions = [
+  { value: 1, label: '周一' }, { value: 2, label: '周二' }, { value: 3, label: '周三' }, { value: 4, label: '周四' }, { value: 5, label: '周五' }, { value: 6, label: '周六' }, { value: 7, label: '周日' },
+];
+const emptyTrainingProfile: TrainingProfile = {
+  biologicalSex: 'NOT_DISCLOSED',
+  experienceLevel: 'BEGINNER',
+  trainingVenues: ['HOME'],
+  availableEquipment: [],
+  trainingWeekdays: [],
+  sessionMinutes: 30,
+  trainingRestrictions: [],
+  coachingTone: 'WARM_DIRECT',
+  nutritionPreferences: [],
+};
 const AI_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 function errorText(error: unknown) { return error instanceof Error ? error.message : '网络似乎出了点问题，请重试。'; }
@@ -46,12 +83,15 @@ function readJson<T>(key: string, fallback: T): T {
   try { const value = window.localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
 }
 function readAiSession(key: string) {
-  const stored = readJson<{ updatedAt?: number; messages?: ChatMessage[] }>(key, {});
+  const stored = readJson<{ sessionId?: string; updatedAt?: number; messages?: ChatMessage[] }>(key, {});
   if (!stored.updatedAt || !Array.isArray(stored.messages) || Date.now() - stored.updatedAt >= AI_SESSION_TTL_MS) {
     try { window.localStorage.removeItem(key); } catch { /* Ignore unavailable storage. */ }
-    return [];
+    return { sessionId: undefined, messages: [] as ChatMessage[] };
   }
-  return stored.messages.filter((message) => (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string');
+  return {
+    sessionId: typeof stored.sessionId === 'string' ? stored.sessionId : undefined,
+    messages: stored.messages.filter((message) => (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string'),
+  };
 }
 function dayKey(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function sameDay(left: Date, right: Date) { return dayKey(left) === dayKey(right); }
@@ -80,6 +120,8 @@ function currentWeek(today: Date) {
   });
 }
 function equipmentFor(exercise: Exercise) { return /哑铃|壶铃|弹力带/.test(exercise.name) ? '小器械' : '徒手'; }
+function toggleValue<T>(values: T[], value: T) { return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]; }
+function tagValues(value: string) { return Array.from(new Set(value.split(/[，,]/).map((item) => item.trim()).filter(Boolean))); }
 
 function Mascot({ small = false }: { small?: boolean }) {
   return <div className={`mascot${small ? ' mascot--small' : ''}`} aria-hidden="true"><i /><span>•ᴗ•</span><b /></div>;
@@ -95,7 +137,7 @@ function Header({ nickname, title, subtitle }: { nickname: string; title: string
 
 function Navigation() {
   const { pathname } = useLocation();
-  if (pathname.startsWith('/meal/') || pathname.startsWith('/workout/')) return null;
+  if (pathname.startsWith('/meal/') || pathname.startsWith('/workout/') || pathname.startsWith('/report/')) return null;
   const items = [
     { to: '/', label: '今天', icon: Home },
     { to: '/plan', label: '计划', icon: CalendarDays },
@@ -119,11 +161,15 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
   const hour = now.getHours();
   const greeting = hour < 11 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
   const totalSets = data.plan?.exercises.reduce((sum, exercise) => sum + exercise.sets, 0) ?? 0;
+  const latestWeight = [...data.bodyRecords]
+    .filter((record) => typeof record.weightJin === 'number')
+    .sort((left, right) => new Date(left.recordedAt).getTime() - new Date(right.recordedAt).getTime())
+    .at(-1)?.weightJin;
   const quickActions = [
     { title: '训练', eyebrow: '今日主题', headline: data.plan?.title ?? '今天还没安排', meta: data.plan ? `${data.plan.estimatedMinutes} 分钟 · ${data.plan.exercises.length} 动作 · ${totalSets} 组` : '去看看本周计划', icon: Flame, tone: 'tangerine', action: () => navigate('/plan') },
     { title: '饮食', eyebrow: nextMeal ? `${mealTimingLabel(now, nextMeal.mealType)} · ${mealName}` : '今日推荐', headline: nextMeal?.items[0]?.name ?? '今日建议尚未生成', meta: nextMeal ? `约 ${recommendationKcal(nextMeal)} kcal` : '生成后会展示在这里', icon: Salad, tone: 'butter', action: () => navigate('/meal/today') },
     { title: '记录', eyebrow: '留下真实数据', headline: '记录身材或一餐', meta: '体重 · 腰围 · 饮食', icon: Plus, tone: 'mint', action: () => onOpenRecord('body') },
-    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由花爷整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/ai?report=current') },
+    { title: '报告', eyebrow: '当前目标', headline: '累计变化分析', meta: '由花爷整理依据与建议', icon: BarChart3, tone: 'sky', action: () => navigate('/report/current') },
   ];
 
   return <section className="page home-page">
@@ -132,12 +178,16 @@ function HomePage({ data, onOpenRecord }: { data: Dashboard; onOpenRecord: (tab:
       <Mascot />
     </header>
     {goal ? <section className="goal-card">
-      <div className="goal-card__top"><span><Target /> 当前目标</span><button aria-label="查看目标进度" onClick={() => navigate('/ai?report=current')}><ChevronRight /></button></div>
+      <div className="goal-card__top"><span><Target /> 当前目标</span><button aria-label="查看目标进度" onClick={() => navigate('/report/current')}><ChevronRight /></button></div>
       <h2>{goal.name}</h2>
       <div className="goal-card__numbers"><strong>{goal.currentWeightJin}<small>斤</small></strong><span>目标<br /><b>{goal.targetWeightJin} 斤</b></span></div>
       <div className="progress" role="progressbar" aria-label={`目标已完成 ${goal.progressPercent}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={goal.progressPercent}><i style={{ width: `${goal.progressPercent}%` }} /></div>
       <p>已经走完 {goal.progressPercent}% <Sparkles /></p>
     </section> : <Empty icon={Target} title="设一个刚刚好的目标" text="有方向，但不用给自己太大压力。" />}
+    <section className="home-trend" aria-label="首页体重趋势">
+      <header><div><small>最近记录</small><strong>体重变化</strong></div><span>{latestWeight === undefined ? '等待记录' : `${latestWeight} 斤`}</span></header>
+      <ExpandableSurface variant="media" label="体重趋势" title="体重趋势详情"><WeightSparkline records={data.bodyRecords} /></ExpandableSurface>
+    </section>
     <section className="home-actions" aria-label="今日快捷功能">{quickActions.map(({ title, eyebrow, headline, meta, icon: Icon, tone, action }) => <button key={title} className={`home-action home-action--${tone}`} aria-label={title} onClick={action}><span className="home-action__icon"><Icon /></span><div className="home-action__title"><small>{eyebrow}</small><strong>{title}</strong></div><div className="home-action__summary"><b>{headline}</b><small>{meta}</small></div><i><ChevronRight /></i></button>)}</section>
   </section>;
 }
@@ -230,7 +280,7 @@ function PlanPage({ data, reload }: { data: Dashboard; reload: () => Promise<voi
       <section className="plan-hero"><div><small>{done || plan.status === 'COMPLETED' ? `${selectedIsToday ? '今天' : '这天'}完成啦` : `${selectedIsToday ? '今天' : '这天'}的训练`}</small><h2>{plan.title}</h2><p><Clock3 /> {plan.estimatedMinutes} 分钟 <i /> {plan.exercises.reduce((sum, exercise) => sum + exercise.sets, 0)} 组</p></div><span>{plan.exercises.length}<small>个动作</small></span></section>
       <div className="plan-exercises">{plan.exercises.map((exercise, index) => {
         const media = data.exercises.find((item) => item.id === exercise.id) ?? exercise;
-        return <article className="plan-exercise" key={exercise.id}><ExerciseVisual exercise={media} compact /><div className="plan-exercise__copy"><small>{String(index + 1).padStart(2, '0')} · {exercise.targetArea}</small><h2>{exercise.name}</h2><p>{exercise.sets} 组 × {exercise.seconds} 秒</p><div className="cue"><strong>动作要点</strong>{exercise.steps.map((step) => <span key={step}>{step}</span>)}</div>{exercise.errors.length > 0 && <div className="mistakes"><strong>常见错误</strong>{exercise.errors.map((item) => <span key={item}>{item}</span>)}</div>}</div></article>;
+        return <article className="plan-exercise" key={exercise.id}><ExerciseVisual exercise={media} autoPlay compact /><div className="plan-exercise__copy"><small>{String(index + 1).padStart(2, '0')} · {exercise.targetArea}</small><h2>{exercise.name}</h2><p>{exercise.sets} 组 × {exercise.seconds} 秒</p><div className="cue"><strong>动作要点</strong>{exercise.steps.map((step) => <span key={step}>{step}</span>)}</div>{exercise.errors.length > 0 && <div className="mistakes"><strong>常见错误</strong>{exercise.errors.map((item) => <span key={item}>{item}</span>)}</div>}</div></article>;
       })}</div>
       {error && <p className="error">{error}</p>}
       {done || plan.status === 'COMPLETED' ? <p className="success-card"><Check /> {selectedIsToday ? '今天' : '这天'}的训练已经好好收下。</p> : <div className="plan-actions"><button className="primary" onClick={() => navigate(`/workout/${plan.id}`)}><Play /> 开始跟练</button><button className="soft-button" onClick={complete}><Check /> 完成本次训练</button></div>}
@@ -245,34 +295,80 @@ const aiFeatures = [
   { title: '看看最近状态', description: '训练、饮食和身体一起看', prompt: '帮我看看最近的训练、饮食和身体变化', icon: Activity, tone: 'sky' },
 ];
 
-function AiPage({ data, onOpenRecord, onDataChanged }: { data: Dashboard; onOpenRecord: (tab: RecordTab) => void; onDataChanged: () => Promise<void> }) {
+function CurrentGoalReportPage({ onOpenRecord }: { onOpenRecord: (tab: RecordTab) => void }) {
+  const navigate = useNavigate();
+  const [report, setReport] = useState<CurrentGoalReport>();
+  const [error, setError] = useState('');
+  const requested = useRef(false);
+  const readCurrentGoalReport = useCallback(() => api.currentGoalReport(), []);
+  const acceptPolledReport = useCallback((nextReport: CurrentGoalReport) => {
+    setReport(nextReport);
+    setError('');
+  }, []);
+  const reportPollingError = useCallback((err: unknown) => setError(errorText(err)), []);
+  useCurrentGoalReportPolling(report, readCurrentGoalReport, acceptPolledReport, 1000, reportPollingError);
+
+  const refresh = useCallback(async (reason: 'USER_REFRESH' | 'RETRY_FAILED') => {
+    setError('');
+    try {
+      setReport(await api.refreshCurrentGoalReport(reason, newClientId()));
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (requested.current) return;
+    requested.current = true;
+    void refresh('USER_REFRESH');
+  }, [refresh]);
+
+  return <section className="page report-page">
+    <header className="report-page-head"><button className="back-button" aria-label="返回首页" onClick={() => navigate('/')}><ChevronLeft /></button><div><small>AI 累计分析</small><h1>当前目标报告</h1></div><Mascot small /></header>
+    {report ? <CurrentGoalReportCard report={report} onRetry={() => void refresh(report.state === 'FAILED' ? 'RETRY_FAILED' : 'USER_REFRESH')} onGeneratePlan={() => navigate(`/ai?prompt=${encodeURIComponent('根据当前目标报告，帮我生成下周训练计划')}`)} onOpenRecord={() => onOpenRecord('body')} /> : <section className="report-page-loading"><div className="spinner" /><p>正在读取目标报告…</p></section>}
+    {error && <p className="error">{error}</p>}
+  </section>;
+}
+
+function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () => Promise<void> }) {
   const [searchParams] = useSearchParams();
   const preparedPrompt = searchParams.get('prompt') ?? '';
-  const reportRequested = searchParams.get('report') === 'current';
   const preparedSent = useRef('');
-  const preparedReport = useRef(false);
   const sessionKey = `happy-fitness-ai-session:${data.user.id}`;
-  const [messages, setMessages] = useState<ChatMessage[]>(() => readAiSession(sessionKey));
+  const restoredSession = useRef(readAiSession(sessionKey)).current;
+  const [sessionId, setSessionId] = useState<string | undefined>(restoredSession.sessionId);
+  const [messages, setMessages] = useState<ChatMessage[]>(restoredSession.messages);
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
-  const [report, setReport] = useState<import('./api/generated/public').CurrentGoalReport>();
-  const [reportError, setReportError] = useState('');
   const [sending, setSending] = useState(false);
   const conversationGeneration = useRef(0);
+  const conversationScroll = useRef<HTMLDivElement>(null);
   const activeStream = useRef<AbortController | undefined>(undefined);
   useEffect(() => {
     try {
-      if (messages.length) window.localStorage.setItem(sessionKey, JSON.stringify({ updatedAt: Date.now(), messages }));
+      if (sessionId || messages.length) window.localStorage.setItem(sessionKey, JSON.stringify({ sessionId, updatedAt: Date.now(), messages }));
       else window.localStorage.removeItem(sessionKey);
     } catch { /* Storage may be disabled; the in-memory conversation remains usable. */ }
-  }, [messages, sessionKey]);
+  }, [messages, sessionId, sessionKey]);
+  useEffect(() => {
+    const container = conversationScroll.current;
+    if (!container || messages.length === 0) return;
+    container.scrollTop = container.scrollHeight;
+  }, [error, messages, sending]);
 
   async function submit(message: string) {
     if (!message.trim() || sending) return;
     const generation = conversationGeneration.current;
     setMessages((list) => [...list, { role: 'user', content: message }]); setValue(''); setSending(true); setError('');
     try {
-      const response = await api.createAiRun(message.trim(), crypto.randomUUID());
+      let targetSessionId = sessionId;
+      if (!targetSessionId) {
+        const created = await api.createAiSession(newClientId());
+        if (conversationGeneration.current !== generation) return;
+        targetSessionId = created.sessionId;
+        setSessionId(targetSessionId);
+      }
+      const response = await api.createAiMessage(targetSessionId, message.trim(), newClientId());
       if (conversationGeneration.current !== generation) return;
       const runId = response.runId;
       setMessages((list) => [...list, { role: 'assistant', content: '', runId, progress: ['已提交给花爷'] }]);
@@ -285,32 +381,36 @@ function AiPage({ data, onOpenRecord, onDataChanged }: { data: Dashboard; onOpen
     } finally { if (conversationGeneration.current === generation) setSending(false); }
   }
 
+  async function startNewConversation() {
+    activeStream.current?.abort();
+    const generation = conversationGeneration.current + 1;
+    conversationGeneration.current = generation;
+    setSending(true);
+    setError('');
+    try {
+      const created = await api.createAiSession(newClientId());
+      if (conversationGeneration.current !== generation) return;
+      setSessionId(created.sessionId);
+      setMessages([]);
+    } catch (err) {
+      if (conversationGeneration.current === generation) setError(errorText(err));
+    } finally {
+      if (conversationGeneration.current === generation) setSending(false);
+    }
+  }
+
   function applyEvent(runId: string, event: AgentRunEvent) {
-    setMessages((list) => list.map((item) => {
-      if (item.runId !== runId) return item;
-      if (event.type === 'TEXT_DELTA') return { ...item, content: item.content + String(event.data.delta ?? '') };
-      if (event.type === 'RUN_STATE' && event.data.summary) {
-        const progress = [...(item.progress ?? [])];
-        const summary = String(event.data.summary);
-        if (!progress.includes(summary)) progress.push(summary);
-        return { ...item, progress };
-      }
-      if (event.type === 'APPROVAL') {
-        const incoming = event.data as unknown as RunApproval;
-        return { ...item, deciding: false, approval: { ...(item.approval ?? incoming), ...incoming } };
-      }
-      return item;
-    }));
+    setMessages((list) => list.map((item) => item.runId === runId ? applyAgentRunEvent(item, event) : item));
     if (event.type === 'ERROR') setError(String(event.data.message ?? 'AI 运行失败'));
   }
 
   async function decide(runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT') {
-    setMessages((list) => list.map((item) => item.runId === runId ? { ...item, deciding: true } : item));
+    setMessages((list) => list.map((item) => item.runId === runId ? { ...item, deciding: true, decidingApprovalId: approvalId } : item));
     try {
-      await api.decideAiRunApproval(runId, approvalId, decision, crypto.randomUUID());
+      await api.decideAiRunApproval(runId, approvalId, decision, newClientId());
       if (decision === 'APPROVE') await onDataChanged();
     } catch (err) {
-      setMessages((list) => list.map((item) => item.runId === runId ? { ...item, deciding: false } : item));
+      setMessages((list) => list.map((item) => item.runId === runId ? { ...item, deciding: false, decidingApprovalId: undefined } : item));
       setError(errorText(err));
     }
   }
@@ -319,31 +419,11 @@ function AiPage({ data, onOpenRecord, onDataChanged }: { data: Dashboard; onOpen
     preparedSent.current = preparedPrompt;
     void submit(preparedPrompt);
   }, [preparedPrompt]);
-  async function refreshCurrentGoalReport(reason: 'USER_REFRESH' | 'RETRY_FAILED') {
-    setReportError('');
-    try {
-      setReport(await api.refreshCurrentGoalReport(reason, crypto.randomUUID()));
-    } catch (err) {
-      setReportError(errorText(err));
-    }
-  }
-  const readCurrentGoalReport = useCallback(() => api.currentGoalReport(), []);
-  const acceptPolledReport = useCallback((nextReport: import('./api/generated/public').CurrentGoalReport) => {
-    setReport(nextReport);
-    setReportError('');
-  }, []);
-  const reportPollingError = useCallback((err: unknown) => setReportError(errorText(err)), []);
-  useCurrentGoalReportPolling(report, readCurrentGoalReport, acceptPolledReport, 1000, reportPollingError);
-  useEffect(() => {
-    if (!reportRequested || preparedReport.current) return;
-    preparedReport.current = true;
-    void refreshCurrentGoalReport('USER_REFRESH');
-  }, [reportRequested]);
   const isWelcome = messages.length === 0;
 
   return <section className="page ai-page">
-    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>花爷</h1></div><button aria-label="新建会话" onClick={() => { activeStream.current?.abort(); conversationGeneration.current += 1; setMessages([]); setError(''); setSending(false); }}><MessageCirclePlus /></button></header>
-    <div className="ai-scroll">{report && <CurrentGoalReportCard report={report} onRetry={() => void refreshCurrentGoalReport(report.state === 'FAILED' ? 'RETRY_FAILED' : 'USER_REFRESH')} onGeneratePlan={() => setReportError('训练计划生成能力暂不可用：请先在 Agent 工作台发布计划生成能力。')} onOpenRecord={() => onOpenRecord('body')} />}{reportError && <p className="error">{reportError}</p>}{isWelcome ? <>
+    <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>花爷</h1></div><button aria-label="新建会话" onClick={() => void startNewConversation()}><MessageCirclePlus /></button></header>
+    <div className="ai-scroll" ref={conversationScroll}>{isWelcome ? <>
       <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
       <section className="ai-capabilities" role="region" aria-label="花爷快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
       {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
@@ -374,15 +454,85 @@ function LibraryPage({ data }: { data: Dashboard }) {
   </section>;
 }
 
-function MePage({ data, onLoggedOut }: { data: Dashboard; onLoggedOut: () => void }) {
-  const preferenceKey = `happy-fitness-preferences:${data.user.id}`;
-  const savedPreferences = readJson<{ tone?: string; preferences?: string[] }>(preferenceKey, {});
+function TrainingProfileEditor({ profile, onSaved }: { profile?: TrainingProfile; onSaved: () => Promise<void> }) {
+  const initial = profile ?? emptyTrainingProfile;
+  const [biologicalSex, setBiologicalSex] = useState<TrainingProfile['biologicalSex']>(initial.biologicalSex);
+  const [experienceLevel, setExperienceLevel] = useState<TrainingProfile['experienceLevel']>(initial.experienceLevel);
+  const [trainingVenues, setTrainingVenues] = useState<TrainingProfile['trainingVenues']>(initial.trainingVenues);
+  const [trainingWeekdays, setTrainingWeekdays] = useState(initial.trainingWeekdays);
+  const [sessionMinutes, setSessionMinutes] = useState(String(initial.sessionMinutes));
+  const [birthYear, setBirthYear] = useState(initial.birthYear?.toString() ?? '');
+  const [heightCm, setHeightCm] = useState(initial.heightCm?.toString() ?? '');
+  const [equipment, setEquipment] = useState(initial.availableEquipment.join('，'));
+  const [restrictions, setRestrictions] = useState(initial.trainingRestrictions.join('，'));
+  const [coachingTone, setCoachingTone] = useState<TrainingProfile['coachingTone']>(initial.coachingTone);
+  const [nutritionPreferences, setNutritionPreferences] = useState(initial.nutritionPreferences.join('，'));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    const minutes = Number(sessionMinutes);
+    const nextBirthYear = birthYear.trim() === '' ? undefined : Number(birthYear);
+    const nextHeightCm = heightCm.trim() === '' ? undefined : Number(heightCm);
+    if (!trainingVenues.length || !Number.isInteger(minutes) || minutes < 10 || minutes > 180
+      || (nextBirthYear !== undefined && !Number.isInteger(nextBirthYear))
+      || (nextHeightCm !== undefined && !Number.isFinite(nextHeightCm))) {
+      setError('请检查训练场所、单次时长和填写的数字。');
+      return;
+    }
+    const request: TrainingProfileInput = {
+      biologicalSex,
+      experienceLevel,
+      trainingVenues,
+      trainingWeekdays,
+      sessionMinutes: minutes,
+      birthYear: nextBirthYear,
+      heightCm: nextHeightCm,
+      availableEquipment: tagValues(equipment),
+      trainingRestrictions: tagValues(restrictions),
+      coachingTone,
+      nutritionPreferences: tagValues(nutritionPreferences),
+    };
+    setSaving(true);
+    setError('');
+    try {
+      await api.updateTrainingProfile(request);
+      await onSaved();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const sexLabel = sexOptions.find((option) => option.value === initial.biologicalSex)?.label ?? '待补充';
+  const experienceLabel = experienceOptions.find((option) => option.value === initial.experienceLevel)?.label ?? '待补充';
+  return <section className="profile-panel training-profile-panel">
+    <div className="panel-title"><span><UserRound /></span><div><small>给花爷的训练依据</small><h2>训练档案</h2></div></div>
+    <p className="training-profile-summary">{profile ? `${sexLabel} · ${experienceLabel} · ${initial.sessionMinutes} 分钟 / 次` : '还没有训练档案，补充后花爷才能按你的实际情况安排。'}</p>
+    <details>
+      <summary>{profile ? '查看和修改资料' : '补充训练资料'}<ChevronRight /></summary>
+      <form className="training-profile-form" onSubmit={save}>
+        <fieldset><legend>生理性别</legend><p>只用于训练基线与特殊阶段适配；可以选择不愿透露。</p><div className="choice-row">{sexOptions.map((option) => <button key={option.value} type="button" aria-pressed={biologicalSex === option.value} className={biologicalSex === option.value ? 'is-active' : ''} onClick={() => setBiologicalSex(option.value)}>{biologicalSex === option.value && <Check />}{option.label}</button>)}</div></fieldset>
+        <fieldset><legend>训练经验</legend><div className="choice-row">{experienceOptions.map((option) => <button key={option.value} type="button" aria-pressed={experienceLevel === option.value} className={experienceLevel === option.value ? 'is-active' : ''} onClick={() => setExperienceLevel(option.value)}>{experienceLevel === option.value && <Check />}{option.label}</button>)}</div></fieldset>
+        <fieldset><legend>通常在哪里练</legend><div className="choice-row">{venueOptions.map((option) => <button key={option.value} type="button" aria-pressed={trainingVenues.includes(option.value)} className={trainingVenues.includes(option.value) ? 'is-active' : ''} onClick={() => setTrainingVenues(toggleValue(trainingVenues, option.value))}>{trainingVenues.includes(option.value) && <Check />}{option.label}</button>)}</div></fieldset>
+        <div className="record-form-grid"><label>单次训练（分钟）<input aria-label="单次训练（分钟）" type="number" min="10" max="180" value={sessionMinutes} onChange={(event) => setSessionMinutes(event.target.value)} /></label><label>身高（cm，可选）<input aria-label="身高（cm，可选）" type="number" min="80" max="250" step="0.1" value={heightCm} onChange={(event) => setHeightCm(event.target.value)} /></label></div>
+        <label>出生年份（可选）<input aria-label="出生年份（可选）" type="number" min="1900" value={birthYear} onChange={(event) => setBirthYear(event.target.value)} /></label>
+        <fieldset><legend>一周通常哪几天方便练（可选）</legend><div className="choice-row">{weekdayOptions.map((day) => <button key={day.value} type="button" aria-pressed={trainingWeekdays.includes(day.value)} className={trainingWeekdays.includes(day.value) ? 'is-active' : ''} onClick={() => setTrainingWeekdays(toggleValue(trainingWeekdays, day.value))}>{trainingWeekdays.includes(day.value) && <Check />}{day.label}</button>)}</div></fieldset>
+        <label>可用器械（可选）<input aria-label="可用器械（可选）" value={equipment} onChange={(event) => setEquipment(event.target.value)} placeholder="例如：瑜伽垫，弹力带，哑铃" /></label>
+        <label>训练限制或想避免的内容（可选）<input aria-label="训练限制或想避免的内容（可选）" value={restrictions} onChange={(event) => setRestrictions(event.target.value)} placeholder="例如：避免跳跃，膝盖不舒服" /></label>
+        <fieldset><legend>花爷怎么陪你</legend><div className="choice-row">{coachingToneOptions.map((option) => <button key={option.value} type="button" aria-pressed={coachingTone === option.value} className={coachingTone === option.value ? 'is-active' : ''} onClick={() => setCoachingTone(option.value)}>{coachingTone === option.value && <Check />}{option.label}</button>)}</div></fieldset>
+        <label>饮食偏好（可选）<input aria-label="饮食偏好（可选）" value={nutritionPreferences} onChange={(event) => setNutritionPreferences(event.target.value)} placeholder="例如：中式家常，晚餐清淡" /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="primary" disabled={saving}>{saving ? '正在保存…' : '保存训练档案'}</button>
+      </form>
+    </details>
+  </section>;
+}
+
+function MePage({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => Promise<void>; onLoggedOut: () => void }) {
   const [logoutError, setLogoutError] = useState('');
-  const [tone, setTone] = useState(() => tones.includes(savedPreferences.tone ?? '') ? savedPreferences.tone as string : tones[0]);
-  const [preferences, setPreferences] = useState<string[]>(() => savedPreferences.preferences?.filter((item) => preferenceOptions.includes(item)) ?? ['晚餐清淡', '温和提醒']);
-  useEffect(() => {
-    try { window.localStorage.setItem(preferenceKey, JSON.stringify({ tone, preferences })); } catch { /* Keep the current in-memory choice. */ }
-  }, [preferenceKey, preferences, tone]);
   const recordDays = new Set([...data.bodyRecords.map((record) => dayKey(new Date(record.recordedAt))), ...data.meals.map((meal) => dayKey(new Date(meal.occurredAt)))]).size;
   const areas = Array.from(new Set(data.plan?.exercises.map((exercise) => exercise.targetArea) ?? []));
   const achievements = [
@@ -391,7 +541,6 @@ function MePage({ data, onLoggedOut }: { data: Dashboard; onLoggedOut: () => voi
     { label: '目标同行', earned: (data.goal?.progressPercent ?? 0) >= 25, icon: Trophy },
   ];
   async function logout() { try { await api.logout(); onLoggedOut(); } catch (err) { setLogoutError(errorText(err)); } }
-  function togglePreference(option: string) { setPreferences((current) => current.includes(option) ? current.filter((item) => item !== option) : [...current, option]); }
 
   return <section className="page profile-page">
     <header className="profile-cover"><div className="profile-avatar">{data.user.nickname.slice(0, 1)}</div><div><small>和花爷一起认真生活</small><h1>{data.user.nickname}</h1><p>{data.goal?.name ?? '还没有进行中的目标'}</p></div><Sparkles /></header>
@@ -400,8 +549,7 @@ function MePage({ data, onLoggedOut }: { data: Dashboard; onLoggedOut: () => voi
     <section className="achievements">{achievements.map(({ label, earned, icon: Icon }) => <article className={earned ? 'is-earned' : ''} key={label}><span><Icon /></span><strong>{label}</strong><small>{earned ? '已点亮' : '继续积累'}</small></article>)}</section>
     <section className="profile-panel activation-panel"><div className="panel-title"><span><Activity /></span><div><small>本次计划</small><h2>运动点亮图</h2></div></div><BodyActivation areas={areas} /></section>
     <section className="profile-panel trend-panel"><div className="panel-title"><span><BarChart3 /></span><div><small>客观记录</small><h2>体重 / 体脂趋势</h2></div></div><WeightSparkline records={data.bodyRecords} /><p className="body-fat-empty">体脂暂无数据 · 记录后会和体重一起呈现</p></section>
-    <section className="profile-panel"><div className="panel-title"><span><Bot /></span><div><small>陪伴方式</small><h2>AI 教练语气</h2></div></div><div className="choice-row">{tones.map((item) => <button key={item} aria-pressed={tone === item} className={tone === item ? 'is-active' : ''} onClick={() => setTone(item)}>{tone === item && <Check />}{item}</button>)}</div></section>
-    <section className="profile-panel"><div className="panel-title"><span><Sparkles /></span><div><small>花爷记住的你</small><h2>个人偏好</h2></div></div><div className="preference-tags">{preferenceOptions.map((option) => <button key={option} aria-pressed={preferences.includes(option)} className={preferences.includes(option) ? 'is-active' : ''} onClick={() => togglePreference(option)}>{preferences.includes(option) && <Check />}{option}</button>)}</div></section>
+    <TrainingProfileEditor profile={data.trainingProfile} onSaved={reload} />
     <section className="profile-panel"><div className="panel-title"><span><Award /></span><div><small>真实数据</small><h2>历史记录</h2></div></div><div className="history-list"><p><span>训练历史</span><strong>{data.completedWorkoutCount ?? 0} 次</strong></p><p><span>指标记录</span><strong>{data.bodyRecords.length} 条</strong></p><p><span>饮食记录</span><strong>{data.meals.length} 餐</strong></p></div></section>
     {logoutError && <p className="error">{logoutError}</p>}<button className="logout-button" onClick={() => void logout()}><LogOut /> 退出登录</button>
   </section>;
@@ -420,9 +568,71 @@ function Register({ onRegistered, onBackToLogin }: { onRegistered: () => Promise
 }
 
 function FirstSetup({ onComplete }: { onComplete: () => Promise<void> }) {
-  const [weightJin, setWeightJin] = useState(''); const [waistCm, setWaistCm] = useState(''); const [targetWeightJin, setTargetWeightJin] = useState(''); const [targetDate, setTargetDate] = useState(''); const [error, setError] = useState(''); const [saving, setSaving] = useState(false);
-  async function submit(event: FormEvent) { event.preventDefault(); const current = Number(weightJin); const target = Number(targetWeightJin); const waist = waistCm.trim() === '' ? undefined : Number(waistCm); if (!Number.isFinite(current) || current <= 0 || !Number.isFinite(target) || target <= 0 || !targetDate || (waist !== undefined && (!Number.isFinite(waist) || waist <= 0))) { setError('请填写有效的当前体重、目标体重和目标日期'); return; } setSaving(true); setError(''); try { await api.firstSetup(current, waist, target, targetDate); await onComplete(); } catch (err) { setError(errorText(err)); } finally { setSaving(false); } }
-  return <section className="page onboarding-page"><div className="onboarding-card"><span className="onboarding-card__eyebrow">FIRST STEP</span><h1>开始你的第一个目标</h1><p>记录此刻的身体状态，给自己一个清晰又温和的方向。</p><form onSubmit={submit}><label>当前体重（斤）<input aria-label="当前体重（斤）" inputMode="decimal" value={weightJin} onChange={e => setWeightJin(e.target.value)} placeholder="例如 128.6" /></label><label>腰围（厘米，可选）<input aria-label="腰围（厘米，可选）" inputMode="decimal" value={waistCm} onChange={e => setWaistCm(e.target.value)} placeholder="例如 72.5" /></label><label>目标体重（斤）<input aria-label="目标体重（斤）" inputMode="decimal" value={targetWeightJin} onChange={e => setTargetWeightJin(e.target.value)} placeholder="例如 118" /></label><label>目标日期<input aria-label="目标日期" type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : '保存并开始'}</button></form></div></section>;
+  const [weightJin, setWeightJin] = useState('');
+  const [waistCm, setWaistCm] = useState('');
+  const [targetWeightJin, setTargetWeightJin] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [biologicalSex, setBiologicalSex] = useState<TrainingProfile['biologicalSex']>();
+  const [experienceLevel, setExperienceLevel] = useState<TrainingProfile['experienceLevel']>();
+  const [trainingVenues, setTrainingVenues] = useState<TrainingProfile['trainingVenues']>([]);
+  const [sessionMinutes, setSessionMinutes] = useState('30');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const current = Number(weightJin);
+    const target = Number(targetWeightJin);
+    const waist = waistCm.trim() === '' ? undefined : Number(waistCm);
+    const minutes = Number(sessionMinutes);
+    if (!Number.isFinite(current) || current <= 0 || !Number.isFinite(target) || target <= 0 || !targetDate
+      || (waist !== undefined && (!Number.isFinite(waist) || waist <= 0))) {
+      setError('请填写有效的当前体重、目标体重和目标日期。');
+      return;
+    }
+    if (!biologicalSex || !experienceLevel || !trainingVenues.length || !Number.isInteger(minutes) || minutes < 10 || minutes > 180) {
+      setError('请补充生理性别、训练经验、训练场所和单次训练时长。');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await api.firstSetup({
+        weightJin: current,
+        waistCm: waist,
+        targetWeightJin: target,
+        targetDate,
+        trainingProfile: {
+          biologicalSex,
+          experienceLevel,
+          trainingVenues,
+          availableEquipment: [],
+          trainingWeekdays: [],
+          sessionMinutes: minutes,
+          trainingRestrictions: [],
+          coachingTone: 'WARM_DIRECT',
+          nutritionPreferences: [],
+        },
+      });
+      await onComplete();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="page onboarding-page"><div className="onboarding-card"><span className="onboarding-card__eyebrow">FIRST STEP</span><h1>开始你的第一个目标</h1><p>先告诉花爷你平时怎么练；身高、器械和可训练日之后随时补充。</p><form onSubmit={submit}>
+    <label>当前体重（斤）<input aria-label="当前体重（斤）" inputMode="decimal" value={weightJin} onChange={(event) => setWeightJin(event.target.value)} placeholder="例如 128.6" /></label>
+    <label>腰围（厘米，可选）<input aria-label="腰围（厘米，可选）" inputMode="decimal" value={waistCm} onChange={(event) => setWaistCm(event.target.value)} placeholder="例如 72.5" /></label>
+    <label>目标体重（斤）<input aria-label="目标体重（斤）" inputMode="decimal" value={targetWeightJin} onChange={(event) => setTargetWeightJin(event.target.value)} placeholder="例如 118" /></label>
+    <label>目标日期<input aria-label="目标日期" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
+    <fieldset className="onboarding-choice"><legend>生理性别</legend><p>用于训练基线与特殊阶段适配；不愿透露也完全可以。</p><div className="choice-row">{sexOptions.map((option) => <button key={option.value} type="button" aria-pressed={biologicalSex === option.value} className={biologicalSex === option.value ? 'is-active' : ''} onClick={() => setBiologicalSex(option.value)}>{biologicalSex === option.value && <Check />}{option.label}</button>)}</div></fieldset>
+    <fieldset className="onboarding-choice"><legend>训练经验</legend><div className="choice-row">{experienceOptions.map((option) => <button key={option.value} type="button" aria-pressed={experienceLevel === option.value} className={experienceLevel === option.value ? 'is-active' : ''} onClick={() => setExperienceLevel(option.value)}>{experienceLevel === option.value && <Check />}{option.label}</button>)}</div></fieldset>
+    <fieldset className="onboarding-choice"><legend>通常在哪里练</legend><div className="choice-row">{venueOptions.map((option) => <button key={option.value} type="button" aria-pressed={trainingVenues.includes(option.value)} className={trainingVenues.includes(option.value) ? 'is-active' : ''} onClick={() => setTrainingVenues(toggleValue(trainingVenues, option.value))}>{trainingVenues.includes(option.value) && <Check />}{option.label}</button>)}</div></fieldset>
+    <label>单次训练时长（分钟）<input aria-label="单次训练时长（分钟）" type="number" min="10" max="180" value={sessionMinutes} onChange={(event) => setSessionMinutes(event.target.value)} /></label>
+    {error && <p className="form-error" role="alert">{error}</p>}<button className="primary" disabled={saving}>{saving ? '正在保存…' : '保存并开始'}</button>
+  </form></div></section>;
 }
 
 function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => Promise<void>; onLoggedOut: () => void }) {
@@ -436,7 +646,7 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
     restoreFocus.current?.focus();
     setRecordTab(undefined);
   }, []);
-  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} onGenerated={reload} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/ai" element={<AiPage data={data} onOpenRecord={openRecord} onDataChanged={reload} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
+  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} onGenerated={reload} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/report/current" element={<CurrentGoalReportPage onOpenRecord={openRecord} />} /><Route path="/ai" element={<AiPage data={data} onDataChanged={reload} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} reload={reload} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
 function MobileApp() {

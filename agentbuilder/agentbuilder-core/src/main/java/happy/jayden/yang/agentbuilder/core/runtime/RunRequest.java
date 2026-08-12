@@ -19,6 +19,7 @@ public record RunRequest(
     String runId,
     String userId,
     String input,
+    String systemPrompt,
     ResolvedAgentConfig resolvedConfig,
     ModelEndpoint model,
     List<ResolvedTool> tools,
@@ -30,6 +31,7 @@ public record RunRequest(
     runId = text(runId, "runId");
     userId = text(userId, "userId");
     input = text(input, "input");
+    systemPrompt = systemPrompt == null ? "" : systemPrompt.trim();
     Objects.requireNonNull(resolvedConfig, "resolvedConfig");
     Objects.requireNonNull(model, "model");
     tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
@@ -41,6 +43,32 @@ public record RunRequest(
         || !userId.equals(toolExecutionContext.userId())) {
       throw new IllegalArgumentException("trusted tool context must match the run identity");
     }
+  }
+
+  /** Compatibility constructor for callers that have not yet captured a published prompt. */
+  public RunRequest(
+      String runId,
+      String userId,
+      String input,
+      ResolvedAgentConfig resolvedConfig,
+      ModelEndpoint model,
+      List<ResolvedTool> tools,
+      List<Skill> skills,
+      List<Hook> hooks,
+      Memory memory,
+      ToolExecutionContext toolExecutionContext) {
+    this(
+        runId,
+        userId,
+        input,
+        "",
+        resolvedConfig,
+        model,
+        tools,
+        skills,
+        hooks,
+        memory,
+        toolExecutionContext);
   }
 
   public record ModelEndpoint(URI baseUri, String modelName, ModelCredential credential) {

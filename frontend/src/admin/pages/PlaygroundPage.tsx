@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, Bot, CheckCircle2, CircleDashed, LoaderCircle, Rocket } from 'lucide-react';
 
 import { ApiError, admin, type AgentDraft, type WorkbenchSnapshot } from '../api';
-import { AgentRunMessage, consumeAgentRunStream, type AgentRunEvent, type AgentRunUiMessage, type RunApproval } from '../../components/AgentRunMessage';
+import { AgentRunMessage, applyAgentRunEvent, consumeAgentRunStream, type AgentRunEvent, type AgentRunUiMessage } from '../../components/AgentRunMessage';
 import { PageHeading } from '../components/PageHeading';
 
 type ChatMessage = AgentRunUiMessage;
@@ -114,30 +114,16 @@ export function PlaygroundPage() {
   }
 
   function applyEvent(runId: string, event: AgentRunEvent) {
-    setTrace((items) => items.map((item) => {
-      if (item.runId !== runId) return item;
-      if (event.type === 'TEXT_DELTA') return { ...item, content: item.content + String(event.data.delta ?? '') };
-      if (event.type === 'RUN_STATE' && event.data.summary) {
-        const progress = [...(item.progress ?? [])];
-        const summary = String(event.data.summary);
-        if (!progress.includes(summary)) progress.push(summary);
-        return { ...item, progress };
-      }
-      if (event.type === 'APPROVAL') {
-        const incoming = event.data as unknown as RunApproval;
-        return { ...item, deciding: false, approval: { ...(item.approval ?? incoming), ...incoming } };
-      }
-      return item;
-    }));
+    setTrace((items) => items.map((item) => item.runId === runId ? applyAgentRunEvent(item, event) : item));
     if (event.type === 'ERROR') setSendError(String(event.data.message ?? 'AI 运行失败'));
   }
 
   async function decide(runId: string, approvalId: string, decision: 'APPROVE' | 'REJECT') {
-    setTrace((items) => items.map((item) => item.runId === runId ? { ...item, deciding: true } : item));
+    setTrace((items) => items.map((item) => item.runId === runId ? { ...item, deciding: true, decidingApprovalId: approvalId } : item));
     try {
       await admin.decidePlaygroundRunApproval(runId, approvalId, decision, crypto.randomUUID());
     } catch (caught) {
-      setTrace((items) => items.map((item) => item.runId === runId ? { ...item, deciding: false } : item));
+      setTrace((items) => items.map((item) => item.runId === runId ? { ...item, deciding: false, decidingApprovalId: undefined } : item));
       setSendError(caught instanceof Error ? caught.message : '确认操作失败');
     }
   }

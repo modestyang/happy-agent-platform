@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); source "$SCRIPT_DIR/common.sh"
-backup() {
+backup_core() {
   local timestamp pending complete release release_id manifest_hash
   timestamp=${HAPPY_AGENT_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
   [[ "$timestamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die "unsafe backup timestamp"
@@ -25,4 +25,4 @@ backup() {
   mv -Tf -- "$pending" "$complete"
   log "backup created at $complete"
 }
-with_lock backup
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then with_lock backup_core; fi

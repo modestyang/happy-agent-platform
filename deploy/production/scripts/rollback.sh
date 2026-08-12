@@ -7,8 +7,16 @@ rollback() {
   target=$(release_path "$1"); [ -d "$target" ] || die "release is missing"; verify_manifest "$target" .env compose.yml nginx.conf
   [ ! -L "$HAPPY_AGENT_ROOT/current" ] || old=$(current_release)
   if compose_release "$target" up -d --no-deps app nginx && all_services_healthy "$target"; then switch_current "$target"; log "rollback selected: $1"; return; fi
-  compose_release "$target" stop app nginx
-  if [ -n "$old" ]; then compose_release "$old" up -d --no-deps app nginx && all_services_healthy "$old" && switch_current "$old"; fi
-  die "rollback target is unhealthy"
+  if recover_previous "$target" "$old"; then die "rollback target is unhealthy; previous release recovered"; fi
+  die "rollback target is unhealthy; previous release recovery failed"
+}
+recover_previous() {
+  local attempted=$1 previous=$2
+  compose_release "$attempted" stop app nginx || log "attempted rollback stop failed; continuing recovery"
+  [ -n "$previous" ] || return 1
+  compose_release "$previous" up -d --no-deps app nginx || return 1
+  all_services_healthy "$previous" || return 1
+  switch_current "$previous"
+  log "previous release recovered"
 }
 with_lock rollback "$@"

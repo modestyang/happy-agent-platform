@@ -32,6 +32,7 @@ export HAPPY_AGENT_HEALTH_ATTEMPTS=1
 export HAPPY_AGENT_HEALTH_INTERVAL=0
 export FAKE_LOG="$LOG"
 export FAKE_STATE="$TMP/state"
+export HAPPY_AGENT_TEST_SYSTEM_ROOT="$TMP"
 printf 'ID=ubuntu\nVERSION_ID="22.04"\n' >"$HAPPY_AGENT_OS_RELEASE_PATH"
 
 fake() { cat >"$FAKE/$1"; chmod +x "$FAKE/$1"; }
@@ -69,7 +70,16 @@ if [ "${1:-}" = --check ]; then
   done <"$1"
   exit 0
 fi
+[ "$#" -gt 0 ] || { /usr/bin/shasum -a 256; exit 0; }
 for file in "$@"; do /usr/bin/shasum -a 256 "$file" | sed "s#  $file#  $file#"; done
+EOF
+fake stat <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ] && [ "${2:-}" = %s ]; then printf '2147483648\n'; else /usr/bin/stat "$@"; fi
+EOF
+fake file <<'EOF'
+#!/usr/bin/env bash
+printf 'Linux swap file\n'
 EOF
 fake uname <<'EOF'
 #!/usr/bin/env bash
@@ -84,7 +94,7 @@ fake curl <<'EOF'
 printf 'curl %s\n' "$*" >>"$FAKE_LOG"
 case "$*" in
   *gpg*) printf key;;
-  *'acme-challenge/'*) url=${!#}; printf '%s' "${url##*/}";;
+  *'acme-challenge/'*) [ "${FAKE_ACME_FAIL:-0}" = 1 ] && exit 1; url=${!#}; printf '%s' "${url##*/}";;
   *'/api/app/bootstrap'*) printf '401';;
   *'/admin'*) printf '401';;
   *'/api/app/events'*) printf '401';;
@@ -113,7 +123,7 @@ fake openssl <<'EOF'
 printf 'openssl %s\n' "$*" >>"$FAKE_LOG"
 case "$*" in
   *'rand -hex'*) printf '0123456789abcdef0123456789abcdef\n';;
-  *'-ext subjectAltName'*) printf 'X509v3 Subject Alternative Name: IP Address:39.101.65.254\n';;
+  *'-ext subjectAltName'*) printf 'IP Address:39.101.65.254\n';;
   *'-enddate'*) printf 'notAfter=Dec 31 23:59:59 2099 GMT\n';;
   *'-checkend'*) exit "${FAKE_CERT_EXPIRES:-0}";;
   *) exit 0;;
@@ -123,10 +133,11 @@ fake docker <<'EOF'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >>"$FAKE_LOG"
 case "$*" in
+  *' renew '*) if [ "${FAKE_RENEW_FAIL:-0}" = 1 ]; then exit 1; fi;;
   *'certbot'*)
     if [[ "$*" == *happy-agent-ip-staging* ]]; then d="$HAPPY_AGENT_ROOT/certificates/staging/live/happy-agent-ip-staging"; else d="$HAPPY_AGENT_ROOT/certificates/production/live/happy-agent-ip"; fi
     mkdir -p "$d"; : >"$d/fullchain.pem"; : >"$d/privkey.pem"; : >"$d/cert.pem"; : >"$d/chain.pem";;
-  *' psql '* ) if [ "${FAKE_PSQL_OUTPUT:-0}" != 0 ]; then printf '%s\n' "$FAKE_PSQL_OUTPUT"; elif [[ "$*" == *flyway_schema_history* ]]; then printf '0|0|0|0\n'; elif [[ "$*" == *pg_namespace* ]]; then printf '0\n0\n0\n'; else printf '0\n'; fi;;
+  *' psql '* ) if [ "${FAKE_PSQL_OUTPUT:-0}" != 0 ]; then printf '%s\n' "$FAKE_PSQL_OUTPUT"; elif [[ "$*" == *flyway_schema_history* ]]; then printf '0|0|0|0\n'; elif [[ "$*" == *pg_namespace* ]]; then printf '0\n0\n0\n0\n0\n0\n0\n'; else printf '0\n'; fi;;
   *'compose '*ps*)
     [ "${FAKE_HEALTH_FAIL:-0}" = 1 ] || case "$*" in *postgres*) printf 'postgres running healthy\n';; *nginx*) printf 'nginx running healthy\n';; *app*) printf 'app running healthy\n';; *) printf 'postgres running healthy\napp running healthy\nnginx running healthy\n';; esac;;
 esac
@@ -225,7 +236,8 @@ tar -C "$TMP/media-source" -cf "$bundle/media.tar" .
 printf 'master-key-fixture\000bytes' >"$bundle/agent-master-key"
 media_hash=$(sha256sum "$bundle/media.tar" | awk '{print $1}')
 key_hash=$(sha256sum "$bundle/agent-master-key" | awk '{print $1}')
-printf 'fitness_history_count=0\nagent_history_count=0\napplication_table_count=0\nkey_object_count=0\nmedia_sha256=%s\nmaster_key_sha256=%s\n' "$media_hash" "$key_hash" >"$bundle/metadata.env"
+tree_hash=$(cd "$TMP/media-source" && find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256sum "$file"; done | sha256sum | awk '{print $1}')
+printf 'fitness_history_count=0\nagent_history_count=0\napplication_table_count=0\nkey_object_count=0\nmedia_sha256=%s\nmedia_tree_sha256=%s\nmaster_key_sha256=%s\n' "$media_hash" "$tree_hash" "$key_hash" >"$bundle/metadata.env"
 (cd "$bundle" && sha256sum initial.dump media.tar agent-master-key metadata.env >SHA256SUMS)
 expect_fail "$SCRIPTS/restore-initial-data.sh" "$TMP/no-bundle" --initial-empty-target
 expect_fail "$SCRIPTS/restore-initial-data.sh" "$bundle"
@@ -237,13 +249,19 @@ FAKE_PSQL_OUTPUT=0 "$SCRIPTS/restore-initial-data.sh" "$bundle" --initial-empty-
 assert_not_contains "$LOG" "pg_restore --clean"
 assert_not_contains "$LOG" "pg_restore --create"
 assert_contains "$LOG" "pg_restore --exit-on-error"
+assert_contains "$LOG" "n.nspname not in ('information_schema','public')"
+assert_contains "$LOG" "pg_default_acl"
 assert_file_mode "$HAPPY_AGENT_ROOT/secrets/agent-master-key" 600
 cmp "$bundle/agent-master-key" "$HAPPY_AGENT_ROOT/secrets/agent-master-key" || fail "master key was not byte copied"
+[ -f "$HAPPY_AGENT_ROOT/data/media/file" ] || fail "staged media was not committed"
 
 : >"$LOG"
 "$SCRIPTS/activate-release.sh" new
 [ "$(readlink "$HAPPY_AGENT_ROOT/current")" = releases/new ] || fail "activation did not select healthy release"
 assert_contains "$LOG" "pg_dump"
+backup_line=$(grep -n 'pg_dump' "$LOG" | head -n1 | cut -d: -f1)
+replacement_line=$(grep -n ' up -d postgres app nginx' "$LOG" | head -n1 | cut -d: -f1)
+[ "$backup_line" -lt "$replacement_line" ] || fail "backup did not precede replacement"
  [ "$(grep -Fc 'flock -x 9' "$LOG")" = 1 ] || fail "activate to backup lock was not re-entrant"
 assert_contains "$LOG" "compose -p happy-agent --env-file $HAPPY_AGENT_ROOT/releases/new/.env -f $HAPPY_AGENT_ROOT/releases/new/compose.yml up -d"
 ln -sfn releases/old "$HAPPY_AGENT_ROOT/current"
@@ -259,6 +277,10 @@ assert_not_contains "$LOG" "pg_dump"
 assert_not_contains "$LOG" " postgres "
 
 : >"$LOG"
+FAKE_ACME_FAIL=1 expect_fail "$SCRIPTS/issue-certificate.sh"
+[ -z "$(find "$HAPPY_AGENT_ROOT/data/acme-webroot/.well-known/acme-challenge" -type f -print -quit)" ] || fail "failed ACME proof leaked challenge"
+assert_not_contains "$LOG" 'certbot'
+: >"$LOG"
 "$SCRIPTS/issue-certificate.sh"
 staging_line=$(grep -n 'happy-agent-ip-staging' "$LOG" | head -n1 | cut -d: -f1)
 production_line=$(grep -n 'happy-agent-ip' "$LOG" | grep -v staging | head -n1 | cut -d: -f1)
@@ -268,7 +290,9 @@ assert_contains "$LOG" '--ip-address 39.101.65.254'
 assert_contains "$LOG" '--email modest_yang@126.com'
 assert_contains "$LOG" 'systemctl enable --now happy-agent-cert-renew.timer'
 : >"$LOG"
-FAKE_CERT_EXPIRES=1 expect_fail "$SCRIPTS/renew-certificate.sh"
+FAKE_RENEW_FAIL=1 FAKE_CERT_EXPIRES=1 expect_fail "$SCRIPTS/renew-certificate.sh"
+assert_contains "$HAPPY_AGENT_ROOT/logs/cert-renew.log" 'renewal-failed-expiring'
+unset FAKE_RENEW_FAIL
 FAKE_CERT_EXPIRES=0 "$SCRIPTS/renew-certificate.sh"
 assert_contains "$LOG" 'renew --preferred-profile shortlived'
 assert_contains "$LOG" 'nginx -t'

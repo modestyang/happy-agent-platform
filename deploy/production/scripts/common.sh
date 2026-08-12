@@ -27,6 +27,16 @@ validate_absolute_path() {
   case "$1" in ''|/|~*|*'?'*|*'['*|*'*'*|!/*) die "unsafe absolute path";; esac
   realpath -m -- "$1"
 }
+validate_system_path() {
+  local path
+  path=$(validate_absolute_path "$1")
+  case "$path" in
+    "$HAPPY_AGENT_ROOT"/*|/etc/*|/var/lib/*|/swapfile) ;;
+    "${HAPPY_AGENT_TEST_SYSTEM_ROOT:-/__not_a_root}"/*) ;;
+    *) die "system path escapes approved parents";;
+  esac
+  printf '%s\n' "$path"
+}
 validate_descendant() {
   local target root
   root=$(realpath -m -- "$HAPPY_AGENT_ROOT")
@@ -62,7 +72,6 @@ verify_manifest() {
   for path in "$@"; do case "|$seen|" in *"|$path|"*) ;; *) die "consumed file missing from manifest: $path";; esac; done
 }
 with_lock() {
-  if [ "${HAPPY_AGENT_LOCK_FD:-}" = 9 ] && { : >&9; } 2>/dev/null; then "$@"; return; fi
   validate_root
   HAPPY_AGENT_LOCK_FILE=$(validate_absolute_path "$HAPPY_AGENT_LOCK_FILE")
   mkdir -p -- "$HAPPY_AGENT_ROOT"
@@ -71,10 +80,7 @@ with_lock() {
   mkdir -p -- "$lock_parent"
   exec 9>"$HAPPY_AGENT_LOCK_FILE"
   flock -x 9
-  (
-    export HAPPY_AGENT_LOCK_FD=9
-    "$@"
-  )
+  "$@"
 }
 compose_release() {
   local release
@@ -115,7 +121,7 @@ validate_certificate() {
   require_file "$directory/privkey.pem"
   require_file "$directory/cert.pem"
   require_file "$directory/chain.pem"
-  openssl x509 -in "$directory/cert.pem" -noout -ext subjectAltName | awk '/IP Address:/{for (i=1;i<=NF;i++) if ($i == "IP" || $i ~ /^IP/) print $i}' | grep -Fx 'IP' >/dev/null || openssl x509 -in "$directory/cert.pem" -noout -ext subjectAltName | grep -Eq '(^|[^0-9])IP Address:39\.101\.65\.254([^0-9]|$)'
+  openssl x509 -in "$directory/cert.pem" -noout -ext subjectAltName | tr ',' '\n' | sed -n 's/^[[:space:]]*IP Address:\([0-9.]*\)[[:space:]]*$/\1/p' | grep -Fx '39.101.65.254' >/dev/null
   openssl x509 -in "$directory/fullchain.pem" -noout -checkend 172800
   [ "$(openssl x509 -in "$directory/cert.pem" -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')" = "$(openssl pkey -in "$directory/privkey.pem" -pubout -outform DER | sha256sum | awk '{print $1}')" ] || die "certificate and private key do not match"
   openssl verify -CAfile "$directory/chain.pem" -untrusted "$directory/chain.pem" "$directory/cert.pem" >/dev/null

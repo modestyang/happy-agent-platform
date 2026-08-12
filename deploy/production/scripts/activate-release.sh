@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/backup.sh"
 activate() {
   [ "$#" = 1 ] || die "usage: activate-release.sh RELEASE_ID"
   local target old='' image attempt attempts interval
   target=$(release_path "$1"); [ -d "$target" ] || die "release is missing"; verify_manifest "$target" .env compose.yml nginx.conf
   [ ! -L "$HAPPY_AGENT_ROOT/current" ] || old=$(current_release)
-  "$SCRIPT_DIR/backup.sh"
+  backup_core
   for image in "$target"/images/*.tar; do [ -e "$image" ] || continue; docker load -i "$image"; done
   attempts=${HAPPY_AGENT_HEALTH_ATTEMPTS:-12}; interval=${HAPPY_AGENT_HEALTH_INTERVAL:-5}
   compose_release "$target" up -d postgres app nginx
@@ -16,11 +17,17 @@ activate() {
     fi
     sleep "$interval"
   done
-  compose_release "$target" stop app nginx || log "attempted release stop failed"
-  if [ -n "$old" ]; then
-    compose_release "$old" up -d app nginx && all_services_healthy "$old" && switch_current "$old" || log "old release recovery failed"
-  fi
-  die "release activation failed"
+  if recover_previous "$target" "$old"; then die "release activation failed; previous release recovered"; fi
+  die "release activation failed; previous release recovery failed"
+}
+recover_previous() {
+  local attempted=$1 previous=$2 stop_ok=0
+  compose_release "$attempted" stop app nginx && stop_ok=1 || log "attempted release stop failed; continuing recovery"
+  [ -n "$previous" ] || return 1
+  compose_release "$previous" up -d app nginx || return 1
+  all_services_healthy "$previous" || return 1
+  switch_current "$previous"
+  log "previous release recovered after attempted stop=$stop_ok"
 }
 public_smoke() {
   local endpoint code

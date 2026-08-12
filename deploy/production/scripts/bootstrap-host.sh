@@ -17,11 +17,19 @@ preflight() {
 }
 bootstrap() {
   preflight
+  HAPPY_AGENT_FSTAB_PATH=$(validate_system_path "$HAPPY_AGENT_FSTAB_PATH")
+  HAPPY_AGENT_SWAPFILE=$(validate_system_path "$HAPPY_AGENT_SWAPFILE")
+  HAPPY_AGENT_SYSTEMD_UNIT_DIR=$(validate_system_path "$HAPPY_AGENT_SYSTEMD_UNIT_DIR")
+  HAPPY_AGENT_APT_KEYRING_DIR=$(validate_system_path "$HAPPY_AGENT_APT_KEYRING_DIR")
+  HAPPY_AGENT_APT_SOURCES_DIR=$(validate_system_path "$HAPPY_AGENT_APT_SOURCES_DIR")
   apt-get update
   apt-get install -y ca-certificates curl gnupg openssl tar
   require_command curl; require_command gpg
   install -d -m 0755 "$HAPPY_AGENT_APT_KEYRING_DIR" "$HAPPY_AGENT_APT_SOURCES_DIR"
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o "$HAPPY_AGENT_APT_KEYRING_DIR/docker.gpg"
+  key_tmp=$(validate_system_path "$HAPPY_AGENT_APT_KEYRING_DIR/.docker.gpg.$$")
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor >"$key_tmp"
+  chmod 0644 "$key_tmp"
+  mv -Tf -- "$key_tmp" "$HAPPY_AGENT_APT_KEYRING_DIR/docker.gpg"
   printf 'deb [arch=amd64 signed-by=%s/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable\n' "$HAPPY_AGENT_APT_KEYRING_DIR" >"$HAPPY_AGENT_APT_SOURCES_DIR/docker.list"
   apt-get update
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -32,6 +40,10 @@ bootstrap() {
     swapon "$HAPPY_AGENT_SWAPFILE"
   elif [ ! -s "$HAPPY_AGENT_SWAPFILE" ]; then
     die "existing swapfile is empty"
+  elif [ "$(stat -c %s "$HAPPY_AGENT_SWAPFILE")" != 2147483648 ]; then
+    die "existing swapfile is not 2GB"
+  elif ! file -b "$HAPPY_AGENT_SWAPFILE" | grep -qi 'swap'; then
+    die "existing swapfile has no swap signature"
   elif ! swapon --show=NAME | grep -Fxq "$HAPPY_AGENT_SWAPFILE"; then
     swapon "$HAPPY_AGENT_SWAPFILE"
   fi

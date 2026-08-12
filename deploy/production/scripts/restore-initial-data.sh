@@ -2,7 +2,9 @@
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); source "$SCRIPT_DIR/common.sh"
 
-bundle_value() { sed -n "s/^$2=\([0-9a-fA-F][0-9a-fA-F]*\)$/\1/p" "$1/metadata.env"; }
+bundle_count() { sed -n "s/^$2=\([0-9][0-9]*\)$/\1/p" "$1/metadata.env"; }
+bundle_hash() { sed -n "s/^$2=\([a-fA-F0-9]\{64\}\)$/\1/p" "$1/metadata.env"; }
+tree_hash() { (cd "$1" && find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256sum "$file"; done | sha256sum | awk '{print $1}'); }
 require_bundle_manifest() {
   local bundle=$1 hash member actual listed=''
   while IFS=' ' read -r hash member; do
@@ -22,14 +24,14 @@ require_bundle_manifest() {
 }
 restore() {
   [ "$#" = 2 ] && [ "$2" = --initial-empty-target ] || die "usage: restore-initial-data.sh BUNDLE --initial-empty-target"
-  local original=$1 bundle release staging media expected_fitness expected_agent expected_tables expected_objects expected_media expected_key actual
+  local original=$1 bundle release staging media expected_fitness expected_agent expected_tables expected_objects expected_media expected_tree expected_key actual
   case "$original" in ''|~*|*'?'*|*'['*|*'*'*|!/*) die "bundle must be a safe absolute path";; esac
   bundle=$(realpath -m -- "$original"); [ -d "$bundle" ] || die "migration bundle is missing"
   require_file "$bundle/SHA256SUMS"; require_bundle_manifest "$bundle"
-  expected_fitness=$(bundle_value "$bundle" fitness_history_count); expected_agent=$(bundle_value "$bundle" agent_history_count)
-  expected_tables=$(bundle_value "$bundle" application_table_count); expected_objects=$(bundle_value "$bundle" key_object_count)
-  expected_media=$(bundle_value "$bundle" media_sha256); expected_key=$(bundle_value "$bundle" master_key_sha256)
-  for actual in "$expected_fitness" "$expected_agent" "$expected_tables" "$expected_objects" "$expected_media" "$expected_key"; do [ -n "$actual" ] || die "invalid bundle metadata"; done
+  expected_fitness=$(bundle_count "$bundle" fitness_history_count); expected_agent=$(bundle_count "$bundle" agent_history_count)
+  expected_tables=$(bundle_count "$bundle" application_table_count); expected_objects=$(bundle_count "$bundle" key_object_count)
+  expected_media=$(bundle_hash "$bundle" media_sha256); expected_tree=$(bundle_hash "$bundle" media_tree_sha256); expected_key=$(bundle_hash "$bundle" master_key_sha256)
+  for actual in "$expected_fitness" "$expected_agent" "$expected_tables" "$expected_objects" "$expected_media" "$expected_tree" "$expected_key"; do [ -n "$actual" ] || die "invalid bundle metadata"; done
   [ "$(sha256sum "$bundle/media.tar" | awk '{print $1}')" = "$expected_media" ] || die "media checksum mismatch"
   [ "$(sha256sum "$bundle/agent-master-key" | awk '{print $1}')" = "$expected_key" ] || die "master key checksum mismatch"
   if ! tar -tf "$bundle/media.tar" >/dev/null; then die "invalid media archive"; fi
@@ -40,16 +42,21 @@ restore() {
   staging=$(validate_descendant "$HAPPY_AGENT_ROOT/data/.restore-media-$$")
   install -d -m 0700 "$staging"
   tar -C "$staging" -xf "$bundle/media.tar"
+  [ "$(tree_hash "$staging")" = "$expected_tree" ] || die "staged media checksum mismatch"
   release=$(current_release)
   service_healthy "$release" postgres || die "PostgreSQL is not healthy"
-  [ "$(compose_release "$release" exec -T postgres psql -Atqc "select count(*) from pg_namespace n where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'; select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'; select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema';")" = '0
+  [ "$(compose_release "$release" exec -T postgres psql -Atqc "select count(*) from pg_namespace n where n.nspname !~ '^pg_' and n.nspname not in ('information_schema','public'); select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'; select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind='S' and n.nspname !~ '^pg_' and n.nspname <> 'information_schema'; select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'; select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'; select count(*) from pg_roles where rolname in ('fitness_owner','agent_owner','fitness_user','agent_user'); select count(*) from pg_default_acl;")" = '0
 0
-0' ] || die "target contains application schemas or user objects"
+0
+0
+0
+0
+0' ] || die "target contains application schemas, roles, ACLs, or user objects"
   compose_release "$release" exec -T postgres pg_restore --exit-on-error -U postgres -d happy_agent <"$bundle/initial.dump"
   compose_release "$release" exec -T postgres psql -v ON_ERROR_STOP=1 -f /usr/local/share/happy-agent-enforce-isolation.sql
   actual=$(compose_release "$release" exec -T postgres psql -Atqc 'select (select count(*) from fitness.flyway_schema_history), (select count(*) from agent.flyway_schema_history), (select count(*) from pg_tables where schemaname in (''fitness'',''agent'')), (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in (''fitness'',''agent''))')
   [ "$actual" = "$expected_fitness|$expected_agent|$expected_tables|$expected_objects" ] || die "restore database verification failed"
-  tar -C "$media" -xf "$bundle/media.tar"
+  cp -a "$staging/." "$media/"
   cp -- "$bundle/agent-master-key" "$HAPPY_AGENT_ROOT/secrets/agent-master-key"
   chmod 0600 "$HAPPY_AGENT_ROOT/secrets/agent-master-key"
   [ "$(sha256sum "$HAPPY_AGENT_ROOT/secrets/agent-master-key" | awk '{print $1}')" = "$expected_key" ] || die "restored master key checksum mismatch"

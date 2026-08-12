@@ -31,6 +31,7 @@ export HAPPY_AGENT_TIMESTAMP=20260813T000000Z
 export HAPPY_AGENT_HEALTH_ATTEMPTS=1
 export HAPPY_AGENT_HEALTH_INTERVAL=0
 export FAKE_LOG="$LOG"
+export FAKE_STATE="$TMP/state"
 printf 'ID=ubuntu\nVERSION_ID="22.04"\n' >"$HAPPY_AGENT_OS_RELEASE_PATH"
 
 fake() { cat >"$FAKE/$1"; chmod +x "$FAKE/$1"; }
@@ -42,7 +43,7 @@ fake realpath <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" = -m ] && shift
 [ "${1:-}" = -- ] && shift
-case "$1" in /*) printf '%s\n' "$1";; *) /bin/pwd; esac
+if [ -L "$1" ]; then link=$(/usr/bin/readlink "$1"); case "$link" in /*) printf '%s\n' "$link";; *) printf '%s/%s\n' "$(dirname "$1")" "$link";; esac; else case "$1" in /*) printf '%s\n' "$1";; *) /bin/pwd; esac; fi
 EOF
 fake flock <<'EOF'
 #!/usr/bin/env bash
@@ -60,10 +61,12 @@ EOF
 fake sha256sum <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = --check ]; then
+  shift
+  [ "${1:-}" != --strict ] || shift
   while IFS=' ' read -r expected file; do
     actual=$(/usr/bin/shasum -a 256 "$file" | awk '{print $1}')
     [ "$actual" = "$expected" ] || exit 1
-  done <"$2"
+  done <"$1"
   exit 0
 fi
 for file in "$@"; do /usr/bin/shasum -a 256 "$file" | sed "s#  $file#  $file#"; done
@@ -79,7 +82,14 @@ EOF
 fake curl <<'EOF'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >>"$FAKE_LOG"
-case "$*" in *gpg*) printf key;; *) printf data;; esac
+case "$*" in
+  *gpg*) printf key;;
+  *'acme-challenge/'*) url=${!#}; printf '%s' "${url##*/}";;
+  *'/api/app/bootstrap'*) printf '401';;
+  *'/admin'*) printf '401';;
+  *'/api/app/events'*) printf '401';;
+  *) printf '200';;
+esac
 EOF
 fake gpg <<'EOF'
 #!/usr/bin/env bash
@@ -96,6 +106,7 @@ EOF
 fake swapon <<'EOF'
 #!/usr/bin/env bash
 printf 'swapon %s\n' "$*" >>"$FAKE_LOG"
+if [ "${1:-}" = --show=NAME ]; then [ ! -f "$FAKE_STATE/swap" ] || cat "$FAKE_STATE/swap"; else mkdir -p "$FAKE_STATE"; printf '%s\n' "$1" >"$FAKE_STATE/swap"; fi
 EOF
 fake openssl <<'EOF'
 #!/usr/bin/env bash
@@ -114,9 +125,10 @@ printf 'docker %s\n' "$*" >>"$FAKE_LOG"
 case "$*" in
   *'certbot'*)
     if [[ "$*" == *happy-agent-ip-staging* ]]; then d="$HAPPY_AGENT_ROOT/certificates/staging/live/happy-agent-ip-staging"; else d="$HAPPY_AGENT_ROOT/certificates/production/live/happy-agent-ip"; fi
-    mkdir -p "$d"; : >"$d/fullchain.pem"; : >"$d/privkey.pem";;
-  *' psql '*) printf '%s\n' "${FAKE_PSQL_OUTPUT:-0}";;
-  *'compose '*ps*) [ "${FAKE_HEALTH_FAIL:-0}" = 1 ] || printf 'healthy\n';;
+    mkdir -p "$d"; : >"$d/fullchain.pem"; : >"$d/privkey.pem"; : >"$d/cert.pem"; : >"$d/chain.pem";;
+  *' psql '* ) if [ "${FAKE_PSQL_OUTPUT:-0}" != 0 ]; then printf '%s\n' "$FAKE_PSQL_OUTPUT"; elif [[ "$*" == *flyway_schema_history* ]]; then printf '0|0|0|0\n'; elif [[ "$*" == *pg_namespace* ]]; then printf '0\n0\n0\n'; else printf '0\n'; fi;;
+  *'compose '*ps*)
+    [ "${FAKE_HEALTH_FAIL:-0}" = 1 ] || case "$*" in *postgres*) printf 'postgres running healthy\n';; *nginx*) printf 'nginx running healthy\n';; *app*) printf 'app running healthy\n';; *) printf 'postgres running healthy\napp running healthy\nnginx running healthy\n';; esac;;
 esac
 EOF
 fake systemctl <<'EOF'
@@ -148,10 +160,6 @@ EOF
 fake nginx <<'EOF'
 #!/usr/bin/env bash
 printf 'nginx %s\n' "$*" >>"$FAKE_LOG"
-EOF
-fake swapon <<'EOF'
-#!/usr/bin/env bash
-printf 'swapon %s\n' "$*" >>"$FAKE_LOG"
 EOF
 fake free <<'EOF'
 #!/usr/bin/env bash
@@ -215,7 +223,9 @@ printf 'dump' >"$bundle/initial.dump"
 mkdir "$TMP/media-source"; printf 'media' >"$TMP/media-source/file"
 tar -C "$TMP/media-source" -cf "$bundle/media.tar" .
 printf 'master-key-fixture\000bytes' >"$bundle/agent-master-key"
-printf 'fitness_history_count=0\nagent_history_count=0\n' >"$bundle/metadata.env"
+media_hash=$(sha256sum "$bundle/media.tar" | awk '{print $1}')
+key_hash=$(sha256sum "$bundle/agent-master-key" | awk '{print $1}')
+printf 'fitness_history_count=0\nagent_history_count=0\napplication_table_count=0\nkey_object_count=0\nmedia_sha256=%s\nmaster_key_sha256=%s\n' "$media_hash" "$key_hash" >"$bundle/metadata.env"
 (cd "$bundle" && sha256sum initial.dump media.tar agent-master-key metadata.env >SHA256SUMS)
 expect_fail "$SCRIPTS/restore-initial-data.sh" "$TMP/no-bundle" --initial-empty-target
 expect_fail "$SCRIPTS/restore-initial-data.sh" "$bundle"

@@ -2,6 +2,12 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+compose_file="${project_root}/deploy/production/compose.yml"
+
+if grep -q '/release/current\|}/media\|}/acme-webroot' "${compose_file}"; then
+  echo "Compose must use canonical current and data layout" >&2
+  exit 1
+fi
 temp_parent="${TMPDIR:-/tmp}"
 temp_root="$(mktemp -d "${temp_parent%/}/happy-agent-compose.XXXXXX")"
 
@@ -22,20 +28,20 @@ trap cleanup EXIT
 
 mkdir -p \
   "${temp_root}/data/postgres" \
-  "${temp_root}/media" \
-  "${temp_root}/acme-webroot" \
+  "${temp_root}/data/media" \
+  "${temp_root}/data/acme-webroot" \
   "${temp_root}/certificates" \
-  "${temp_root}/release/current/postgres" \
+  "${temp_root}/current/postgres" \
   "${temp_root}/secrets"
 
 printf 'fake-postgres-password\n' > "${temp_root}/secrets/postgres-password"
 printf 'fake-fitness-password\n' > "${temp_root}/secrets/fitness-db-password"
 printf 'fake-agent-password\n' > "${temp_root}/secrets/agent-db-password"
 printf 'fake-master-key\n' > "${temp_root}/secrets/agent-master-key"
-printf 'events {}\n' > "${temp_root}/release/current/nginx.conf"
-printf '#!/bin/sh\n' > "${temp_root}/release/current/postgres/init-roles.sh"
-printf 'SELECT 1;\n' > "${temp_root}/release/current/postgres/init-roles.sql"
-printf 'SELECT 1;\n' > "${temp_root}/release/current/postgres/enforce-isolation.sql"
+printf 'events {}\n' > "${temp_root}/current/nginx.conf"
+printf '#!/bin/sh\n' > "${temp_root}/current/postgres/init-roles.sh"
+printf 'SELECT 1;\n' > "${temp_root}/current/postgres/init-roles.sql"
+printf 'SELECT 1;\n' > "${temp_root}/current/postgres/enforce-isolation.sql"
 
 export HAPPY_AGENT_ROOT="${temp_root}"
 export POSTGRES_PASSWORD_FILE="${temp_root}/secrets/postgres-password"
@@ -100,6 +106,17 @@ for (const secret of Object.values(config.secrets)) {
   assert(secret.file.startsWith(happyAgentRoot), `secret source beneath temp root: ${secret.file}`);
 }
 assert(services.nginx.volumes.some((volume) => volume.target === '/etc/nginx/conf.d/default.conf' && volume.read_only), 'nginx active config mount');
+function bindSource(service, target) {
+  const volume = service.volumes.find((item) => item.type === 'bind' && item.target === target);
+  assert(volume != null, `missing bind mount for ${target}`);
+  return volume.source;
+}
+assert(bindSource(services.postgres, '/docker-entrypoint-initdb.d/00-init-roles.sh') === `${happyAgentRoot}/current/postgres/init-roles.sh`, 'postgres init role script canonical source');
+assert(bindSource(services.postgres, '/usr/local/share/happy-agent-init-roles.sql') === `${happyAgentRoot}/current/postgres/init-roles.sql`, 'postgres init role SQL canonical source');
+assert(bindSource(services.postgres, '/usr/local/share/happy-agent-enforce-isolation.sql') === `${happyAgentRoot}/current/postgres/enforce-isolation.sql`, 'postgres isolation SQL canonical source');
+assert(bindSource(services.app, '/app/deploy/.local/media') === `${happyAgentRoot}/data/media`, 'app media canonical source');
+assert(bindSource(services.nginx, '/etc/nginx/conf.d/default.conf') === `${happyAgentRoot}/current/nginx.conf`, 'nginx config canonical source');
+assert(bindSource(services.nginx, '/var/www/acme') === `${happyAgentRoot}/data/acme-webroot`, 'ACME webroot canonical source');
 assert(services.nginx.depends_on.app.condition === 'service_healthy', 'nginx app dependency');
 assert(services.app.depends_on.postgres.condition === 'service_healthy', 'app postgres dependency');
 const appHealthcheck = services.app.healthcheck.test.join(' ');

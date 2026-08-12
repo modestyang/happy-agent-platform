@@ -23,12 +23,16 @@ validate_root() {
   HAPPY_AGENT_ROOT=$(realpath -m -- "$HAPPY_AGENT_ROOT")
   export HAPPY_AGENT_ROOT
 }
+validate_absolute_path() {
+  case "$1" in ''|/|~*|*'?'*|*'['*|*'*'*|!/*) die "unsafe absolute path";; esac
+  realpath -m -- "$1"
+}
 validate_descendant() {
   local target root
   root=$(realpath -m -- "$HAPPY_AGENT_ROOT")
   case "$1" in ''|/|~*|*'?'*|*'['*|*'*'*|!/*) die "unsafe path";; esac
   target=$(realpath -m -- "$1")
-  case "$target" in "$root"|"$root"/*) printf '%s\n' "$target";; *) die "path escapes configured root";; esac
+  case "$target" in "$root"/*) printf '%s\n' "$target";; *) die "path must be a root descendant";; esac
 }
 validate_release_id() {
   [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "unsafe release id"
@@ -36,14 +40,31 @@ validate_release_id() {
 }
 release_path() { validate_descendant "$HAPPY_AGENT_ROOT/releases/$(validate_release_id "$1")"; }
 verify_manifest() {
-  local directory
+  local directory line hash path actual seen=''
   directory=$(validate_descendant "$1")
   require_file "$directory/SHA256SUMS"
-  (cd "$directory" && sha256sum --check SHA256SUMS >/dev/null)
+  [ -z "$(find "$directory" ! -type f ! -type d -print -quit)" ] || die "release contains special member"
+  while IFS=' ' read -r hash path; do
+    [[ "$hash" =~ ^[a-fA-F0-9]{64}$ ]] || die "invalid manifest digest"
+    case "$path" in ''|/*|*'..'*|*'?'*|*'['*|*'*'*) die "unsafe manifest member";; esac
+    case "|$seen|" in *"|$path|"*) die "duplicate manifest member";; esac
+    seen="${seen}${path}|"
+    actual=$(validate_descendant "$directory/$path")
+    [ -f "$actual" ] && [ ! -L "$actual" ] || die "manifest member is not a regular file"
+  done <"$directory/SHA256SUMS"
+  [ -n "$seen" ] || die "empty checksum manifest"
+  while IFS= read -r -d '' actual; do
+    path=${actual#"$directory"/}
+    [ "$path" = SHA256SUMS ] || case "|$seen|" in *"|$path|"*) ;; *) die "unmanifested release member";; esac
+  done < <(find "$directory" -type f -print0)
+  (cd "$directory" && sha256sum --check --strict SHA256SUMS >/dev/null)
+  shift
+  for path in "$@"; do case "|$seen|" in *"|$path|"*) ;; *) die "consumed file missing from manifest: $path";; esac; done
 }
 with_lock() {
-  if [ "${HAPPY_AGENT_LOCK_HELD:-}" = 1 ]; then "$@"; return; fi
+  if [ "${HAPPY_AGENT_LOCK_FD:-}" = 9 ] && { : >&9; } 2>/dev/null; then "$@"; return; fi
   validate_root
+  HAPPY_AGENT_LOCK_FILE=$(validate_absolute_path "$HAPPY_AGENT_LOCK_FILE")
   mkdir -p -- "$HAPPY_AGENT_ROOT"
   local lock_parent
   lock_parent=$(dirname -- "$HAPPY_AGENT_LOCK_FILE")
@@ -51,7 +72,7 @@ with_lock() {
   exec 9>"$HAPPY_AGENT_LOCK_FILE"
   flock -x 9
   (
-    export HAPPY_AGENT_LOCK_HELD=1
+    export HAPPY_AGENT_LOCK_FD=9
     "$@"
   )
 }
@@ -61,6 +82,14 @@ compose_release() {
   require_file "$release/.env"
   require_file "$release/compose.yml"
   docker compose -p happy-agent --env-file "$release/.env" -f "$release/compose.yml" "${@:2}"
+}
+service_healthy() {
+  local release=$1 service=$2
+  compose_release "$release" ps --format '{{.Service}} {{.State}} {{.Health}}' "$service" | grep -Fx "$service running healthy" >/dev/null
+}
+all_services_healthy() {
+  local release=$1 service
+  for service in postgres app nginx; do service_healthy "$release" "$service" || return 1; done
 }
 current_release() {
   [ -L "$HAPPY_AGENT_ROOT/current" ] || die "no active release"
@@ -84,7 +113,10 @@ validate_certificate() {
   directory=$(certificate_dir)
   require_file "$directory/fullchain.pem"
   require_file "$directory/privkey.pem"
-  openssl x509 -in "$directory/fullchain.pem" -noout -ext subjectAltName | grep -F 'IP Address:39.101.65.254' >/dev/null
+  require_file "$directory/cert.pem"
+  require_file "$directory/chain.pem"
+  openssl x509 -in "$directory/cert.pem" -noout -ext subjectAltName | awk '/IP Address:/{for (i=1;i<=NF;i++) if ($i == "IP" || $i ~ /^IP/) print $i}' | grep -Fx 'IP' >/dev/null || openssl x509 -in "$directory/cert.pem" -noout -ext subjectAltName | grep -Eq '(^|[^0-9])IP Address:39\.101\.65\.254([^0-9]|$)'
   openssl x509 -in "$directory/fullchain.pem" -noout -checkend 172800
-  openssl verify "$directory/fullchain.pem" >/dev/null
+  [ "$(openssl x509 -in "$directory/cert.pem" -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')" = "$(openssl pkey -in "$directory/privkey.pem" -pubout -outform DER | sha256sum | awk '{print $1}')" ] || die "certificate and private key do not match"
+  openssl verify -CAfile "$directory/chain.pem" -untrusted "$directory/chain.pem" "$directory/cert.pem" >/dev/null
 }

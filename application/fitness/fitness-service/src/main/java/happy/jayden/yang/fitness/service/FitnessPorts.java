@@ -89,9 +89,6 @@ public final class FitnessPorts {
     FitnessDtos.MealRecommendationFeedbackDto upsertMealRecommendationFeedback(
         UUID userId, FitnessDtos.CreateMealRecommendationFeedbackRequest request);
 
-    FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(
-        UUID userId, Instant since);
-
     /** Reads the durable state and the persisted recommendation rows for one local date. */
     Optional<DailyMealPlanStateDto> findDailyMealPlan(UUID userId, LocalDate date);
 

@@ -180,12 +180,6 @@ public final class FitnessDtos {
       Instant createdAt,
       Instant updatedAt) {}
 
-  public record MealRecommendationFeedbackContext(
-      List<String> likedFoods,
-      List<String> dislikedFoods,
-      List<String> dislikeReasons,
-      List<String> notes) {}
-
   public record MealRecommendationDto(
       UUID id,
       LocalDate recommendationDate,

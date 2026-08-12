@@ -94,13 +94,15 @@ function normalizeProposal(value: unknown): TrainingPlanProposal | undefined {
     const date = text(day.date) || text(day.scheduledFor);
     if (!date) return [];
     const rawExercises = Array.isArray(day.exercises) ? day.exercises : [];
-    const exercises = rawExercises.flatMap((rawExercise) => {
+    const exercises = rawExercises.flatMap((rawExercise, index) => {
       const exercise = asRecord(rawExercise);
       const exerciseId = text(exercise?.exerciseId) || text(exercise?.id);
-      return exerciseId ? [{ exerciseId, name: text(exercise?.name) || exerciseId }] : [];
+      return exerciseId ? [{ exerciseId, name: text(exercise?.name).trim() || `动作 ${index + 1}` }] : [];
     });
     if (!exercises.length && Array.isArray(day.exerciseIds)) {
-      exercises.push(...day.exerciseIds.filter((id): id is string => typeof id === 'string').map((exerciseId) => ({ exerciseId, name: exerciseId })));
+      exercises.push(...day.exerciseIds
+        .filter((id): id is string => typeof id === 'string')
+        .map((exerciseId, index) => ({ exerciseId, name: `动作 ${index + 1}` })));
     }
     return [{ date, title: text(day.title) || '训练计划', estimatedMinutes: Number(day.estimatedMinutes) || 0, exercises }];
   });
@@ -193,7 +195,12 @@ export function AgentRunMessage({
   const hasMatchingStructuredConfirmation = Boolean(approval && message.blocks?.some((block) => {
     return isRenderableConfirmationBlock(block) && block.confirmationId === approval.approvalId;
   }));
+  const replyStarted = Boolean(message.content.trim() || message.blocks?.length || approval);
   return <div className={className}>
+    {progress.length > 0 && <details className="run-progress" open={!replyStarted}>
+      <summary>处理进度</summary>
+      <ul>{progress.map((item) => <li key={item}>{item}</li>)}</ul>
+    </details>}
     <ChatMarkdown text={message.content} className={markdownClassName} />
     {message.blocks?.map((block, index) => <AiContentRenderer
       key={`structured-${index}`}
@@ -204,10 +211,6 @@ export function AgentRunMessage({
         onConfirm: onDecision ? (confirmationId) => onDecision(confirmationId, 'APPROVE') : undefined,
       }}
     />)}
-    {progress.length > 0 && <details className="run-progress">
-      <summary>处理进度</summary>
-      <ul>{progress.map((item) => <li key={item}>{item}</li>)}</ul>
-    </details>}
     {approval && !hasMatchingStructuredConfirmation && <ConfirmationCard
       deciding={message.deciding}
       model={{

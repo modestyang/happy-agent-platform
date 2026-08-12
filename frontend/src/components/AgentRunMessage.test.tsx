@@ -11,6 +11,24 @@ describe('AgentRunMessage', () => {
     expect(second.events[0]?.data.delta).toBe('## 计划');
   });
 
+  it('expands progress before reply output and collapses it when the reply starts', () => {
+    const progressOnly: AgentRunUiMessage = {
+      role: 'assistant',
+      content: '',
+      progress: ['正在理解你的需求', '正在查看相关记录'],
+    };
+    const { rerender } = render(<AgentRunMessage message={progressOnly} />);
+    const progress = screen.getByText('处理进度').closest('details') as HTMLDetailsElement;
+
+    expect(progress).toHaveAttribute('open');
+
+    rerender(<AgentRunMessage message={{ ...progressOnly, content: '训练建议开始输出' }} />);
+
+    const reply = screen.getByText('训练建议开始输出');
+    expect(progress).not.toHaveAttribute('open');
+    expect(progress.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('keeps execution progress collapsed and asks before saving a proposal', () => {
     const decide = vi.fn();
     const message: AgentRunUiMessage = {
@@ -28,6 +46,43 @@ describe('AgentRunMessage', () => {
     expect(screen.getByText('处理进度').closest('details')).not.toHaveAttribute('open');
     fireEvent.click(screen.getByRole('button', { name: '确认并保存' }));
     expect(decide).toHaveBeenCalledWith('approval-1', 'APPROVE');
+  });
+
+  it('uses readable fallback labels instead of exercise ids in historical approvals', () => {
+    const exerciseId = '60000000-0000-0000-0000-000000000001';
+    const completed = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      {
+        type: 'APPROVAL',
+        data: {
+          approvalId: 'approval-legacy',
+          status: 'REQUESTED',
+          title: '保存训练计划',
+          proposal: {
+            scope: 'WEEK',
+            days: [
+              {
+                scheduledFor: '2026-08-13',
+                title: '历史计划',
+                estimatedMinutes: 20,
+                exerciseIds: [exerciseId],
+              },
+              {
+                scheduledFor: '2026-08-14',
+                title: '空名称计划',
+                estimatedMinutes: 20,
+                exercises: [{ exerciseId, name: '  ' }],
+              },
+            ],
+          },
+        },
+      },
+    );
+
+    render(<AgentRunMessage message={completed} onDecision={vi.fn()} />);
+
+    expect(screen.getAllByText(/动作 1/)).toHaveLength(2);
+    expect(screen.queryByText(new RegExp(exerciseId))).not.toBeInTheDocument();
   });
 
   it('hides provider thinking and reduces internal events to fixed business stages', () => {

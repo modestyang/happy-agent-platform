@@ -224,3 +224,46 @@
 - 收尾定向套件 5 文件 56/56 通过，TypeScript、ESLint、生产构建和 `git diff --check` 均通过；构建仅保留既有的大包体积提示。
 - 全量前端测试 127/128 通过；唯一失败是并行改动中的 `MealRecommendationPage.test.tsx` 重试状态断言，单独运行仍可复现，未纳入本轮训练修复。
 - 本地已登录账号没有可进入的训练计划，未创建或保存验收数据；媒体、计时、节拍/静音和声音预设由集成测试覆盖，真实设备音色观感待有计划数据后手工验收。
+# 2026-08-12 训练计划确认卡、全身候选查询与聊天字号修复
+
+- 用户已确认方案 C、字号边界、书面规格并要求继续开发。
+- 已创建隔离 worktree 分支 `codex/workout-plan-confirmation-readability`。
+- 当前准备运行相关基线测试，尚未修改生产代码。
+- 首轮并行基线暴露 worktree 初始化和 Maven 共享 target 竞争；已确认与源码无关，改为依赖复用与 Maven 串行重跑。
+- 串行基线通过：Fitness/Tool 17 项、Runtime 6 项、前端 49 项；Task 1 已只添加“全身”行为与 Tool schema 测试，准备验证 RED。
+- Task 1 RED 已确认：单独“全身”抛出“未知目标部位”，混用也未返回明确冲突；已实现归一为空 focus list、混用拒绝和 Tool schema 说明。
+- Task 1 GREEN 已确认：Fitness service 与 Tool 18 项通过。Task 2 已添加完整 Runtime 集成测试，等待 RED。
+- Task 2 首次运行因测试夹具 Schema 注解缺失而报错，尚不计为 RED；已修正夹具，不改生产代码。
+- Task 2 RED 已确认：旧 approval proposal 不含可展示的 exercises。已实现白名单 Tool 名称收集与独立展示 proposal，冻结 arguments 未修改。
+- Task 2 GREEN 已确认：Runtime 7 项通过。Task 3 已添加历史/空名称 UUID 降级和真实 CSS 字号测试，等待 RED。
+- Task 3 RED 已确认：历史卡片仍渲染 UUID/空名称，AI 正文计算字号仍为 12px。
+- Task 3 GREEN 已确认：历史/缺名动作统一显示“动作 N”，AI 页面按正文 16px、卡片/进度/建议词 14px、辅助说明 11px 分级；定向前端 51/51 通过。
+- 收尾验证通过：Fitness/Tool 定向 18/18、Runtime 定向 7/7、前端定向 51/51、前端全量 130/130、Maven 全量与架构边界均零失败；TypeScript、ESLint、生产构建、Spotless check、编译和 `git diff --check` 通过。
+- Maven Testcontainers 测试退出时仍输出既有后台 Worker 访问已关闭容器的噪声日志，但两轮 Maven 最终退出码均为 0；本轮未触及 Worker 生命周期。
+- 独立审查发现名称来源还需验证当前 Run 的真实 Tool 绑定；新增未绑定同名事件 RED 后，已按精确 Tool key 收紧 provenance，Runtime 8/8 通过，复审 Critical/Important 为零。
+- 字号正文选择器已进一步显式限定到 `.ai-page`，页面外作用域回归通过；修复后的 Maven 全量、架构边界和前端全量 130/130 再次通过。
+- 页面验收反馈确认处理进度的时序不合理；根因是组件把进度渲染在正文和结构化内容之后且始终默认收起。已确认采用派生方案：进度固定在回复前，只有进度时自动展开，首段正文/结构化内容/审批出现后自动收起。
+- 处理进度交互已完成 RED/GREEN：旧实现因缺少 `open` 精确失败；新实现由现有消息内容派生状态，回复前自动展开，正文/结构化内容/审批出现后自动收起，并始终排在回复前。
+- 全量前端 131/131、TypeScript、ESLint、生产构建与 `git diff --check` 通过；390×844 真实流页面先观察到展开的两步流转，再观察到首段正文出现时自动收起且位置在正文上方，浏览器控制台无 warning/error。
+
+## 2026-08-12 已注册 Tool 历史兼容与使用情况审计
+
+- 已启动只读审计；不删除代码、不修改发布配置或数据库。
+- 当前阶段正在枚举源码注册点、历史别名和 AgentScope/Harness 内部 Tool。
+- 已完成 23 个业务 Tool 的源码、v1–v16 发布快照、四个当前 Skill 和真实 Run Trace 交叉审计。
+- 确认 5 个迁移后可删除的历史 Tool：`fitness.profile.query`、`fitness.workout.query`、`fitness.meal.query`、`fitness.meal.feedback_context`、`fitness.exercise.search`；其余 18 个均对应当前 Skill 或写入确认能力。
+
+## 2026-08-12 历史 Tool 统一清理
+
+- 用户明确授权统一删除 5 个历史 Tool、修改 Agent V1 baseline、做简单功能验证并推送 `main`。
+- 已确认工作区当前分支 `codex/workout-plan-confirmation-readability` 与本地主 `main` 同起点，连续需求改动尚未提交；远端 `origin/main` 仍落后本地一个既有提交。
+- 已开始按“测试契约先红灯 → 删除实现和配置 → 全量验证 → 合并推送”顺序实施。
+- 已写入清理设计 `docs/superpowers/specs/2026-08-12-fitness-agent-legacy-tool-removal-design.md` 和实施计划 `docs/superpowers/plans/2026-08-12-fitness-agent-legacy-tool-removal.md`，自检未发现占位符、范围矛盾或类型命名不一致。
+- RED 已验证：`./mvnw -pl starter -am -Dtest=FitnessToolsTest -Dsurefire.failIfNoSpecifiedTests=false test` 运行 3 项、1 项按预期失败；实际注册集合比期望 18 项恰好多出已确认的 5 个历史 Tool。
+- GREEN 已验证：删除五个注册方法、旧 DTO/映射、`loadForTool()` 及旧 feedback context 数据路径后，同一 `FitnessToolsTest` 运行 3 项全部通过；中途发现并迁移了集成测试中对旧反馈方法的直接调用。
+- 配置 RED 已验证：baseline 测试实际得到 13 个旧默认键而非 18 个当前键；`FitnessSkillRegistryTest` 因 Meal Skill 仍调用未绑定的 `fitness.profile.query` 出现 2 个预期错误。
+- 配置 GREEN 已验证：V1 baseline/default draft 和 Meal Skill 改用细粒度键后，`JdbcAdminWorkbenchStoreTest` 8/8、`FitnessSkillRegistryTest` 3/3 通过。
+- 已确认源码和运行时只注册 18 个现行 Tool；五个历史键、旧宽聚合 DTO/Store 路径、Skill 与默认草稿绑定均已移除，源码与测试目录无遗留引用。
+- 自动化验证通过：Maven 全 reactor（含 Architecture Tests）零失败；前端 16 个文件 131/131，TypeScript、ESLint、生产构建和 Spotless 均通过。Maven 退出时仍有既有后台 Worker 访问已关闭 Testcontainers 的噪声日志，但最终退出码为 0。
+- 本地 Agent V1 校验和按预生产单一基线规则同步；现有 Plan Skill 更新为 8 个必要 Tool、草稿更新为 18 个现行 Tool，管理校验无错误/警告并发布 `fitness.coach` v17。
+- 390×844 页面验收通过：处理进度先展开“理解需求 → 查看记录”，正文开始后在回复前自动收起；输入“全身”时 `fitness_exercise_candidates_query` 成功返回；确认卡展示 6 个动作中文名，无 UUID；确认保存后 8 月 13 日计划页展示完整 6 个动作，浏览器控制台无错误。

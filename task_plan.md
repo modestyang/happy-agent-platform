@@ -462,3 +462,94 @@
 | 放大表格通过 portal 脱离 `.md` 后丢失二维布局规则 | 1 | 将表格宽度、边框与 nowrap 规则归属到 `.data-table-viewport`，并用 portal 后计算样式回归测试覆盖。 |
 | 全 reactor Spotless 被工作区内无关 Fitness/Starter 旧格式阻断 | 1 | 不改动无关文件；本轮涉及的 agentbuilder-service 与 agentbuilder-infrastructure 模块 Spotless 单独通过。 |
 | 9 文件并发 Vitest 首轮因机器负载使后台总览异步断言超过默认等待时间 | 1 | 单测文件单独通过；最终使用 `--maxWorkers=1` 重跑同一相关套件，88/88 通过，未修改产品代码规避超时。 |
+# 2026-08-12 训练计划确认卡、全身候选查询与聊天字号修复
+
+## 目标
+
+- 确认卡展示可信动作名称，名称缺失时显示“动作 N”，不展示 UUID。
+- 候选 Tool 将单独“全身”解释为无部位偏好，混用具体部位时明确拒绝。
+- AI 对话正文 16px，确认卡/进度/建议词 14px，辅助说明 11px。
+
+## 阶段
+
+1. [complete] 根因调查、方案比较、设计确认与书面规格。
+2. [complete] TDD 实施计划与隔离 worktree 创建。
+3. [complete] 运行相关基线测试。
+4. [complete] 全身别名 RED → GREEN。
+5. [complete] 可信确认 proposal RED → GREEN。
+6. [complete] 前端 UUID 降级与字号 RED → GREEN。
+7. [complete] 格式化、全量验证与最终差异复核。
+8. [complete] 将处理进度移到回复前：无回复时展开流转，开始回复后自动收起，并完成组件与页面验收。
+
+## 约束
+
+- 不新增依赖、OpenAPI 变更、migration、CI/CD 或部署改动。
+- 不 commit、不 push。
+- 不让 agentbuilder 查询 Fitness repository/schema。
+
+## Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 新 worktree 前端缺少 `node_modules`，Vitest 未启动 | 1 | lockfile 一致，复用主工作区同版本依赖的被忽略软链接 |
+| 两个 Maven reactor 并行写同一 `target/`，编译期 class 文件短暂缺失 | 1 | Maven 基线与后续验证全部串行执行 |
+| Task 2 测试夹具 record 缺少 `@AgentToolParam`，Schema 扫描先失败 | 1 | 仅补齐测试 record 组件注解，继续运行直到业务断言 RED |
+| Task 3 旧实现把 UUID/空名称直接作为展示文本，正文仍为 12px | 1 | 缺名统一降级为“动作 N”，并按已确认的 AI 页面 16/14/11px 层级覆盖 |
+
+# 2026-08-12 已注册 Tool 历史兼容与使用情况审计
+
+## 目标
+
+盘点当前已注册 Tool，结合源码注册、当前发布 Agent/Skill 绑定和近期真实 Run Trace，识别仅为历史兼容保留且具备安全删除条件的 Tool，并明确不能直接删除或需要迁移后删除的项。
+
+## 阶段
+
+1. [complete] 枚举源码注册的业务 Tool、内部 Harness Tool、别名与兼容投影。
+2. [complete] 读取当前数据库中的发布 Agent/Skill Tool 绑定与组件生命周期状态。
+3. [complete] 统计近期真实 Run Trace 的 Tool 调用和历史快照引用。
+4. [complete] 逐项交叉验证代码调用、Prompt/Skill 声明、测试和运行证据。
+5. [complete] 输出“可直接删 / 迁移后删 / 保留”清单、风险与建议顺序；本轮不实施删除。
+
+## 约束
+
+- 只读审计，不修改 Tool 代码、发布配置、数据库、API 契约或 migration。
+- “近期未调用”不能单独作为删除依据；必须同时核对当前发布绑定和历史恢复/审批路径。
+- 区分业务 Tool 与 AgentScope/Harness 自动注入的内部 Tool，避免混为一谈。
+
+## Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 首次补写规划文件时使用了不存在的二级标题上下文 | 1 | 改用文件末尾现有唯一表格行作为锚点追加审计章节，不重复原补丁。 |
+
+# 2026-08-12 历史 Tool 统一清理与发布
+
+## 目标
+
+删除已确认由细粒度 Tool 替代的 5 个历史 Tool，迁移 Agent/Skill 默认绑定和旧执行入口，完成自动化与页面级简单验收后将统一改动推送到 `main`。
+
+## 阶段
+
+1. [complete] 固化清理设计和实施计划，复核工作区既有改动范围。
+2. [complete] 先增加注册表与默认配置回归测试，确认旧 Tool 仍存在时测试失败。
+3. [complete] 删除历史 Tool、专用宽聚合查询路径，并迁移 Skill/Agent 默认配置。
+4. [complete] 执行后端、前端、架构和页面级简单验收。
+5. [pending] 展示完整状态与差异，提交、合并到 `main` 并推送 `origin/main`。
+
+## 已确认设计
+
+- 删除 `fitness.profile.query`、`fitness.workout.query`、`fitness.meal.query`、`fitness.meal.feedback_context`、`fitness.exercise.search`。
+- 保留 18 个当前细粒度/写入 Tool；`fitness.plan.save` 必须保留。
+- Agent 草稿和 Plan/Meal Skill 只声明正文实际使用的新 Tool，不保留兼容键。
+- 旧发布快照和 Trace 继续作为历史记录保存，不为旧版本重跑保留已淘汰实现。
+- 用户已明确授权本轮修改 Agent V1 baseline、提交并推送 `main`。
+
+## Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 首次读取 baseline 使用了错误的 `starter/src/main/resources` 路径 | 1 | 通过 `rg --files` 定位到 `agentbuilder/agentbuilder-infrastructure/src/main/resources/db/agent/V1__agent_baseline.sql`。 |
+| 首次批量删除旧 Tool 路径时，`JdbcFitnessStore.truncateCodePoints` 补丁上下文与实际实现不符 | 1 | `apply_patch` 原子失败、未产生修改；改为按文件分块删除，并先读取辅助方法的真实实现。 |
+| 首轮全量 Maven 测试中，旧集成断言仍要求 feedback context 将合法 300 字输入裁剪为 160 字 | 1 | 新 Tool 契约保留 API 允许的最多 300 字并标记 `executable=false`；迁移集成断言验证非可执行标记和 300 字边界，不恢复旧截断行为。 |
+| 本地持久库已应用旧 Agent V1，部署时 Flyway 校验和不一致 | 1 | 按预生产单一 V1 基线规则只修复本地 schema history 校验和，再通过管理 API 更新草稿/Skill 并发布 v17；不新增 migration、不重置业务数据。 |
+| 管理 API 检查命令依赖本机未安装的 `jq` | 1 | 改用仓库已有 Node.js 读取 JSON，不新增依赖。 |

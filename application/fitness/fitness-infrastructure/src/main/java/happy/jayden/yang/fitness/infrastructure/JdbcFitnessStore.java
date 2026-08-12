@@ -73,8 +73,6 @@ public final class JdbcFitnessStore implements FitnessStore {
   private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
   private static final TypeReference<List<Integer>> INTEGERS = new TypeReference<>() {};
   private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
-  private static final int MAX_CONTEXT_FOOD_LENGTH = 120;
-  private static final int MAX_CONTEXT_NOTE_LENGTH = 160;
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
@@ -406,44 +404,6 @@ public final class JdbcFitnessStore implements FitnessStore {
   }
 
   @Override
-  public happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext
-      mealRecommendationFeedbackContext(UUID userId, Instant since) {
-    List<String> liked = new ArrayList<>();
-    List<String> disliked = new ArrayList<>();
-    List<String> reasons = new ArrayList<>();
-    List<String> notes = new ArrayList<>();
-    jdbc.query(
-        "SELECT f.sentiment,f.reason,f.note,d.items FROM meal_recommendation_feedback f JOIN"
-            + " daily_meal_recommendations d ON d.recommendation_id=f.recommendation_id WHERE"
-            + " f.user_id=? AND f.updated_at>=? ORDER BY f.updated_at DESC",
-        rs -> {
-          List<MealItemDto> items;
-          try {
-            items = objectMapper.readValue(rs.getString("items"), MEAL_ITEMS);
-          } catch (JsonProcessingException exception) {
-            throw new SQLException("Invalid recommendation items JSON", exception);
-          }
-          List<String> target = "LIKE".equals(rs.getString("sentiment")) ? liked : disliked;
-          items.stream()
-              .map(MealItemDto::name)
-              .map(name -> truncateCodePoints(name, MAX_CONTEXT_FOOD_LENGTH))
-              .limit(8)
-              .forEach(target::add);
-          if (rs.getString("reason") != null) reasons.add(rs.getString("reason"));
-          if (rs.getString("note") != null) {
-            notes.add(truncateCodePoints(rs.getString("note").trim(), MAX_CONTEXT_NOTE_LENGTH));
-          }
-        },
-        userId,
-        Timestamp.from(since));
-    return new happy.jayden.yang.fitness.service.FitnessDtos.MealRecommendationFeedbackContext(
-        liked.stream().distinct().limit(30).toList(),
-        disliked.stream().distinct().limit(30).toList(),
-        reasons.stream().distinct().limit(12).toList(),
-        notes.stream().distinct().limit(12).toList());
-  }
-
-  @Override
   public Optional<happy.jayden.yang.fitness.service.FitnessDtos.DailyMealPlanStateDto>
       findDailyMealPlan(UUID userId, LocalDate date) {
     List<MealRecommendationDto> recommendations = dailyRecommendations(userId, date);
@@ -763,11 +723,6 @@ public final class JdbcFitnessStore implements FitnessStore {
         Timestamp.from(activeSince),
         planDate,
         planDate);
-  }
-
-  private static String truncateCodePoints(String value, int maximum) {
-    if (value.codePointCount(0, value.length()) <= maximum) return value;
-    return value.substring(0, value.offsetByCodePoints(0, maximum));
   }
 
   private List<MealRecommendationDto> dailyRecommendations(UUID userId, LocalDate date) {

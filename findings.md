@@ -257,3 +257,71 @@
 - `ExerciseVisual.tsx` 已含其他任务新增的可展开媒体容器改动；轮播必须在该结构上增量实现，不能回退或覆盖 `ExpandableSurface variant="media"`。
 - `App.test.tsx` 与 `app.css` 有大量并行改动。为降低冲突，新逻辑优先放入独立的 workout 单元测试与组件测试，只在 `WorkoutPlayer`、`PlanPage` 调用点和末端样式区做最小增量。
 - 当前 App 集成测试已经覆盖训练进入、暂停、完成、StrictMode 语音去重和静音/跳过；新测试应聚焦“过期倒计时不补播”“动作帧随秒数往返”“预设参数与持久化”“每秒节拍”和“每个数字至少展示 1 秒”。
+# 2026-08-12 训练计划确认卡、全身候选查询与聊天字号修复
+
+- 根因：保存 Tool 冻结参数只有 exerciseIds，Runtime 原样投影 proposal，前端把 ID 回退为 name。
+- 可信名称来源：同 Run 中实际绑定、key 精确匹配的候选/详情 Tool 在确认前返回的 exerciseId + name；未绑定同名事件不采信，只丰富展示，不修改审批参数。
+- “全身”语义：等价于空 focusAreas，继续应用经验、器械和冲击限制；与具体部位混用为参数错误。
+- 字号边界：正文 16px，确认卡/进度/建议词 14px，辅助说明 11px；标题与底部导航不变。
+- 设计和计划见 docs/superpowers 下本轮文件。
+
+## 2026-08-12 已注册 Tool 历史兼容与使用情况审计
+
+- 审计口径：源码注册是“可用集合”，当前发布 Agent/Skill 绑定是“当前可达集合”，真实 Run Trace 是“近期实际调用集合”；只有三层证据一致且不承担恢复/审批兼容时，才建议直接删除。
+- 历史设计文档显示最初只有 `fitness.profile.query`、`fitness.workout.query`、`fitness.meal.query` 三个聚合只读 Tool；后续又增加计划候选/详情等细粒度 Tool，因此这三个聚合 Tool 是重点兼容候选，但尚不能仅凭文档判定可删。
+- 当前代码还存在 AgentScope/Harness 注入的 `wait_async_results` 等内部 Tool；它们不属于 Fitness 业务 Tool，必须单独审计其运行模式，不能按业务目录使用率直接删除。
+- `FitnessTools` 当前注册 23 个业务 Tool，其中存在四组明显的功能重叠/代际关系：
+  - 旧聚合 `fitness.profile.query` 对应细粒度 `fitness.user.profile.query` + `fitness.goal.current.query` + `fitness.training.constraints.query` + `fitness.nutrition.preferences.query` + `fitness.body.latest.query`。
+  - 旧聚合 `fitness.workout.query` 对应 `fitness.workout.schedule.query` + `fitness.workout.summary.query`/`history.query`。
+  - 旧聚合 `fitness.meal.query` 对应 `fitness.meal.history.query` + `fitness.meal.recommendations.query`。
+  - `fitness.exercise.search` 与较新的 `fitness.exercise.catalog.search`/`fitness.exercise.candidates.query` 重叠；`fitness.meal.feedback_context` 与较新的 `fitness.meal.feedback.query` 重叠。
+- 代码基线仍让 `fitness.meal.skill` 依赖四个旧式 Tool：`fitness.profile.query`、`fitness.workout.query`、`fitness.meal.query`、`fitness.meal.feedback_context`；因此它们即使属于历史兼容，也不能在迁移当前 Skill/发布快照前直接删除。
+- 代码基线的 `fitness.coach` 当前绑定 13 个 Tool，包含旧式三餐四件套、计划 Skill 的 8 个 Tool，以及额外的 `fitness.exercise.catalog.search`；已注册的其余细粒度饮食/身体趋势类 Tool 可能尚未进入当前发布 Agent，需要查数据库确认。
+- 五个旧式实现并不是新 Tool 的简单别名：
+  - `fitness.profile.query`、`fitness.workout.query`、`fitness.meal.query`、`fitness.exercise.search` 都通过 `FitnessApplicationService.loadForTool()` 读取一份大聚合，再在内存裁剪；新 Tool 通过 `FitnessAgentQueryService` 做目的明确、带边界的查询。
+  - 旧 `fitness.exercise.search` 会把步骤和常见错误一起返回、允许最多 50 条；新 `fitness.exercise.catalog.search` 只返回紧凑目录，`fitness.exercise.details.query` 再批量读取 1–8 个详情，计划场景另有带用户硬限制的 candidates Tool。
+  - `fitness.meal.feedback_context` 直读旧应用服务；`fitness.meal.feedback.query` 走新查询服务和安全 DTO，描述明确把自由文本标为不可执行数据。
+- 因而旧式 Tool 的删除收益不仅是少几个名称，还会移除一条高负载、宽数据面的 `loadForTool()` 兼容访问路径；但四个三餐旧 Tool 目前仍被 Skill 强依赖，需要先迁移 Skill。
+- Agent 发布快照保存在 `agent.agent_versions.configuration`，当前草稿/Skill 绑定分别在 `agent.agent_drafts.tool_keys` 与 `agent.agent_skills.required_tool_keys`；Run 调用证据在 `agent.agent_run_events.payload`，审批 Tool 另有 `agent.agent_run_approvals.tool_key`。
+- 本地 PostgreSQL 容器 `deploy-postgres-1` 正常运行，数据库为 `happy_agent`；可通过容器内 `postgres` 账户执行只读 SQL，不需要输出或复制任何凭证。
+- 实际数据库已比源码基线演进到 `fitness.coach` 发布版 v16：当前草稿绑定了全部 23 个 Fitness Tool，以及 `plan/meal/analysis/knowledge` 四个 Skill。
+- 当前 `fitness.meal.skill` revision 3、`fitness.analysis.skill` revision 1、`fitness.knowledge.skill` revision 1 已全部改用细粒度新 Tool，不再要求旧聚合 Tool。
+- 当前 `fitness.plan.skill` revision 7 的 `required_tool_keys` 却包含全部 23 个 Tool；这使所有历史 Tool 在静态发布校验上仍是强依赖。需要继续核对该 Skill 正文是否真的引用它们，判断这是实际能力要求还是发布配置膨胀。
+- 历史发布快照共有 `fitness.coach` v1–v16。删除运行时 Tool 前必须明确旧 Run 的恢复策略：当前新 Run 使用最新快照，但等待审批的旧 Run 可能继续按其原版本绑定执行 `fitness.plan.save`；只读历史消息本身不需要重新调用 Tool。
+- 发布历史清楚显示代际切换：v1–v5 曾绑定已从源码注册表移除的 `fitness.plan.generate`；v6 起加入 `fitness.exercise.search`；v12 起加入细粒度查询族；v15 起加入 `fitness.exercise.candidates.query`。这证明系统已经允许旧快照保留不存在于当前 registry 的 Tool，关键约束应落在“是否还有可恢复的旧 Run”，而不是永远保留所有历史实现。
+- 当前四个 Skill 正文的实际 Tool 引用：
+  - plan：只引用 `body.latest`、`exercise.catalog.search`、`exercise.details`、`goal.current`、`plan.save`、`training.constraints`、`workout.schedule`、`workout.summary`。
+  - meal：只引用 10 个细粒度新 Tool；不引用四个旧式三餐 Tool。
+  - analysis/knowledge：也只引用细粒度新 Tool。
+- 因此 `fitness.plan.skill` revision 7 把全部 23 个 Tool 写入 `required_tool_keys` 与正文不一致，是配置膨胀而非实际编排需要；应先收敛 required keys，才能安全从 Agent 绑定移除旧 Tool。
+- v16 Skill 快照结构把依赖放在 `config` 内（顶层只有 `key/version/status/config`）；后续如审计历史快照依赖，应读取 `skills[].config.requiredToolKeys`，不能误读顶层字段。
+- 全量真实 Trace 显示旧 Tool 确实曾被使用：`profile.query` 成功 19 次、`workout.query` 19 次、`meal.query` 1 次、`meal.feedback_context` 2 次、`exercise.search` 60 次；这些调用集中在旧发布版本，不能把它们描述成“从未使用”。
+- 新 Tool 已接管主要场景：`exercise.catalog.search` 成功 30 次、`exercise.candidates.query` 14 次、`goal.current` 21 次、`training.constraints` 20 次、`workout.schedule` 19 次、`workout.summary` 16 次等。
+- 当前仍有 v15 和 v16 各一个 `WAITING_APPROVAL` Run，且所有审批记录都只涉及 `fitness.plan.save`（12 已批准、3 已拒绝、2 待定）。旧只读 Tool 不参与审批执行，但删除前仍需核对恢复实现是否会强制解析完整旧快照的所有 Tool。
+- Trace 还保留已经移除的 `fitness.plan.generate`（9 次成功），进一步证明“历史 Trace 中出现”不等于必须继续保留运行时实现。
+- 按版本看，旧聚合 Tool 的实际调用在 v10 后基本停止；v15 完全只使用细粒度新 Tool，v16 只有 `fitness.profile.query` 又被模型调用 1 次，其余 `workout.query`、`meal.query`、`meal.feedback_context`、`exercise.search` 在 v15/v16 均为 0。
+- `fitness.profile.query` 的 v16 单次调用说明：只要旧 Tool 仍暴露在 Agent 全量绑定中，即使 Skill 正文已迁移，模型仍可能基于旧 Tool 的宽泛描述自行选择它。因此安全清理顺序必须是“收敛 Skill required keys → 从草稿解绑并发布 → 验证新 Trace → 删除注册实现”，不能直接删方法。
+- 源码中旧四个三餐 Tool 还被 `FitnessSkillRegistry.MealSkill.execute()` 硬编码调用，但全仓生产代码没有调用 `FitnessSkillRegistry.skill()` 或 `ExecutableSkill.execute()`；当前运行适配器消费的是发布 Skill 快照。这部分看起来是更早期“确定性 Skill 预取事实”的遗留实现，需作为删除旧 Tool 时同步清理/改造的源码依赖，而非当前真实调用证据。
+- `fitness.exercise.search` 在生产源码中除注册、旧默认种子投影外没有业务调用者；当前 Skill 正文已改用 `exercise.catalog.search`、`exercise.candidates.query` 和 `exercise.details.query`。
+- 两个待审批 Run 恢复时，`decide()` 不会重新解析或 resolve 旧发布快照的全部 Tool；它只从冻结审批记录取 `tool_key=fitness.plan.save` 和参数，直接通过当前 registry 执行。因此保留 `fitness.plan.save` 即可，移除旧只读 Tool 不会阻断现有两张确认卡的批准/拒绝。
+- 对新 Run，Runtime 会对最新发布版本的 `toolKeys` 全量 resolve；所以必须先发布一个不含旧 Tool 的新版本，再删除注册实现。反过来先删实现会让最新 v16 在启动运行时直接报“已发布 Agent 绑定的 Tool 不可用”。
+- 生产 `@AgentTool` 只出现在 `FitnessTools` 一个类中；源码注册表即这 23 个业务 Tool。AgentScope 的 `wait_async_results` 是框架内部辅助 Tool，构建 Agent 后已显式移除，不属于管理后台的 Fitness Tool 清单。
+- 旧 Tool 最终审计结论：以下 5 个均可在配置迁移后删除，且恰好是 23 个注册 Tool 与 18 个当前细粒度能力 Tool 的差集：
+  1. `fitness.profile.query`
+  2. `fitness.workout.query`
+  3. `fitness.meal.query`
+  4. `fitness.meal.feedback_context`
+  5. `fitness.exercise.search`
+- `fitness.plan.generate` 是已完成清理的历史样例：源码 registry 已无该 Tool，测试明确断言不存在，但历史 v1–v5 快照和 Trace 仍可保留审计数据。
+- 建议安全顺序：先把 `fitness.plan.skill.required_tool_keys` 去掉上述 5 项，随后从 `fitness.coach.tool_keys` 解绑并发布新版本；跑计划、三餐、分析、知识四类真实验收确认新 Trace 无旧 runtime name；最后删除五个 `@AgentTool` 方法、旧 DTO、`loadForTool()` 专用聚合路径、默认种子/基线引用及对应测试。
+
+## 2026-08-12 历史 Tool 清理实施边界
+
+- 当前工作分支与本地主 `main` 同起点，已包含上一轮训练确认卡、候选查询、聊天字号和处理进度位置的未提交改动；用户要求“统一处理后推送 main”，本轮会将这些连续需求作为同一发布批次验证与提交。
+- 默认种子仍同时在 `JdbcAdminWorkbenchStore.seedDefaults()` 与 Agent V1 baseline 中维护，二者都必须移除历史键，否则新环境或空库会重新暴露已删除 Tool。
+- `FitnessToolsTest` 当前直接测试旧 profile/search 行为，是最合适的 RED 入口：先把注册契约改为精确的 18 个 Tool 并断言 5 个旧键不存在，再删除实现。
+- baseline 实际路径是 `agentbuilder/agentbuilder-infrastructure/src/main/resources/db/agent/V1__agent_baseline.sql`，不是 starter 资源目录。
+- `FitnessSkillRegistry.MealSkill` 仍按顺序调用旧 profile/workout/meal/feedback_context；测试也把这些键写入 allowed tools。若保留该兼容执行器，迁移后的对应事实调用应改为当前 Meal Skill 所需的细粒度 Tool，而不是只删除断言。
+- `FitnessApplicationService.loadForTool()` 当前只承担旧聚合 Tool 的可信用户宽读取；五个方法移除后可连同该入口删除。`mealRecommendationFeedbackContext(UUID)` 是否还能删除需要再次核对所有生产调用，不能与 `loadForTool()` 一并假定。
+- 当前持久化本地数据库的 v16/草稿仍绑定旧键；仅改 V1 baseline 只能保证新库正确。页面验收前必须确认项目对既有开发库的预期迁移方式，避免源码删除后当前发布 Agent 无法解析 Tool。
+- 删除后的已知代价：旧 v1–v16 快照仍可查看，但若未来加入“直接按旧版本重新执行/回滚”的能力，引用已删除 Tool 的旧版本将不可运行。当前实现只运行最新发布版本，审批恢复又只调用冻结的 `fitness.plan.save`，因此现状不受影响。

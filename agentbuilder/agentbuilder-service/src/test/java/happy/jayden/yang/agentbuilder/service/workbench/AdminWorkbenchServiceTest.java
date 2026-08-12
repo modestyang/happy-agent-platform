@@ -28,7 +28,7 @@ class AdminWorkbenchServiceTest {
 
     assertFalse(validation.valid());
     assertTrue(validation.errors().contains("Provider 尚未配置 API Key"));
-    assertTrue(validation.errors().contains("组件 fitness.exercise.search 当前不可用"));
+    assertTrue(validation.errors().contains("组件 fitness.exercise.catalog.search 当前不可用"));
   }
 
   @Test
@@ -67,7 +67,7 @@ class AdminWorkbenchServiceTest {
             "bailian",
             "qwen-plus",
             "fitness.coach.prompt",
-            List.of("fitness.exercise.search"),
+            List.of("fitness.exercise.catalog.search"),
             List.of("fitness.plan.skill"),
             List.of("fitness.safety"),
             "fitness.daily-memory",
@@ -107,7 +107,7 @@ class AdminWorkbenchServiceTest {
             "bailian",
             "qwen-plus",
             "fitness.coach.prompt",
-            List.of("fitness.exercise.search"),
+            List.of("fitness.exercise.catalog.search"),
             List.of("fitness.plan.skill"),
             List.of(),
             "fitness.daily-memory",
@@ -169,7 +169,7 @@ class AdminWorkbenchServiceTest {
             "用户要求训练计划时",
             "",
             "先读取动作库。",
-            List.of("fitness.exercise.search"),
+            List.of("fitness.exercise.catalog.search"),
             true,
             "ACTIVE",
             1,
@@ -185,7 +185,9 @@ class AdminWorkbenchServiceTest {
 
     assertFalse(validation.valid());
     assertTrue(
-        validation.errors().contains("Skill fitness.plan.skill 缺少所需 Tool fitness.exercise.search"));
+        validation
+            .errors()
+            .contains("Skill fitness.plan.skill 缺少所需 Tool fitness.exercise.catalog.search"));
   }
 
   @Test
@@ -200,7 +202,7 @@ class AdminWorkbenchServiceTest {
             () ->
                 service.updateComponent(
                     "TOOL",
-                    "fitness.exercise.search",
+                    "fitness.exercise.catalog.search",
                     new ComponentUpdate("x", "x", "AVAILABLE", List.of(), Map.of())));
 
     assertEquals("Tool 仅可由应用代码登记，工作台只读", failure.getMessage());
@@ -272,7 +274,7 @@ class AdminWorkbenchServiceTest {
         "bailian",
         "qwen-plus",
         "fitness.coach.prompt",
-        List.of("fitness.exercise.search"),
+        List.of("fitness.exercise.catalog.search"),
         List.of("fitness.plan.skill"),
         List.of("fitness.safety"),
         "fitness.daily-memory",
@@ -313,7 +315,7 @@ class AdminWorkbenchServiceTest {
                   "MODEL", "qwen-plus", componentStatus, Map.of("providerKey", modelProviderKey)),
               component("PROMPT", "fitness.coach.prompt", componentStatus),
               component("MEMORY", "fitness.daily-memory", componentStatus),
-              component("TOOL", "fitness.exercise.search", componentStatus),
+              component("TOOL", "fitness.exercise.catalog.search", componentStatus),
               component("SKILL", "fitness.plan.skill", componentStatus),
               component("HOOK", "fitness.safety", componentStatus)),
           List.of(

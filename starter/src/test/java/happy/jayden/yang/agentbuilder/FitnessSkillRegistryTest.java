@@ -30,10 +30,16 @@ class FitnessSkillRegistryTest {
     assertEquals("three-meal-plan", result.value().get("kind"));
     assertEquals(
         List.of(
-            "fitness.profile.query",
-            "fitness.workout.query",
-            "fitness.meal.query",
-            "fitness.meal.feedback_context"),
+            "fitness.user.profile.query",
+            "fitness.goal.current.query",
+            "fitness.body.latest.query",
+            "fitness.nutrition.preferences.query",
+            "fitness.workout.summary.query",
+            "fitness.meal.summary.query",
+            "fitness.meal.history.query",
+            "fitness.meal.recommendations.query",
+            "fitness.meal.feedback.query",
+            "fitness.nutrition.targets.estimate"),
         calls);
     assertEquals(List.of("BREAKFAST", "LUNCH", "DINNER"), result.value().get("requiredMeals"));
     assertTrue(result.value().containsKey("facts"));
@@ -75,16 +81,19 @@ class FitnessSkillRegistryTest {
             "user-1",
             "请帮我生成计划",
             Set.of(
-                "fitness.profile.query",
-                "fitness.workout.query",
-                "fitness.meal.query",
-                "fitness.meal.feedback_context",
+                "fitness.user.profile.query",
                 "fitness.goal.current.query",
                 "fitness.training.constraints.query",
+                "fitness.nutrition.preferences.query",
                 "fitness.body.latest.query",
                 "fitness.workout.summary.query",
                 "fitness.workout.schedule.query",
-                "fitness.exercise.candidates.query"),
+                "fitness.exercise.candidates.query",
+                "fitness.meal.summary.query",
+                "fitness.meal.history.query",
+                "fitness.meal.recommendations.query",
+                "fitness.meal.feedback.query",
+                "fitness.nutrition.targets.estimate"),
             new ToolExecutionContext("user-1", "run-1", Set.of("fitness.read"), "fitness.skill"),
             (toolKey, input, ignored) -> {
               receivedArguments.put(toolKey, Map.copyOf(input));
@@ -95,9 +104,9 @@ class FitnessSkillRegistryTest {
     registry.skill("fitness.meal.skill").orElseThrow().execute(context, Map.of());
     registry.skill("fitness.plan.skill").orElseThrow().execute(context, Map.of());
 
-    assertEquals(Map.of(), receivedArguments.get("fitness.workout.query"));
-    assertEquals(Map.of(), receivedArguments.get("fitness.meal.query"));
-    assertEquals(Map.of(), receivedArguments.get("fitness.meal.feedback_context"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.user.profile.query"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.meal.history.query"));
+    assertEquals(Map.of(), receivedArguments.get("fitness.meal.feedback.query"));
     assertEquals(Map.of(), receivedArguments.get("fitness.workout.schedule.query"));
     assertEquals(Map.of(), receivedArguments.get("fitness.exercise.candidates.query"));
   }
@@ -109,16 +118,19 @@ class FitnessSkillRegistryTest {
         "user-1",
         "请帮我生成计划",
         Set.of(
-            "fitness.profile.query",
-            "fitness.workout.query",
-            "fitness.meal.query",
-            "fitness.meal.feedback_context",
+            "fitness.user.profile.query",
             "fitness.goal.current.query",
             "fitness.training.constraints.query",
+            "fitness.nutrition.preferences.query",
             "fitness.body.latest.query",
             "fitness.workout.summary.query",
             "fitness.workout.schedule.query",
-            "fitness.exercise.candidates.query"),
+            "fitness.exercise.candidates.query",
+            "fitness.meal.summary.query",
+            "fitness.meal.history.query",
+            "fitness.meal.recommendations.query",
+            "fitness.meal.feedback.query",
+            "fitness.nutrition.targets.estimate"),
         new ToolExecutionContext("user-1", "run-1", Set.of("fitness.read"), "fitness.skill"),
         (toolKey, input, ignored) -> {
           calls.add(toolKey);

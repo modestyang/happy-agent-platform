@@ -636,13 +636,21 @@ public final class FitnessAgentQueryService {
         throw new IllegalArgumentException("focusAreas 不能包含空值");
       }
       String area = value.trim();
-      if (!TARGET_AREAS.contains(area)) {
-        throw new IllegalArgumentException("未知目标部位 " + area);
-      }
       if (normalized.contains(area)) {
         throw new IllegalArgumentException("focusAreas 不能重复");
       }
       normalized.add(area);
+    }
+    if (normalized.contains("全身")) {
+      if (normalized.size() != 1) {
+        throw new IllegalArgumentException("全身不能与具体部位同时使用");
+      }
+      return List.of();
+    }
+    for (String area : normalized) {
+      if (!TARGET_AREAS.contains(area)) {
+        throw new IllegalArgumentException("未知目标部位 " + area);
+      }
     }
     return List.copyOf(normalized);
   }

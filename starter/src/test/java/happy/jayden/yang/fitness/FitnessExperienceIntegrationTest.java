@@ -783,7 +783,7 @@ class FitnessExperienceIntegrationTest {
   }
 
   @Test
-  void feedbackContextTreatsFreeTextAsBoundedReferenceData() throws Exception {
+  void feedbackQueryTreatsFreeTextAsNonExecutableReferenceData() throws Exception {
     Cookie owner = login();
     JsonNode bootstrap =
         objectMapper.readTree(
@@ -807,7 +807,7 @@ class FitnessExperienceIntegrationTest {
         .andExpect(status().isOk());
 
     var context =
-        fitnessTools.mealFeedbackContext(
+        fitnessTools.agentMealFeedbackContext(
             new ToolExecutionContext(
                 userId.toString(),
                 "meal-feedback-context-run",
@@ -816,7 +816,11 @@ class FitnessExperienceIntegrationTest {
     assertThat(context.dislikedFoods()).isNotEmpty();
     assertThat(context.noteReferences())
         .allSatisfy(
-            note -> assertThat(note.codePointCount(0, note.length())).isLessThanOrEqualTo(160));
+            reference -> {
+              assertThat(reference.executable()).isFalse();
+              assertThat(reference.text().codePointCount(0, reference.text().length()))
+                  .isLessThanOrEqualTo(300);
+            });
   }
 
   @Test
@@ -2012,7 +2016,7 @@ class FitnessExperienceIntegrationTest {
 
   private static void resetChatAgentDraft(JdbcTemplate jdbc) {
     jdbc.update(
-        "UPDATE agent_drafts SET name='花爷健身教练',description='结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。',status='DRAFT',framework_key='agentscope',provider_key='bailian',model_key='qwen-plus',prompt_key='fitness.coach.prompt',tool_keys='[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.exercise.search\",\"fitness.plan.save\"]'::jsonb,skill_keys='[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,hook_keys='[\"fitness.safety\"]'::jsonb,memory_key='fitness.daily-memory',temperature=0.5,max_tool_calls=8,updated_at=CURRENT_TIMESTAMP WHERE agent_key='fitness.coach'");
+        "UPDATE agent_drafts SET name='花爷健身教练',description='结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。',status='DRAFT',framework_key='agentscope',provider_key='bailian',model_key='qwen-plus',prompt_key='fitness.coach.prompt',tool_keys='[\"fitness.user.profile.query\",\"fitness.goal.current.query\",\"fitness.training.constraints.query\",\"fitness.nutrition.preferences.query\",\"fitness.body.latest.query\",\"fitness.body.trend.query\",\"fitness.workout.schedule.query\",\"fitness.workout.history.query\",\"fitness.workout.summary.query\",\"fitness.exercise.candidates.query\",\"fitness.exercise.catalog.search\",\"fitness.exercise.details.query\",\"fitness.meal.history.query\",\"fitness.meal.summary.query\",\"fitness.meal.recommendations.query\",\"fitness.meal.feedback.query\",\"fitness.nutrition.targets.estimate\",\"fitness.plan.save\"]'::jsonb,skill_keys='[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,hook_keys='[\"fitness.safety\"]'::jsonb,memory_key='fitness.daily-memory',temperature=0.5,max_tool_calls=18,updated_at=CURRENT_TIMESTAMP WHERE agent_key='fitness.coach'");
     jdbc.update(
         "UPDATE agent_skills SET status='ACTIVE',runtime_ready=true WHERE skill_key IN ('fitness.meal.skill','fitness.plan.skill')");
     jdbc.update(

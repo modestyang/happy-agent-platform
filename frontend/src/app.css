@@ -459,7 +459,7 @@ input, select { width: 100%; border: 1px solid #ded5c8; border-radius: 14px; pad
 .ai-offline svg { width: 14px; }
 .conversation { display: grid; gap: 11px; min-width: 0; max-width: 100%; overflow-x: hidden; }
 .message { display: flex; align-items: flex-start; gap: 7px; min-width: 0; max-width: 87%; }
-.message-body { min-width: 0; max-width: 100%; overflow-wrap: anywhere; border-radius: 18px; padding: 11px 13px; font-size: 12px; line-height: 1.55; }
+.ai-page .message-body { min-width: 0; max-width: 100%; overflow-wrap: anywhere; border-radius: 18px; padding: 11px 13px; font-size: 16px; line-height: 1.65; }
 .message--user { justify-self: end; }
 .message--user .message-body { border-bottom-right-radius: 5px; color: #fff; background: var(--ink); }
 .message--assistant .message-body { border-bottom-left-radius: 5px; background: #ffe8bb; }
@@ -543,6 +543,18 @@ input, select { width: 100%; border: 1px solid #ded5c8; border-radius: 14px; pad
 .send { display: grid; place-items: center; width: 37px; height: 37px; border: 0; border-radius: 13px; color: #fff; background: var(--ink); }
 .send svg { width: 16px; }
 .session-note { display: block; margin-top: 5px; color: #aaa096; font-size: 8px; text-align: center; }
+.ai-page .run-progress { font-size: 14px; line-height: 1.55; }
+.ai-page .run-approval header strong,
+.ai-page .run-approval header small,
+.ai-page .run-approval article b,
+.ai-page .run-approval article small,
+.ai-page .confirmation-card__message,
+.ai-page .run-approval button,
+.ai-page .run-approval__status,
+.ai-page .prompt-row button { font-size: 14px; }
+.ai-page .surface-card__head small,
+.ai-page .data-table-hint,
+.ai-page .session-note { font-size: 11px; line-height: 1.45; }
 
 .current-goal-report { display: grid; gap: 11px; margin-bottom: 15px; border: 1px solid #e7d4bd; border-radius: 23px; padding: 15px; background: linear-gradient(150deg, #fff9ee, #fff2db); box-shadow: 0 10px 25px rgba(98,66,31,.07); }
 .goal-report-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

@@ -371,7 +371,7 @@ class AdminWorkbenchIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"skillKey":"acceptance.skill","displayName":"验收技能","description":"页面新增技能","whenToUse":"验收时","whenNotToUse":"无","content":"读取档案后回答。","requiredToolKeys":["fitness.profile.query"]}
+                    {"skillKey":"acceptance.skill","displayName":"验收技能","description":"页面新增技能","whenToUse":"验收时","whenNotToUse":"无","content":"读取档案后回答。","requiredToolKeys":["fitness.user.profile.query"]}
                     """))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.skillKey").value("acceptance.skill"))
@@ -402,7 +402,7 @@ class AdminWorkbenchIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"displayName":"验收技能（已修改）","description":"页面修改技能","whenToUse":"需要验收时","whenNotToUse":"无需验收时","content":"读取资料后回答。","requiredToolKeys":["fitness.profile.query"],"status":"ACTIVE"}
+                    {"displayName":"验收技能（已修改）","description":"页面修改技能","whenToUse":"需要验收时","whenNotToUse":"无需验收时","content":"读取资料后回答。","requiredToolKeys":["fitness.user.profile.query"],"status":"ACTIVE"}
                     """))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.skillKey").value("acceptance.skill"))

@@ -44,6 +44,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -52,6 +53,8 @@ public final class PublishedAgentPlaygroundRuntime {
   private static final UUID DEVELOPER_USER_ID =
       UUID.nameUUIDFromBytes("happy-agent:developer-playground".getBytes(StandardCharsets.UTF_8));
   private static final ZoneId USER_ZONE = ZoneId.of("Asia/Shanghai");
+  private static final Set<String> TRUSTED_EXERCISE_NAME_TOOL_KEYS =
+      Set.of("fitness.exercise.candidates.query", "fitness.exercise.details.query");
   private static final String PUBLISHED_AGENT_SQL =
       "SELECT version,configuration::text FROM agent_versions WHERE agent_key=?"
           + " AND status='PUBLISHED' ORDER BY version DESC LIMIT 1";
@@ -770,7 +773,9 @@ public final class PublishedAgentPlaygroundRuntime {
     payload.put("toolCallId", approval.toolCallId().toString());
     payload.put("status", "REQUESTED");
     payload.put("title", approval.title());
-    planProposal(pending.arguments()).ifPresent(value -> payload.put("proposal", value));
+    if (!pending.proposal().isEmpty()) {
+      payload.put("proposal", pending.proposal());
+    }
     traces.appendStreamEvent(runId, "APPROVAL", payload);
   }
 
@@ -819,14 +824,15 @@ public final class PublishedAgentPlaygroundRuntime {
             .filter(event -> event.type() == RunEvent.Type.CONFIRMATION_REQUIRED)
             .findFirst();
     if (confirmation.isEmpty()) return null;
-    Object rawCalls = confirmation.get().data().get("toolCalls");
+    RunEvent confirmationEvent = confirmation.get();
+    Object rawCalls = confirmationEvent.data().get("toolCalls");
     Map<?, ?> raw;
     if (rawCalls instanceof List<?> calls
         && calls.size() == 1
         && calls.get(0) instanceof Map<?, ?> call) {
       raw = call;
-    } else if (confirmation.get().data().containsKey("toolName")) {
-      raw = confirmation.get().data();
+    } else if (confirmationEvent.data().containsKey("toolName")) {
+      raw = confirmationEvent.data();
     } else {
       throw new PlaygroundRuntimeUnavailableException("框架确认事件必须包含一个 Tool 调用");
     }
@@ -846,7 +852,70 @@ public final class PublishedAgentPlaygroundRuntime {
     if (frozenArguments.isEmpty() && raw.get("toolCallId") instanceof String toolCallId) {
       frozenArguments = argumentsFromToolCallBlocks(events, toolCallId);
     }
-    return new PendingApproval(toolKey, titleFor(toolKey), frozenArguments);
+    Map<String, Object> proposal =
+        "fitness.plan.save".equals(toolKey)
+            ? planProposal(
+                    frozenArguments,
+                    trustedExerciseNames(request, events, confirmationEvent.sequence()))
+                .orElse(Map.of())
+            : Map.of();
+    return new PendingApproval(toolKey, titleFor(toolKey), frozenArguments, proposal);
+  }
+
+  private Map<String, String> trustedExerciseNames(
+      RunRequest request, List<RunEvent> events, long confirmationSequence) {
+    Set<String> trustedRuntimeNames =
+        request.tools().stream()
+            .filter(tool -> TRUSTED_EXERCISE_NAME_TOOL_KEYS.contains(tool.descriptor().toolKey()))
+            .map(tool -> tool.descriptor().runtimeName())
+            .collect(Collectors.toUnmodifiableSet());
+    var names = new LinkedHashMap<String, String>();
+    events.stream()
+        .filter(event -> event.sequence() < confirmationSequence)
+        .filter(event -> event.type() == RunEvent.Type.TOOL_RESULT)
+        .filter(event -> trustedRuntimeNames.contains(event.data().get("toolName")))
+        .map(event -> event.data().get("result"))
+        .filter(Objects::nonNull)
+        .forEach(result -> collectExerciseNames(mapper.valueToTree(result), names));
+    return Map.copyOf(names);
+  }
+
+  private void collectExerciseNames(JsonNode node, Map<String, String> names) {
+    if (node == null || node.isNull()) {
+      return;
+    }
+    if (node.isTextual()) {
+      String encoded = node.textValue().trim();
+      if (!(encoded.startsWith("{") || encoded.startsWith("["))) {
+        return;
+      }
+      try {
+        collectExerciseNames(mapper.readTree(encoded), names);
+      } catch (JsonProcessingException ignored) {
+        // A non-JSON encoded result cannot contribute trusted exercise facts.
+      }
+      return;
+    }
+    if (node.isObject()) {
+      JsonNode exerciseId = node.get("exerciseId");
+      JsonNode name = node.get("name");
+      if (exerciseId != null && exerciseId.isTextual() && name != null && name.isTextual()) {
+        try {
+          String canonicalId = UUID.fromString(exerciseId.textValue().trim()).toString();
+          String normalizedName = name.textValue().trim();
+          if (!normalizedName.isEmpty()) {
+            names.putIfAbsent(canonicalId, normalizedName);
+          }
+        } catch (IllegalArgumentException ignored) {
+          // Invalid IDs are not trusted action-library facts.
+        }
+      }
+      node.elements().forEachRemaining(child -> collectExerciseNames(child, names));
+      return;
+    }
+    if (node.isArray()) {
+      node.elements().forEachRemaining(child -> collectExerciseNames(child, names));
+    }
   }
 
   private Map<String, Object> argumentsFromToolCallBlocks(
@@ -953,16 +1022,55 @@ public final class PublishedAgentPlaygroundRuntime {
   }
 
   private static java.util.Optional<Map<String, Object>> planProposal(
-      Map<String, Object> arguments) {
+      Map<String, Object> arguments, Map<String, String> exerciseNames) {
     Object request = arguments.get("request");
     if (!(request instanceof Map<?, ?> value)) {
       return java.util.Optional.empty();
     }
     Map<String, Object> plan = stringKeyedMap(value);
-    if (!(plan.get("scope") instanceof String) || !(plan.get("days") instanceof List<?>)) {
+    if (!(plan.get("scope") instanceof String) || !(plan.get("days") instanceof List<?> rawDays)) {
       return java.util.Optional.empty();
     }
-    return java.util.Optional.of(plan);
+    var days = new ArrayList<Map<String, Object>>();
+    for (Object rawDay : rawDays) {
+      if (!(rawDay instanceof Map<?, ?> dayValue)) {
+        return java.util.Optional.empty();
+      }
+      var day = new LinkedHashMap<>(stringKeyedMap(dayValue));
+      Object rawExerciseIds = day.remove("exerciseIds");
+      if (!(rawExerciseIds instanceof List<?> exerciseIds)) {
+        return java.util.Optional.empty();
+      }
+      var exercises = new ArrayList<Map<String, Object>>();
+      for (int index = 0; index < exerciseIds.size(); index++) {
+        Object rawExerciseId = exerciseIds.get(index);
+        String exerciseId =
+            rawExerciseId instanceof UUID valueId
+                ? valueId.toString()
+                : rawExerciseId instanceof String text ? text.trim() : "";
+        if (exerciseId.isEmpty()) {
+          return java.util.Optional.empty();
+        }
+        String canonicalId;
+        try {
+          canonicalId = UUID.fromString(exerciseId).toString();
+        } catch (IllegalArgumentException ignored) {
+          canonicalId = exerciseId;
+        }
+        exercises.add(
+            Map.of(
+                "exerciseId",
+                exerciseId,
+                "name",
+                exerciseNames.getOrDefault(canonicalId, "动作 " + (index + 1))));
+      }
+      day.put("exercises", List.copyOf(exercises));
+      days.add(Map.copyOf(day));
+    }
+    var proposal = new LinkedHashMap<String, Object>();
+    proposal.put("scope", plan.get("scope"));
+    proposal.put("days", List.copyOf(days));
+    return java.util.Optional.of(Map.copyOf(proposal));
   }
 
   private static Map<String, Object> stringKeyedMap(Map<?, ?> values) {
@@ -1134,7 +1242,8 @@ public final class PublishedAgentPlaygroundRuntime {
 
   private record AdapterOutcome(String response, int toolCalls, PendingApproval pendingApproval) {}
 
-  private record PendingApproval(String toolKey, String title, Map<String, Object> arguments) {}
+  private record PendingApproval(
+      String toolKey, String title, Map<String, Object> arguments, Map<String, Object> proposal) {}
 
   public record ApprovalDecision(
       UUID runId, UUID conversationId, String status, Instant updatedAt, Object toolResult) {}

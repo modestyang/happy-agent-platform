@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,9 +72,27 @@ class JdbcAdminWorkbenchStoreTest {
     assertEquals("minimax", draft.providerKey());
     assertEquals("minimax-m3", draft.modelKey());
     assertEquals(16, draft.maxToolCalls());
-    assertTrue(draft.toolKeys().contains("fitness.exercise.candidates.query"));
-    assertTrue(draft.toolKeys().contains("fitness.exercise.details.query"));
-    assertTrue(draft.toolKeys().contains("fitness.exercise.catalog.search"));
+    assertEquals(
+        Set.of(
+            "fitness.user.profile.query",
+            "fitness.goal.current.query",
+            "fitness.training.constraints.query",
+            "fitness.nutrition.preferences.query",
+            "fitness.body.latest.query",
+            "fitness.body.trend.query",
+            "fitness.workout.schedule.query",
+            "fitness.workout.history.query",
+            "fitness.workout.summary.query",
+            "fitness.exercise.candidates.query",
+            "fitness.exercise.catalog.search",
+            "fitness.exercise.details.query",
+            "fitness.meal.history.query",
+            "fitness.meal.summary.query",
+            "fitness.meal.recommendations.query",
+            "fitness.meal.feedback.query",
+            "fitness.nutrition.targets.estimate",
+            "fitness.plan.save"),
+        Set.copyOf(draft.toolKeys()));
     assertEquals(2, resources.listProviders().size());
     assertTrue(resources.listProviders().stream().noneMatch(item -> item.configured()));
     assertEquals(
@@ -99,15 +118,35 @@ class JdbcAdminWorkbenchStoreTest {
                 "SELECT template FROM agent_prompts WHERE prompt_key='fitness.coach.prompt'",
                 String.class)
             .startsWith("你是“花爷”"));
-    var requiredTools =
+    var planRequiredTools =
         mapper.readTree(
             new JdbcTemplate(dataSource)
                 .queryForObject(
                     "SELECT required_tool_keys::text FROM agent_skills WHERE skill_key='fitness.plan.skill'",
                     String.class));
-    assertTrue(requiredTools.toString().contains("fitness.exercise.candidates.query"));
-    assertTrue(requiredTools.toString().contains("fitness.exercise.details.query"));
-    assertFalse(requiredTools.toString().contains("fitness.exercise.catalog.search"));
+    assertTrue(planRequiredTools.toString().contains("fitness.exercise.candidates.query"));
+    assertTrue(planRequiredTools.toString().contains("fitness.exercise.details.query"));
+    assertFalse(planRequiredTools.toString().contains("fitness.exercise.catalog.search"));
+    var mealRequiredTools =
+        mapper.readTree(
+            new JdbcTemplate(dataSource)
+                .queryForObject(
+                    "SELECT required_tool_keys::text FROM agent_skills WHERE skill_key='fitness.meal.skill'",
+                    String.class));
+    assertEquals(
+        mapper.valueToTree(
+            List.of(
+                "fitness.user.profile.query",
+                "fitness.goal.current.query",
+                "fitness.body.latest.query",
+                "fitness.nutrition.preferences.query",
+                "fitness.workout.summary.query",
+                "fitness.meal.summary.query",
+                "fitness.meal.history.query",
+                "fitness.meal.recommendations.query",
+                "fitness.meal.feedback.query",
+                "fitness.nutrition.targets.estimate")),
+        mealRequiredTools);
   }
 
   @Test

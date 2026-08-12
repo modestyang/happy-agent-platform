@@ -81,7 +81,7 @@ class FitnessAgentRunServiceTest {
                 "eventType", "BLOCK_STARTED",
                 "blockId", "thinking-1",
                 "type", "THINKING",
-                "toolKey", "fitness.exercise.search"),
+                "toolKey", "fitness.exercise.catalog.search"),
             now);
     var thinkingDelta =
         new JdbcRunTraceRepository.StreamEvent(
@@ -96,7 +96,7 @@ class FitnessAgentRunServiceTest {
         new JdbcRunTraceRepository.StreamEvent(
             3,
             "RUN_EVENT",
-            Map.of("eventType", "TOOL_STARTED", "toolKey", "fitness.exercise.search"),
+            Map.of("eventType", "TOOL_STARTED", "toolKey", "fitness.exercise.catalog.search"),
             now);
 
     var projectedThinking = FitnessAgentRunService.projectUserEvent(thinkingStarted).orElseThrow();

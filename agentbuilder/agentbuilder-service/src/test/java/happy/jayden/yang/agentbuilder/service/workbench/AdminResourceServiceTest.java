@@ -77,12 +77,12 @@ class AdminResourceServiceTest {
                 "用户需要三餐建议时",
                 "用户只记录饮食时",
                 "先读取用户档案，再生成建议。",
-                List.of("fitness.profile.query")));
+                List.of("fitness.user.profile.query")));
 
     assertEquals(1, prompt.revision());
     assertEquals("meal.prompt", prompt.promptKey());
     assertEquals(1, skill.revision());
-    assertEquals(List.of("fitness.profile.query"), skill.requiredToolKeys());
+    assertEquals(List.of("fitness.user.profile.query"), skill.requiredToolKeys());
   }
 
   @Test
@@ -242,6 +242,6 @@ class AdminResourceServiceTest {
   }
 
   private static AdminResourceService service(MemoryPort port) {
-    return new AdminResourceService(port, java.util.Set.of("fitness.profile.query"));
+    return new AdminResourceService(port, java.util.Set.of("fitness.user.profile.query"));
   }
 }

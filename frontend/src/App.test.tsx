@@ -194,6 +194,47 @@ describe('App', () => {
     }
   });
 
+  it('uses the approved readable type scale throughout AI chat', () => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync('src/app.css', 'utf8');
+    document.head.append(style);
+
+    try {
+      render(<main className="phone">
+        <section className="page ai-page">
+          <div className="message-body">训练正文</div>
+          <details className="run-progress"><summary>处理进度</summary></details>
+          <section className="surface-card run-approval">
+            <header><strong>保存训练计划</strong><small>当天</small></header>
+            <article><b>全身训练</b><small>20 分钟 · 深蹲</small></article>
+            <footer><button type="button">暂不保存</button><button type="button">确认并保存</button></footer>
+          </section>
+          <div className="prompt-row"><button type="button">具体怎么做</button></div>
+          <form className="composer"><input aria-label="问花爷" /></form>
+          <small className="session-note">会话 24 小时无操作后自动结束</small>
+        </section>
+        <div className="message-body" data-testid="outside-ai-message">页面外正文</div>
+      </main>);
+
+      const messageBody = screen.getByText('训练正文');
+      const progress = screen.getByText('处理进度').closest('.run-progress') as HTMLElement;
+      const approvalButton = screen.getByRole('button', { name: '确认并保存' });
+      const promptButton = screen.getByRole('button', { name: '具体怎么做' });
+      const sessionNote = screen.getByText('会话 24 小时无操作后自动结束');
+      const composerInput = screen.getByRole('textbox', { name: '问花爷' });
+      expect(getComputedStyle(messageBody).fontSize).toBe('16px');
+      expect(getComputedStyle(messageBody).lineHeight).toBe('1.65');
+      expect(getComputedStyle(progress).fontSize).toBe('14px');
+      expect(getComputedStyle(approvalButton).fontSize).toBe('14px');
+      expect(getComputedStyle(promptButton).fontSize).toBe('14px');
+      expect(getComputedStyle(sessionNote).fontSize).toBe('11px');
+      expect(getComputedStyle(composerInput).fontSize).toBe('16px');
+      expect(getComputedStyle(screen.getByTestId('outside-ai-message')).lineHeight).not.toBe('1.65');
+    } finally {
+      style.remove();
+    }
+  });
+
   it('opens today meal recommendations instead of the meal record drawer', async () => {
     vi.setSystemTime(new Date('2026-08-06T10:00:00+08:00'));
     mockFetch();

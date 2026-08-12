@@ -406,7 +406,7 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
 
   void seedDefaults() {
     jdbc.update(
-        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','花爷健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','minimax','minimax-m3','fitness.coach.prompt','[\"fitness.profile.query\",\"fitness.workout.query\",\"fitness.meal.query\",\"fitness.meal.feedback_context\",\"fitness.goal.current.query\",\"fitness.training.constraints.query\",\"fitness.body.latest.query\",\"fitness.workout.summary.query\",\"fitness.workout.schedule.query\",\"fitness.exercise.candidates.query\",\"fitness.exercise.catalog.search\",\"fitness.exercise.details.query\",\"fitness.plan.save\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,16) ON CONFLICT(agent_key) DO NOTHING");
+        "INSERT INTO agent_drafts(agent_key,name,description,status,framework_key,provider_key,model_key,prompt_key,tool_keys,skill_keys,hook_keys,memory_key,temperature,max_tool_calls) VALUES ('fitness.coach','花爷健身教练','结合用户的训练、饮食与身体记录，提供可执行的日常陪伴。','DRAFT','agentscope','minimax','minimax-m3','fitness.coach.prompt','[\"fitness.user.profile.query\",\"fitness.goal.current.query\",\"fitness.training.constraints.query\",\"fitness.nutrition.preferences.query\",\"fitness.body.latest.query\",\"fitness.body.trend.query\",\"fitness.workout.schedule.query\",\"fitness.workout.history.query\",\"fitness.workout.summary.query\",\"fitness.exercise.candidates.query\",\"fitness.exercise.catalog.search\",\"fitness.exercise.details.query\",\"fitness.meal.history.query\",\"fitness.meal.summary.query\",\"fitness.meal.recommendations.query\",\"fitness.meal.feedback.query\",\"fitness.nutrition.targets.estimate\",\"fitness.plan.save\"]'::jsonb,'[\"fitness.meal.skill\",\"fitness.plan.skill\"]'::jsonb,'[\"fitness.safety\"]'::jsonb,'fitness.daily-memory',0.5,16) ON CONFLICT(agent_key) DO NOTHING");
     seedComponent(
         "FRAMEWORK",
         "agentscope",
@@ -510,34 +510,6 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         Map.of("retentionHours", 24, "maxTokens", 12000));
     seedComponent(
         "TOOL",
-        "fitness.profile.query",
-        "读取用户档案",
-        "读取基础信息、目标与偏好",
-        "AVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
-    seedComponent(
-        "TOOL",
-        "fitness.workout.query",
-        "读取训练记录",
-        "按日期读取训练计划和完成记录",
-        "AVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
-    seedComponent(
-        "TOOL",
-        "fitness.meal.query",
-        "读取饮食记录",
-        "读取历史饮食和当日推荐",
-        "AVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
-    seedComponent(
-        "TOOL",
-        "fitness.meal.feedback_context",
-        "读取饮食偏好反馈",
-        "读取近 30 天饮食偏好反馈，仅作为生成建议的参考数据",
-        "AVAILABLE",
-        Map.of("risk", "LOW", "sideEffect", "READ_ONLY", "source", "LOCAL_BEAN"));
-    seedComponent(
-        "TOOL",
         "fitness.exercise.candidates.query",
         "筛选训练计划候选动作",
         "按用户经验、器械和冲击限制返回有界候选动作",
@@ -590,10 +562,16 @@ public final class JdbcAdminWorkbenchStore implements AdminWorkbenchPort {
         Map.of(
             "requiredTools",
             List.of(
-                "fitness.profile.query",
-                "fitness.workout.query",
-                "fitness.meal.query",
-                "fitness.meal.feedback_context"),
+                "fitness.user.profile.query",
+                "fitness.goal.current.query",
+                "fitness.body.latest.query",
+                "fitness.nutrition.preferences.query",
+                "fitness.workout.summary.query",
+                "fitness.meal.summary.query",
+                "fitness.meal.history.query",
+                "fitness.meal.recommendations.query",
+                "fitness.meal.feedback.query",
+                "fitness.nutrition.targets.estimate"),
             "runtimeReady",
             false));
     seedComponent(

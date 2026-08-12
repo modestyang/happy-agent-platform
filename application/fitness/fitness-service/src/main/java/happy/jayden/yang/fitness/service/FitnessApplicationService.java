@@ -342,12 +342,6 @@ public final class FitnessApplicationService {
     return deserialize.apply(entry.get().responseJson());
   }
 
-  /** Loads data for a trusted in-process Agent Tool context. */
-  public BootstrapData loadForTool(UUID userId) {
-    return store.loadBootstrap(
-        java.util.Objects.requireNonNull(userId, "userId"), LocalDate.now(USER_ZONE));
-  }
-
   public BodyRecordDto createBodyRecord(String sessionToken, CreateBodyRecordRequest request) {
     if (request == null || (request.weightJin() == null && request.waistCm() == null)) {
       throw new InvalidRequestException("weightJin 和 waistCm 至少填写一个");
@@ -474,12 +468,6 @@ public final class FitnessApplicationService {
       throw new InvalidRequestException("OTHER 说明必须为 1 到 300 个字符");
     }
     return store.upsertMealRecommendationFeedback(authenticate(sessionToken), request);
-  }
-
-  public FitnessDtos.MealRecommendationFeedbackContext mealRecommendationFeedbackContext(
-      UUID userId) {
-    return store.mealRecommendationFeedbackContext(
-        userId, Instant.now().minus(Duration.ofDays(30)));
   }
 
   /** Reads only a durable plan state; it never fabricates an answer when no run exists. */

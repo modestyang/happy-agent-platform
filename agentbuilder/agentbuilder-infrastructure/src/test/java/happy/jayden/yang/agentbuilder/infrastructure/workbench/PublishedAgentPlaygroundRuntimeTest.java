@@ -2,6 +2,7 @@ package happy.jayden.yang.agentbuilder.infrastructure.workbench;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -278,6 +279,115 @@ class PublishedAgentPlaygroundRuntimeTest {
   }
 
   @Test
+  void projectsTrustedExerciseNamesWithoutChangingFrozenPlanArguments() throws Exception {
+    configureMiniMaxCredential();
+    UUID knownId = UUID.fromString("60000000-0000-0000-0000-000000000001");
+    UUID unknownId = UUID.fromString("60000000-0000-0000-0000-000000000002");
+    var runtime =
+        workoutPlanRuntime(
+            "plan.display",
+            List.of("fitness.exercise.candidates.query", "fitness.plan.save"),
+            knownId,
+            unknownId,
+            List.of(new TrustedExerciseCandidateTool(), new ConfirmedPlanTool()));
+
+    var started =
+        runtime.startStreaming("plan.display", UUID.randomUUID(), "保存全身训练计划", Runnable::run);
+
+    var approvalEvent =
+        traces.streamEventsAfter(started.runId(), 0).stream()
+            .filter(event -> event.type().equals("APPROVAL"))
+            .findFirst()
+            .orElseThrow();
+    var proposal = assertInstanceOf(Map.class, approvalEvent.data().get("proposal"));
+    var days = assertInstanceOf(List.class, proposal.get("days"));
+    var day = assertInstanceOf(Map.class, days.get(0));
+    var exercises = assertInstanceOf(List.class, day.get("exercises"));
+    var knownExercise = assertInstanceOf(Map.class, exercises.get(0));
+    var unknownExercise = assertInstanceOf(Map.class, exercises.get(1));
+    assertEquals("深蹲", knownExercise.get("name"));
+    assertEquals("动作 2", unknownExercise.get("name"));
+    assertFalse(knownId.toString().equals(knownExercise.get("name")));
+    assertFalse(unknownId.toString().equals(unknownExercise.get("name")));
+
+    UUID approvalId =
+        jdbc.queryForObject(
+            "SELECT approval_id FROM agent_run_approvals WHERE run_id=?",
+            UUID.class,
+            started.runId());
+    var stored = traces.findApproval(started.runId(), approvalId).orElseThrow();
+    var frozenRequest = assertInstanceOf(Map.class, stored.arguments().get("request"));
+    var frozenDays = assertInstanceOf(List.class, frozenRequest.get("days"));
+    var frozenDay = assertInstanceOf(Map.class, frozenDays.get(0));
+    assertFalse(frozenDay.containsKey("exercises"));
+    assertEquals(List.of(knownId.toString(), unknownId.toString()), frozenDay.get("exerciseIds"));
+  }
+
+  @Test
+  void ignoresExerciseNamesFromUnboundToolResults() {
+    configureMiniMaxCredential();
+    UUID knownId = UUID.fromString("60000000-0000-0000-0000-000000000001");
+    UUID unknownId = UUID.fromString("60000000-0000-0000-0000-000000000002");
+    var runtime =
+        workoutPlanRuntime(
+            "plan.unbound-display",
+            List.of("fitness.plan.save"),
+            knownId,
+            unknownId,
+            List.of(new ConfirmedPlanTool()));
+
+    var started =
+        runtime.startStreaming(
+            "plan.unbound-display", UUID.randomUUID(), "保存全身训练计划", Runnable::run);
+
+    var approvalEvent =
+        traces.streamEventsAfter(started.runId(), 0).stream()
+            .filter(event -> event.type().equals("APPROVAL"))
+            .findFirst()
+            .orElseThrow();
+    var proposal = assertInstanceOf(Map.class, approvalEvent.data().get("proposal"));
+    var days = assertInstanceOf(List.class, proposal.get("days"));
+    var day = assertInstanceOf(Map.class, days.get(0));
+    var exercises = assertInstanceOf(List.class, day.get("exercises"));
+    assertEquals("动作 1", assertInstanceOf(Map.class, exercises.get(0)).get("name"));
+  }
+
+  private PublishedAgentPlaygroundRuntime workoutPlanRuntime(
+      String agentKey,
+      List<String> toolKeys,
+      UUID knownId,
+      UUID unknownId,
+      List<Object> toolBeans) {
+    var draft = workbench.createDraft(new CreateAgentRequest(agentKey, "计划确认展示", "使用可信动作名称展示保存确认"));
+    workbench.publish(
+        workbench.updateDraft(
+            agentKey,
+            new DraftUpdate(
+                draft.name(),
+                draft.description(),
+                draft.frameworkKey(),
+                draft.providerKey(),
+                draft.modelKey(),
+                draft.promptKey(),
+                toolKeys,
+                draft.skillKeys(),
+                draft.hookKeys(),
+                draft.memoryKey(),
+                draft.temperature(),
+                draft.maxToolCalls()),
+            draft.revision()));
+    var scanner = new SpringToolCatalogScanner("test", List.of());
+    return new PublishedAgentPlaygroundRuntime(
+        dataSource,
+        new ObjectMapper().findAndRegisterModules(),
+        masterKey,
+        traces,
+        new AgentFrameworkRegistry(List.of(new WorkoutPlanConfirmationAdapter(knownId, unknownId))),
+        new DefaultToolRegistry(toolBeans.stream().map(scanner::scanRegistration).toList()),
+        (hookKey, context) -> {});
+  }
+
+  @Test
   void freezesFrameworkToolArgumentsUntilTheRunOwnerApproves() throws Exception {
     configureMiniMaxCredential();
     var draft = workbench.createDraft(new CreateAgentRequest("plan.writer", "计划保存", "确认后写入计划"));
@@ -551,6 +661,74 @@ class PublishedAgentPlaygroundRuntimeTest {
     }
   }
 
+  private static final class WorkoutPlanConfirmationAdapter implements AgentFrameworkAdapter {
+    private final UUID knownId;
+    private final UUID unknownId;
+
+    private WorkoutPlanConfirmationAdapter(UUID knownId, UUID unknownId) {
+      this.knownId = knownId;
+      this.unknownId = unknownId;
+    }
+
+    @Override
+    public String key() {
+      return "agentscope";
+    }
+
+    @Override
+    public FrameworkCapabilities capabilities() {
+      return new FrameworkCapabilities(true, true, true, true, true, true);
+    }
+
+    @Override
+    public void validate(happy.jayden.yang.agentbuilder.core.defaults.ResolvedAgentConfig config) {}
+
+    @Override
+    public Flux<RunEvent> run(RunRequest request) {
+      Instant now = Instant.now();
+      return Flux.just(
+          RunEvent.replyStarted(1, now, "reply-plan", request.runId()),
+          new RunEvent(
+              2,
+              RunEvent.Type.TOOL_RESULT,
+              now,
+              Map.of(
+                  "toolName",
+                  "fitness_exercise_candidates_query",
+                  "result",
+                  Map.of(
+                      "candidates",
+                      List.of(Map.of("exerciseId", knownId.toString(), "name", "深蹲"))))),
+          new RunEvent(
+              3,
+              RunEvent.Type.CONFIRMATION_REQUIRED,
+              now,
+              Map.of(
+                  "toolName",
+                  "fitness_plan_save",
+                  "arguments",
+                  Map.of(
+                      "request",
+                      Map.of(
+                          "scope",
+                          "DAY",
+                          "days",
+                          List.of(
+                              Map.of(
+                                  "scheduledFor",
+                                  "2026-08-13",
+                                  "title",
+                                  "全身循环训练",
+                                  "estimatedMinutes",
+                                  20,
+                                  "exerciseIds",
+                                  List.of(knownId.toString(), unknownId.toString()))))))),
+          new RunEvent(
+              4, RunEvent.Type.RUN_WAITING_APPROVAL, now, Map.of("toolName", "fitness_plan_save")),
+          RunEvent.replySuspended(5, now, "reply-plan", "USER_CONFIRMATION"));
+    }
+  }
+
   private static final class DirectConfirmationAdapter implements AgentFrameworkAdapter {
     @Override
     public String key() {
@@ -616,6 +794,56 @@ class PublishedAgentPlaygroundRuntimeTest {
       return "saved";
     }
   }
+
+  static final class ConfirmedPlanTool {
+    @AgentTool(
+        key = "fitness.plan.save",
+        version = 1,
+        runtimeName = "fitness_plan_save",
+        displayName = "保存训练计划",
+        description = "确认后保存测试训练计划",
+        whenToUse = "用户确认保存时",
+        whenNotToUse = "用户未确认时",
+        applicationKey = "fitness",
+        group = "plan",
+        sideEffect = ToolSideEffect.WRITE,
+        risk = ToolRiskLevel.MEDIUM,
+        requiredScopes = {"fitness.write"},
+        outputDescription = "保存结果")
+    String save(
+        @AgentToolParam(name = "request", description = "冻结的训练计划") ConfirmedPlanRequest request,
+        ToolExecutionContext context) {
+      return "saved";
+    }
+  }
+
+  static final class TrustedExerciseCandidateTool {
+    @AgentTool(
+        key = "fitness.exercise.candidates.query",
+        version = 1,
+        runtimeName = "fitness_exercise_candidates_query",
+        displayName = "筛选候选动作",
+        description = "返回可信候选动作",
+        whenToUse = "制定训练计划时",
+        whenNotToUse = "无需制定训练计划时",
+        applicationKey = "fitness",
+        group = "exercise",
+        requiredScopes = {"fitness.read"},
+        outputDescription = "候选动作")
+    String query(ToolExecutionContext context) {
+      return context.userId();
+    }
+  }
+
+  record ConfirmedPlanRequest(
+      @AgentToolParam(description = "计划范围") String scope,
+      @AgentToolParam(description = "逐日训练计划") List<ConfirmedPlanDay> days) {}
+
+  record ConfirmedPlanDay(
+      @AgentToolParam(description = "训练日期") String scheduledFor,
+      @AgentToolParam(description = "训练标题") String title,
+      @AgentToolParam(description = "预计分钟") int estimatedMinutes,
+      @AgentToolParam(description = "动作 ID") List<UUID> exerciseIds) {}
 
   static final class BackgroundTaskTools {
     @AgentTool(

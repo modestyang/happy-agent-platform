@@ -265,6 +265,20 @@ class FitnessAgentQueryServiceTest {
   }
 
   @Test
+  void exerciseCandidatesTreatWholeBodyAsNoFocusWithoutRelaxingHardLimits() {
+    when(store.findExerciseCandidates(any()))
+        .thenReturn(new ExerciseCandidatePage(List.of(), 0, 0, List.of()));
+
+    queries.exerciseCandidates(
+        USER_ID, List.of(" 全身 "), ExerciseImpactLevel.LOW, Integer.valueOf(1));
+
+    var filter = ArgumentCaptor.forClass(ExerciseCandidateFilter.class);
+    verify(store).findExerciseCandidates(filter.capture());
+    assertEquals(List.of(), filter.getValue().focusAreas());
+    assertEquals(ExerciseImpactLevel.LOW, filter.getValue().maxImpactLevel());
+  }
+
+  @Test
   void exerciseCandidatesValidateFocusAreasAndBoundedPages() {
     assertThrows(
         IllegalArgumentException.class,
@@ -275,6 +289,11 @@ class FitnessAgentQueryServiceTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> queries.exerciseCandidates(USER_ID, List.of("臀腿", "臀腿"), null, 1));
+    var mixed =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> queries.exerciseCandidates(USER_ID, List.of("全身", "核心"), null, 1));
+    assertEquals("全身不能与具体部位同时使用", mixed.getMessage());
     assertThrows(
         IllegalArgumentException.class,
         () -> queries.exerciseCandidates(USER_ID, List.of(), null, 0));

@@ -75,10 +75,18 @@ public final class FitnessSkillRegistry implements RuntimeCapabilityRegistry, Ru
     public SkillResult execute(AgentExecutionContext context, Map<String, Object> input)
         throws Exception {
       var facts = new LinkedHashMap<String, Object>();
-      facts.put("bodyMetrics", context.invokeTool("fitness.profile.query", Map.of()));
-      facts.put("recentTraining", context.invokeTool("fitness.workout.query", Map.of()));
-      facts.put("mealHistory", context.invokeTool("fitness.meal.query", Map.of()));
-      facts.put("recentFeedback", context.invokeTool("fitness.meal.feedback_context", Map.of()));
+      facts.put("profile", context.invokeTool("fitness.user.profile.query", Map.of()));
+      facts.put("goal", context.invokeTool("fitness.goal.current.query", Map.of()));
+      facts.put("body", context.invokeTool("fitness.body.latest.query", Map.of()));
+      facts.put("preferences", context.invokeTool("fitness.nutrition.preferences.query", Map.of()));
+      facts.put("recentTraining", context.invokeTool("fitness.workout.summary.query", Map.of()));
+      facts.put("mealSummary", context.invokeTool("fitness.meal.summary.query", Map.of()));
+      facts.put("mealHistory", context.invokeTool("fitness.meal.history.query", Map.of()));
+      facts.put(
+          "recommendations", context.invokeTool("fitness.meal.recommendations.query", Map.of()));
+      facts.put("recentFeedback", context.invokeTool("fitness.meal.feedback.query", Map.of()));
+      facts.put(
+          "nutritionTargets", context.invokeTool("fitness.nutrition.targets.estimate", Map.of()));
       return new SkillResult(
           key(),
           Map.of(

@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew Happy Agent IP certificate
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/happy-agent/current
+Environment=HAPPY_AGENT_ROOT=/opt/happy-agent
+ExecStart=/opt/happy-agent/current/scripts/renew-certificate.sh

@@ -1,0 +1,28 @@
+happy:
+  datasource:
+    fitness:
+      url: ${HAPPY_DB_URL:jdbc:postgresql://postgres:5432/happy_agent}
+      username: fitness_app
+      password: ${FITNESS_DB_PASSWORD}
+    agent:
+      url: ${HAPPY_DB_URL:jdbc:postgresql://postgres:5432/happy_agent}
+      username: agent_app
+      password: ${AGENT_DB_PASSWORD}
+  security:
+    secure-cookies: true
+  fitness:
+    local-seed:
+      enabled: false
+    local-media:
+      enabled: true
+    meal-plan:
+      concurrency: 2
+  agent:
+    workbench:
+      local-seed:
+        enabled: false
+      master-key-file: ${HAPPY_AGENT_MASTER_KEY_FILE:/run/secrets/agent-master-key}
+
+server:
+  port: 8080
+  forward-headers-strategy: framework

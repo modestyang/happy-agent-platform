@@ -67,6 +67,47 @@ class DatabaseInfrastructureStaticTest {
     assertThat(integrationTest).doesNotContain("/docker-entrypoint-initdb.d/01-init.sql");
   }
 
+  @Test
+  void productionRolesOnlyInitDoesNotCreateApplicationSchemas() throws IOException {
+    String initScript =
+        Files.readString(projectRoot().resolve("deploy/production/postgres/init-roles.sh"));
+    String initSql =
+        Files.readString(projectRoot().resolve("deploy/production/postgres/init-roles.sql"));
+
+    assertThat(initScript).contains("set -eu");
+    assertThat(initScript).contains("--set=ON_ERROR_STOP=1");
+    assertThat(initScript).contains("FITNESS_DB_PASSWORD_FILE");
+    assertThat(initScript).contains("AGENT_DB_PASSWORD_FILE");
+    assertThat(initSql).contains("CREATE ROLE fitness_app");
+    assertThat(initSql).contains("CREATE ROLE agent_app");
+    assertThat(initSql).contains("NOINHERIT");
+    assertThat(initSql).contains("REVOKE ALL ON DATABASE happy_agent FROM PUBLIC");
+    assertThat(initSql).doesNotContain("CREATE SCHEMA fitness");
+    assertThat(initSql).doesNotContain("CREATE SCHEMA agent");
+    assertThat(initSql).doesNotContain("CREATE EXTENSION");
+    assertThat(initSql).doesNotContain("CREATE TABLE");
+  }
+
+  @Test
+  void postRestoreIsolationRevokesCrossSchemaAccessAndSetsDefaults() throws IOException {
+    String isolationSql =
+        Files.readString(projectRoot().resolve("deploy/production/postgres/enforce-isolation.sql"));
+
+    assertThat(isolationSql).contains("ALTER SCHEMA fitness OWNER TO fitness_app");
+    assertThat(isolationSql).contains("ALTER SCHEMA agent OWNER TO agent_app");
+    assertThat(isolationSql).contains("REVOKE ALL ON SCHEMA fitness FROM agent_app");
+    assertThat(isolationSql).contains("REVOKE ALL ON SCHEMA agent FROM fitness_app");
+    assertThat(isolationSql)
+        .contains(
+            "ALTER ROLE fitness_app IN DATABASE happy_agent SET search_path TO fitness, public");
+    assertThat(isolationSql)
+        .contains("ALTER ROLE agent_app IN DATABASE happy_agent SET search_path TO agent, public");
+    assertThat(isolationSql)
+        .contains("ALTER DEFAULT PRIVILEGES FOR ROLE fitness_app IN SCHEMA fitness");
+    assertThat(isolationSql)
+        .contains("ALTER DEFAULT PRIVILEGES FOR ROLE agent_app IN SCHEMA agent");
+  }
+
   private static Path projectRoot() {
     Path directory = Path.of("").toAbsolutePath();
     while (directory != null) {

@@ -267,3 +267,31 @@
 - 自动化验证通过：Maven 全 reactor（含 Architecture Tests）零失败；前端 16 个文件 131/131，TypeScript、ESLint、生产构建和 Spotless 均通过。Maven 退出时仍有既有后台 Worker 访问已关闭 Testcontainers 的噪声日志，但最终退出码为 0。
 - 本地 Agent V1 校验和按预生产单一基线规则同步；现有 Plan Skill 更新为 8 个必要 Tool、草稿更新为 18 个现行 Tool，管理校验无错误/警告并发布 `fitness.coach` v17。
 - 390×844 页面验收通过：处理进度先展开“理解需求 → 查看记录”，正文开始后在回复前自动收起；输入“全身”时 `fitness_exercise_candidates_query` 成功返回；确认卡展示 6 个动作中文名，无 UUID；确认保存后 8 月 13 日计划页展示完整 6 个动作，浏览器控制台无错误。
+
+## 2026-08-12 阿里云 ECS 一键部署方案
+
+- 已启动只读方案调研，确认本轮先设计、后确认，暂不修改部署实现、CI/CD、migration 或生产数据。
+- 已发现仓库已有一套阿里云部署文档/脚本和数据库导出恢复工具；下一步将逐文件审计其完整性、幂等性、安全边界及对现有数据的支持情况。
+- 已按 `planning-with-files` 将目标、约束、初步发现与进度追加到既有规划文件，未覆盖历史记录。
+- 已完成第一轮部署资产审计：现有阿里云脚本与 Compose/数据库迁移工具采用两套不一致的运行模型，并存在依赖安装、密钥归属、恢复安全和发布回滚缺口，暂不建议直接上 ECS 执行。
+- 已核对运行配置与历史生产设计：当前仓库缺少可工作的 `prod` 配置闭环，历史目标架构尚未实现；方案需要把“主机初始化”和“应用发布”拆成两个幂等阶段，并将数据 dump、Agent master key 和媒体对象作为同一迁移批次处理。
+- 用户已确认采用全量本地状态迁移（选项 A）；开始读取数据库/媒体的非敏感元数据，为迁移预检和容量规划提供依据。
+- 已确认当前 PostgreSQL 容器健康、数据目录约 84MB、媒体约 472KB，适合短暂停写的一次性逻辑备份迁移；master key 必须作为不可重新生成的迁移资产原样复制。
+- 已完成数据库只读盘点：PostgreSQL 16.14、逻辑数据约 24MB、Fitness V16、Agent V1，当前无 vector/pg_trgm 扩展；未查看业务正文或密钥内容。
+- 已通过阿里云和 Docker 官方资料核对当前安装支持；下一步需确认唯一目标操作系统，避免所谓“一键脚本”实际上包含未验证的多发行版分支。
+- 已按用户授权通过 Homebrew 安装阿里云 CLI 3.4.11，并使用 OAuth 临时凭据完成只读 ECS 审计；未创建长期 AccessKey、未修改云资源。
+- 已确认目标 ECS 是乌兰察布 Ubuntu 22.04 2C4G、60GB 单系统盘、公网 IP `39.101.65.254`；安全组当前未开放 80/443，22/3389/ICMP 均对全网开放，且实例未启用释放保护。
+- 云详情查询曾因并行 CLI 请求长期等待而被用户中断；已改为逐条执行并获取全部必要结果，不再继续非必要云查询。
+- 用户进一步要求正式方案直接采用域名方式，域名后续提供，并确认服务器可通过 SSH 登录；开始进行服务器只读运行环境体检。
+- 首次 SSH 因严格主机校验正常拒绝；已取得公开 ED25519 指纹，未绕过验证、未写入本机 SSH 配置，等待用户确认信任。
+- 用户已允许信任并完成指纹复核；SSH 主机验证通过，但 `root`/`ubuntu` 都不接受本机公钥。只读确认云助手在线，尚未下发远程命令或修改服务器 SSH 配置。
+- 已按系统化调试复核私钥路径、模式、指纹和服务端认证日志；根因已定位为服务器未授权本机现有公钥或原私钥缺失，本机常见目录也没有其他候选密钥。未修改 `sshd_config`、未开启 root 密码登录。
+- 用户追加公钥后 SSH root 登录成功。两轮只读体检确认服务器为空白 Ubuntu 22.04：53GB 可用磁盘、无 Docker/Compose、无现有 Web/DB 服务、关键端口空闲；无 Swap、UFW 未启用、系统自动更新和 NTP 正常。
+- 用户要求先按无域名方式处理；官方资料确认当前可为公网 IP 签发 Let’s Encrypt 可信短期证书，方案调整为 IP HTTPS + 自动续期，而不是公网明文 HTTP。
+- 用户已提供证书通知邮箱。生产安全复核发现两个会话 Cookie 均写死 `Secure=false`、旧 `/actuator/health` 实际不存在；已纳入部署前必要代码修复范围，尚未修改生产代码。
+- 用户明确授权实施完整范围。设计规格已写入 `docs/superpowers/specs/2026-08-13-aliyun-ecs-ip-https-deployment-design.md` 并完成占位符、内部一致性、范围和歧义自检；按 brainstorming 书面复核门等待用户确认后再修改生产代码或服务器。
+- 用户已确认书面规格，规格状态更新为“已确认，可进入实施”。
+- 已按 writing-plans 要求完成 9-Task TDD 实施计划 `docs/superpowers/plans/2026-08-13-aliyun-ecs-ip-https-deployment.md`，覆盖 Secure Cookie、prod profile、三容器 Compose、roles-only 空库恢复、Host bootstrap、IP 证书、首次迁移、发布回滚和重启验收。
+- 官方发布信息复核确认 Certbot 5.7.0 是当前版本，5.4.0 起 webroot 支持 IP 证书；registry 实测发现正确镜像标签是 `certbot/certbot:v5.7.0`，不带 `v` 的标签不存在。计划锁定其 digest，staging 与 production 使用隔离证书目录，不使用 `latest`。
+- 计划自检已修正 `pg_dump --no-owner=false` 这一无效写法，明确为省略 `--no-owner` 以保留 owner；远端云命令已固定安全组 `sg-0jlb5v2njkb2jbzrvurr` 和严格 known_hosts，不留省略号占位。
+- 用户选择 Subagent-Driven 并授权隔离分支与本地 commit；已创建 `codex/aliyun-ecs-ip-https-deployment` worktree，`main` 保持干净。下一步建立 SDD ledger 和基线测试，尚未修改生产代码、部署脚本或 ECS。

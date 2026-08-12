@@ -553,3 +553,42 @@
 | 首轮全量 Maven 测试中，旧集成断言仍要求 feedback context 将合法 300 字输入裁剪为 160 字 | 1 | 新 Tool 契约保留 API 允许的最多 300 字并标记 `executable=false`；迁移集成断言验证非可执行标记和 300 字边界，不恢复旧截断行为。 |
 | 本地持久库已应用旧 Agent V1，部署时 Flyway 校验和不一致 | 1 | 按预生产单一 V1 基线规则只修复本地 schema history 校验和，再通过管理 API 更新草稿/Skill 并发布 v17；不新增 migration、不重置业务数据。 |
 | 管理 API 检查命令依赖本机未安装的 `jq` | 1 | 改用仓库已有 Node.js 读取 JSON，不新增依赖。 |
+
+# 2026-08-12 阿里云 ECS 一键部署方案
+
+## 目标
+
+基于当前项目现状设计阿里云 ECS 单机一键部署方案，覆盖宿主机依赖初始化、应用与 PostgreSQL 容器编排、现有数据库数据的安全迁移/恢复、密钥管理、反向代理、健康检查、备份与回滚；先形成并确认设计，不在确认前修改部署实现。
+
+## 阶段
+
+1. [complete] 只读审计现有 `deploy/`、构建产物、运行配置、数据库初始化/备份恢复与近期部署相关提交。
+2. [complete] 逐项确认目标 ECS 操作系统、域名/TLS、部署输入和现有数据来源等边界；用户已确认迁移当前 `deploy/.local/` 全量 PostgreSQL 数据、媒体和 Agent master key/加密凭据，并通过阿里云 CLI 确认目标机为乌兰察布 Ubuntu 22.04 2C4G ECS；当前先以公网 IP + 可信 HTTPS 上线，域名稍后提供，服务器 root SSH 已验证可用。
+3. [complete] 给出 3 种部署路径、权衡与推荐方案；用户授权采用可信构建机生成不可变制品、SSH 发布到 ECS 的方案。
+4. [complete] 提交并确认架构、首次迁移、重复部署、备份恢复、安全与验收设计。
+5. [complete] 正式设计文档已获用户确认；按 TDD、空库恢复、云变更门禁和生产验收拆解为 9 个实施 Task。
+6. [complete] 用户选择 Subagent-Driven；创建隔离 worktree 与本地提交基线，`main` 保持干净。
+7. [in_progress] 按 Task 1–6 逐项 TDD 实施、独立复核、全量验证与可丢弃迁移演练。
+8. [pending] 执行 ECS bootstrap、首次停写迁移、IP HTTPS、备份/回滚/重启验收。
+
+## 当前约束
+
+- 本轮在设计确认前不新增或修改部署脚本、Docker/Compose、CI/CD、migration 和生产数据。
+- 保护仓库中已有规划记录和任何既有改动，不覆盖 `deploy/.local/` 数据。
+- 不把 `.env`、数据库口令、Agent master key 或云凭证提交到 Git。
+- 现有数据迁移采用选项 A：以当前本机 `deploy/.local/` 为源，全量保留用户、Agent 配置/版本、会话、Run、后台任务、媒体与可解密凭据。
+- 当前没有域名，用户要求先按无域名方式部署。Let’s Encrypt 已支持公网 IP 短期证书，临时正式入口调整为 `https://39.101.65.254`；80 仅用于 ACME HTTP-01 与跳转，证书自动续期，后续域名切换不迁移数据。
+- 实施固定 Certbot 5.7.0；5.4.0 是 webroot 支持 IP 证书的最低版本，不使用浮动 `latest`。
+- 实施计划保存于 `docs/superpowers/plans/2026-08-13-aliyun-ecs-ip-https-deployment.md`，设计规格状态已更新为“已确认，可进入实施”。
+
+## Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 初次 `rg --files -g 'deploy/**'` 将 gitignored 的本地 PostgreSQL 数据目录全部列出，输出被截断 | 1 | 后续只读取受版本控制的部署文件，显式排除 `deploy/.local/` 与 `deploy/secrets/`。 |
+| 阿里云 CLI 四个只读详情请求并行执行时至少一个调用长期未返回 | 1 | 用户中断后改为逐条查询；实例、云盘、安全组、VPC 与交换机结果均已取得，未执行云端写操作。 |
+| `DescribeVSwitches` CLI 调用约 3 分钟无即时输出 | 1 | 终止等待时命令已返回所需子网信息；后续不再执行非必要云查询。 |
+| 首次 SSH 只读体检因本机尚未信任 ECS 主机密钥而失败 | 1 | 保持严格主机校验，读取公开 ED25519 指纹并等待用户确认后再写入 `known_hosts`，不使用 `StrictHostKeyChecking=no`。 |
+| 已信任主机指纹后，`root` 与 `ubuntu` 均拒绝本机现有公钥 | 1 | 确认 22 端口与主机身份正常；云助手在线，等待用户明确授权后再决定是否追加本机公钥恢复 SSH，当前未修改服务器。 |
+| 用户提供通用 SSH 排查建议后，显式 `-i ~/.ssh/id_ed25519` 仍被拒绝 | 1 | 依据调试日志确认客户端确实提供指纹 `SHA256:GMJFIHt8NYe7SJD/PCeLmq76B05nL0iotsXf/wwFOms`，服务端再次仅允许 publickey 并拒绝；常见目录无其他 `.pem`/`.key` 候选，根因收敛为缺少匹配的原私钥/服务器未授权当前公钥。 |
+| 首次 Tavily CLI 查询沿用旧参数名 `--search-depth` / `--format` | 1 | 读取当前 CLI help 后改为 `--depth advanced --json`；官方结果确认 Certbot 5.7.0 当前发布与 5.4.0 webroot IP 支持。 |

@@ -10,15 +10,18 @@ activate() {
   backup_core
   for image in "$target"/images/*.tar; do [ -e "$image" ] || continue; docker load -i "$image"; done
   attempts=${HAPPY_AGENT_HEALTH_ATTEMPTS:-12}; interval=${HAPPY_AGENT_HEALTH_INTERVAL:-5}
-  compose_release "$target" up -d postgres app nginx
-  for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if all_services_healthy "$target" && public_smoke; then
-      switch_current "$target"; log "release activated: $1"; return
-    fi
-    sleep "$interval"
-  done
+  if attempt_activation "$target" "$attempts" "$interval"; then log "release activated: $1"; return; fi
   if recover_previous "$target" "$old"; then die "release activation failed; previous release recovered"; fi
   die "release activation failed; previous release recovery failed"
+}
+attempt_activation() {
+  local target=$1 attempts=$2 interval=$3 attempt
+  compose_release "$target" up -d postgres app nginx || return 1
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if all_services_healthy "$target" && public_smoke; then switch_current "$target" || return 1; return; fi
+    sleep "$interval"
+  done
+  return 1
 }
 recover_previous() {
   local attempted=$1 previous=$2 stop_ok=0

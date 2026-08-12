@@ -3,7 +3,7 @@
 set -euo pipefail
 
 : "${HAPPY_AGENT_ROOT:=/opt/happy-agent}"
-: "${HAPPY_AGENT_LOCK_FILE:=$HAPPY_AGENT_ROOT/.operation.lock}"
+HAPPY_AGENT_LOCK_FILE="$HAPPY_AGENT_ROOT/.operation.lock"
 : "${HAPPY_AGENT_OS_RELEASE_PATH:=/etc/os-release}"
 : "${HAPPY_AGENT_FSTAB_PATH:=/etc/fstab}"
 : "${HAPPY_AGENT_SWAPFILE:=/swapfile}"
@@ -73,7 +73,7 @@ verify_manifest() {
 }
 with_lock() {
   validate_root
-  HAPPY_AGENT_LOCK_FILE=$(validate_absolute_path "$HAPPY_AGENT_LOCK_FILE")
+  HAPPY_AGENT_LOCK_FILE=$(validate_descendant "$HAPPY_AGENT_ROOT/.operation.lock")
   mkdir -p -- "$HAPPY_AGENT_ROOT"
   local lock_parent
   lock_parent=$(dirname -- "$HAPPY_AGENT_LOCK_FILE")
@@ -123,6 +123,7 @@ validate_certificate() {
   require_file "$directory/chain.pem"
   openssl x509 -in "$directory/cert.pem" -noout -ext subjectAltName | tr ',' '\n' | sed -n 's/^[[:space:]]*IP Address:\([0-9.]*\)[[:space:]]*$/\1/p' | grep -Fx '39.101.65.254' >/dev/null
   openssl x509 -in "$directory/fullchain.pem" -noout -checkend 172800
+  [ "$(openssl x509 -in "$directory/fullchain.pem" -noout -fingerprint -sha256 | sha256sum | awk '{print $1}')" = "$(openssl x509 -in "$directory/cert.pem" -noout -fingerprint -sha256 | sha256sum | awk '{print $1}')" ] || die "fullchain leaf differs from cert"
   [ "$(openssl x509 -in "$directory/cert.pem" -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')" = "$(openssl pkey -in "$directory/privkey.pem" -pubout -outform DER | sha256sum | awk '{print $1}')" ] || die "certificate and private key do not match"
-  openssl verify -CAfile "$directory/chain.pem" -untrusted "$directory/chain.pem" "$directory/cert.pem" >/dev/null
+  openssl verify -CApath "${HAPPY_AGENT_CA_PATH:-/etc/ssl/certs}" -untrusted "$directory/chain.pem" "$directory/cert.pem" >/dev/null
 }

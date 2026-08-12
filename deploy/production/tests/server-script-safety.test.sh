@@ -137,7 +137,7 @@ case "$*" in
   *'certbot'*)
     if [[ "$*" == *happy-agent-ip-staging* ]]; then d="$HAPPY_AGENT_ROOT/certificates/staging/live/happy-agent-ip-staging"; else d="$HAPPY_AGENT_ROOT/certificates/production/live/happy-agent-ip"; fi
     mkdir -p "$d"; : >"$d/fullchain.pem"; : >"$d/privkey.pem"; : >"$d/cert.pem"; : >"$d/chain.pem";;
-  *' psql '* ) if [ "${FAKE_PSQL_OUTPUT:-0}" != 0 ]; then printf '%s\n' "$FAKE_PSQL_OUTPUT"; elif [[ "$*" == *flyway_schema_history* ]]; then printf '0|0|0|0\n'; elif [[ "$*" == *pg_namespace* ]]; then printf '0\n0\n0\n0\n0\n0\n0\n'; else printf '0\n'; fi;;
+  *' psql '* ) if [ "${FAKE_PSQL_OUTPUT:-0}" != 0 ]; then printf '%s\n' "$FAKE_PSQL_OUTPUT"; elif [[ "$*" == *flyway_schema_history* ]]; then printf '0|0|0|0\n'; elif [[ "$*" == *pg_namespace* ]]; then printf '0\n0\n0\n0\n0\n0\n2\n0\n1\n0\n0\n'; else printf '0\n'; fi;;
   *'compose '*ps*)
     [ "${FAKE_HEALTH_FAIL:-0}" = 1 ] || case "$*" in *postgres*) printf 'postgres running healthy\n';; *nginx*) printf 'nginx running healthy\n';; *app*) printf 'app running healthy\n';; *) printf 'postgres running healthy\napp running healthy\nnginx running healthy\n';; esac;;
 esac
@@ -249,7 +249,7 @@ FAKE_PSQL_OUTPUT=0 "$SCRIPTS/restore-initial-data.sh" "$bundle" --initial-empty-
 assert_not_contains "$LOG" "pg_restore --clean"
 assert_not_contains "$LOG" "pg_restore --create"
 assert_contains "$LOG" "pg_restore --exit-on-error"
-assert_contains "$LOG" "n.nspname not in ('information_schema','public')"
+assert_contains "$LOG" "n.nspname not in ('information_schema','public','fitness','agent')"
 assert_contains "$LOG" "pg_default_acl"
 assert_file_mode "$HAPPY_AGENT_ROOT/secrets/agent-master-key" 600
 cmp "$bundle/agent-master-key" "$HAPPY_AGENT_ROOT/secrets/agent-master-key" || fail "master key was not byte copied"

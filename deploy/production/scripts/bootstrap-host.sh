@@ -5,7 +5,9 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/common.sh"
 
 preflight() {
+  validate_root
   require_root
+  HAPPY_AGENT_OS_RELEASE_PATH=$(validate_system_path "$HAPPY_AGENT_OS_RELEASE_PATH")
   require_file "$HAPPY_AGENT_OS_RELEASE_PATH"
   # shellcheck disable=SC1090
   source "$HAPPY_AGENT_OS_RELEASE_PATH"
@@ -23,8 +25,8 @@ bootstrap() {
   HAPPY_AGENT_APT_KEYRING_DIR=$(validate_system_path "$HAPPY_AGENT_APT_KEYRING_DIR")
   HAPPY_AGENT_APT_SOURCES_DIR=$(validate_system_path "$HAPPY_AGENT_APT_SOURCES_DIR")
   apt-get update
-  apt-get install -y ca-certificates curl gnupg openssl tar
-  require_command curl; require_command gpg
+  apt-get install -y ca-certificates curl file gnupg openssl tar
+  require_command curl; require_command gpg; require_command file
   install -d -m 0755 "$HAPPY_AGENT_APT_KEYRING_DIR" "$HAPPY_AGENT_APT_SOURCES_DIR"
   key_tmp=$(validate_system_path "$HAPPY_AGENT_APT_KEYRING_DIR/.docker.gpg.$$")
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor >"$key_tmp"

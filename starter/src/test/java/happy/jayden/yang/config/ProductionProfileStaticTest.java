@@ -108,7 +108,13 @@ class ProductionProfileStaticTest {
 
     assertThat(run.exitCode()).isZero();
     assertThat(Files.exists(run.invocationMarker())).isTrue();
-    assertThat(run.output()).doesNotContain("fitness-password", "agent-password");
+    assertThat(sensitiveEnvironment(Files.readString(run.javaEnvironment())))
+        .containsExactlyInAnyOrder(
+            "FITNESS_DB_PASSWORD=fitness-password",
+            "AGENT_DB_PASSWORD=agent-password",
+            "HAPPY_AGENT_MASTER_KEY_FILE=" + tempDir.resolve("agent-master-key"));
+    assertThat(run.output())
+        .doesNotContain("fitness-password", "agent-password", "test-master-key-content");
   }
 
   @Test
@@ -124,6 +130,30 @@ class ProductionProfileStaticTest {
   }
 
   @Test
+  void entrypointRejectsEmbeddedCarriageReturnsAndNulBytesBeforeStartingJava(@TempDir Path tempDir)
+      throws IOException, InterruptedException {
+    assumeProductionFilesExist();
+
+    EntrypointRun embeddedCarriageReturn =
+        runEntrypoint(
+            Files.createDirectory(tempDir.resolve("embedded-carriage-return")),
+            "fitness\rpassword".getBytes(StandardCharsets.UTF_8),
+            "agent-password".getBytes(StandardCharsets.UTF_8),
+            true);
+    EntrypointRun embeddedNul =
+        runEntrypoint(
+            Files.createDirectory(tempDir.resolve("embedded-nul")),
+            "fitness\u0000password".getBytes(StandardCharsets.UTF_8),
+            "agent-password".getBytes(StandardCharsets.UTF_8),
+            true);
+
+    assertThat(embeddedCarriageReturn.exitCode()).isNotZero();
+    assertThat(Files.exists(embeddedCarriageReturn.invocationMarker())).isFalse();
+    assertThat(embeddedNul.exitCode()).isNotZero();
+    assertThat(Files.exists(embeddedNul.invocationMarker())).isFalse();
+  }
+
+  @Test
   void entrypointRejectsMissingMasterKeyBeforeStartingJava(@TempDir Path tempDir)
       throws IOException, InterruptedException {
     assumeProductionFilesExist();
@@ -135,17 +165,19 @@ class ProductionProfileStaticTest {
   }
 
   @Test
-  void entrypointDoesNotReadOrLogTheMasterKey() throws IOException {
+  void entrypointRestrictsMasterKeyPathToValidationOnly() throws IOException {
     assumeProductionFilesExist();
 
-    String entrypoint = Files.readString(ENTRYPOINT);
+    List<String> masterKeyReferences =
+        Files.readAllLines(ENTRYPOINT).stream()
+            .map(String::trim)
+            .filter(line -> line.contains("HAPPY_AGENT_MASTER_KEY_FILE"))
+            .toList();
 
-    assertThat(entrypoint)
-        .contains("HAPPY_AGENT_MASTER_KEY_FILE")
-        .contains("exec java")
-        .doesNotContain("cat \"$HAPPY_AGENT_MASTER_KEY_FILE\"")
-        .doesNotContain("read HAPPY_AGENT_MASTER_KEY_FILE")
-        .doesNotContain("echo \"$HAPPY_AGENT_MASTER_KEY_FILE\"");
+    assertThat(masterKeyReferences)
+        .containsExactly(
+            ": \"${HAPPY_AGENT_MASTER_KEY_FILE:?HAPPY_AGENT_MASTER_KEY_FILE is required}\"",
+            "validate_file \"HAPPY_AGENT_MASTER_KEY_FILE\" \"$HAPPY_AGENT_MASTER_KEY_FILE\"");
   }
 
   @Test
@@ -181,25 +213,41 @@ class ProductionProfileStaticTest {
   private static EntrypointRun runEntrypoint(
       Path tempDir, String fitnessPassword, String agentPassword, boolean createMasterKey)
       throws IOException, InterruptedException {
+    return runEntrypoint(
+        tempDir,
+        fitnessPassword.getBytes(StandardCharsets.UTF_8),
+        agentPassword.getBytes(StandardCharsets.UTF_8),
+        createMasterKey);
+  }
+
+  private static EntrypointRun runEntrypoint(
+      Path tempDir, byte[] fitnessPassword, byte[] agentPassword, boolean createMasterKey)
+      throws IOException, InterruptedException {
     Path fitnessPasswordFile = tempDir.resolve("fitness-password");
     Path agentPasswordFile = tempDir.resolve("agent-password");
     Path masterKeyFile = tempDir.resolve("agent-master-key");
     Path binDirectory = Files.createDirectory(tempDir.resolve("bin"));
     Path java = binDirectory.resolve("java");
     Path invocationMarker = tempDir.resolve("java-invoked");
+    Path javaEnvironment = tempDir.resolve("java-environment");
 
-    Files.writeString(fitnessPasswordFile, fitnessPassword, StandardCharsets.UTF_8);
-    Files.writeString(agentPasswordFile, agentPassword, StandardCharsets.UTF_8);
+    Files.write(fitnessPasswordFile, fitnessPassword);
+    Files.write(agentPasswordFile, agentPassword);
     if (createMasterKey) {
-      Files.writeString(masterKeyFile, "test-master-key", StandardCharsets.UTF_8);
+      Files.writeString(masterKeyFile, "test-master-key-content", StandardCharsets.UTF_8);
     }
     Files.writeString(
         java,
         "#!/bin/sh\n"
+            + "touch \"$JAVA_INVOKED_FILE\"\n"
+            + "env > \"$JAVA_ENVIRONMENT_FILE\"\n"
             + "[ \"$FITNESS_DB_PASSWORD\" = \"fitness-password\" ] || exit 11\n"
             + "[ \"$AGENT_DB_PASSWORD\" = \"agent-password\" ] || exit 12\n"
-            + "[ \"$HAPPY_AGENT_MASTER_KEY_FILE\" = \"$EXPECTED_MASTER_KEY_FILE\" ] || exit 13\n"
-            + "touch \"$JAVA_INVOKED_FILE\"\n",
+            + "[ -n \"$HAPPY_AGENT_MASTER_KEY_FILE\" ] || exit 13\n"
+            + "[ -z \"${FITNESS_DB_PASSWORD_FILE+x}\" ] || exit 14\n"
+            + "[ -z \"${AGENT_DB_PASSWORD_FILE+x}\" ] || exit 15\n"
+            + "[ -z \"${HAPPY_AGENT_MASTER_KEY+x}\" ] || exit 16\n"
+            + "if env | grep -F -- \"test-master-key-content\" >/dev/null; then exit 17; fi\n",
         StandardCharsets.UTF_8);
     assertThat(java.toFile().setExecutable(true)).isTrue();
 
@@ -207,8 +255,11 @@ class ProductionProfileStaticTest {
     processBuilder.environment().put("FITNESS_DB_PASSWORD_FILE", fitnessPasswordFile.toString());
     processBuilder.environment().put("AGENT_DB_PASSWORD_FILE", agentPasswordFile.toString());
     processBuilder.environment().put("HAPPY_AGENT_MASTER_KEY_FILE", masterKeyFile.toString());
-    processBuilder.environment().put("EXPECTED_MASTER_KEY_FILE", masterKeyFile.toString());
     processBuilder.environment().put("JAVA_INVOKED_FILE", invocationMarker.toString());
+    processBuilder.environment().put("JAVA_ENVIRONMENT_FILE", javaEnvironment.toString());
+    processBuilder.environment().remove("FITNESS_DB_PASSWORD");
+    processBuilder.environment().remove("AGENT_DB_PASSWORD");
+    processBuilder.environment().remove("HAPPY_AGENT_MASTER_KEY");
     processBuilder
         .environment()
         .put("PATH", binDirectory + ":" + System.getenv().getOrDefault("PATH", ""));
@@ -216,7 +267,17 @@ class ProductionProfileStaticTest {
 
     Process process = processBuilder.start();
     String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    return new EntrypointRun(process.waitFor(), output, invocationMarker);
+    return new EntrypointRun(process.waitFor(), output, invocationMarker, javaEnvironment);
+  }
+
+  private static List<String> sensitiveEnvironment(String environment) {
+    return environment
+        .lines()
+        .filter(
+            line ->
+                line.matches(
+                    "(FITNESS_DB_PASSWORD|AGENT_DB_PASSWORD|HAPPY_AGENT_MASTER_KEY(?:_FILE)?|FITNESS_DB_PASSWORD_FILE|AGENT_DB_PASSWORD_FILE)=.*"))
+        .toList();
   }
 
   private static Path projectRoot() {
@@ -231,5 +292,6 @@ class ProductionProfileStaticTest {
     throw new IllegalStateException("Unable to locate the repository root");
   }
 
-  private record EntrypointRun(int exitCode, String output, Path invocationMarker) {}
+  private record EntrypointRun(
+      int exitCode, String output, Path invocationMarker, Path javaEnvironment) {}
 }

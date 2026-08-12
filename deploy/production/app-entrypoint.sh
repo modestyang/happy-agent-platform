@@ -38,7 +38,7 @@ read_password_file() {
     fail "$file_label must contain a password"
   fi
 
-  if head -c "$content_bytes" "$file_path" | LC_ALL=C od -An -tx1 -v | grep -Eq '(^|[[:space:]])(00|0a)([[:space:]]|$)'; then
+  if head -c "$content_bytes" "$file_path" | LC_ALL=C od -An -tx1 -v | grep -Eq '(^|[[:space:]])(00|0a|0d)([[:space:]]|$)'; then
     fail "$file_label must not contain NUL bytes or embedded newlines"
   fi
 

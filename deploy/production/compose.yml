@@ -53,7 +53,6 @@ services:
 
   app:
     image: ${APP_IMAGE}
-    profiles: [prod]
     environment:
       SPRING_PROFILES_ACTIVE: prod
       FITNESS_DB_PASSWORD_FILE: /run/secrets/fitness_db_password
@@ -71,7 +70,7 @@ services:
       test:
         - CMD-SHELL
         - >-
-          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /api/app/bootstrap HTTP/1.1\r\nHost: localhost\r\nCookie: FITNESS_SESSION=invalid-healthcheck-session\r\nConnection: close\r\n\r\n" >&3; IFS= read -r status <&3; case "$$status" in *" 401 "*|*" 200 "*) exit 0 ;; *) exit 1 ;; esac'
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /api/app/bootstrap HTTP/1.1\r\nHost: localhost\r\nCookie: FITNESS_SESSION=invalid-healthcheck-session\r\nConnection: close\r\n\r\n" >&3; IFS= read -r status <&3; case "$$status" in *" 401 "*) exit 0 ;; *) exit 1 ;; esac'
       interval: 30s
       timeout: 5s
       start_period: 45s

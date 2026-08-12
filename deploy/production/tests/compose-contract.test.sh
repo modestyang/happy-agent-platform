@@ -41,7 +41,6 @@ export HAPPY_AGENT_ROOT="${temp_root}"
 export POSTGRES_PASSWORD_FILE="${temp_root}/secrets/postgres-password"
 export FITNESS_DB_PASSWORD_FILE="${temp_root}/secrets/fitness-db-password"
 export AGENT_DB_PASSWORD_FILE="${temp_root}/secrets/agent-db-password"
-export COMPOSE_PROFILES=prod
 
 cd "${project_root}"
 docker compose \
@@ -104,37 +103,48 @@ assert(services.nginx.volumes.some((volume) => volume.target === '/etc/nginx/con
 assert(services.nginx.depends_on.app.condition === 'service_healthy', 'nginx app dependency');
 assert(services.app.depends_on.postgres.condition === 'service_healthy', 'app postgres dependency');
 const appHealthcheck = services.app.healthcheck.test.join(' ');
-assert(appHealthcheck.includes('FITNESS_SESSION=invalid-healthcheck-session') && appHealthcheck.includes('401'), 'app invalid-session healthcheck');
+assert(
+  appHealthcheck.includes('FITNESS_SESSION=invalid-healthcheck-session')
+    && appHealthcheck.includes(' 401 ')
+    && !appHealthcheck.includes(' 200 '),
+  'app invalid-session healthcheck accepts only 401',
+);
 NODE
 
-if rg -n --fixed-strings 'certbot/certbot:' deploy/production/compose.yml; then
+if grep -nF 'certbot/certbot:' deploy/production/compose.yml; then
   echo "Certbot must not be a permanent Compose service" >&2
   exit 1
 fi
 
-if [ "$(rg --no-filename '^[[:space:]]*proxy_pass ' deploy/production/nginx/ip-https.conf.template deploy/production/nginx/ip-http.conf.template)" != "        proxy_pass http://app:8080;" ]; then
+proxy_pass_lines="$(
+  {
+    grep '^[[:space:]]*proxy_pass ' deploy/production/nginx/ip-https.conf.template || true
+    grep '^[[:space:]]*proxy_pass ' deploy/production/nginx/ip-http.conf.template || true
+  }
+)"
+if [ "${proxy_pass_lines}" != "        proxy_pass http://app:8080;" ]; then
   echo "Nginx must proxy only to app:8080" >&2
   exit 1
 fi
 
-if rg -n 'proxy_pass' deploy/production/nginx/ip-http.conf.template; then
+if grep -n 'proxy_pass' deploy/production/nginx/ip-http.conf.template; then
   echo "HTTP-stage Nginx config must not define an upstream" >&2
   exit 1
 fi
 
-rg -qF 'proxy_buffering off;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_set_header Host $host;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_set_header X-Real-IP $remote_addr;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_set_header X-Forwarded-Proto $scheme;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_set_header X-Forwarded-Host $host;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_connect_timeout 5s;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_send_timeout 3600s;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'proxy_read_timeout 3600s;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'client_max_body_size 20m;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'try_files $uri $uri/ /index.html;' deploy/production/nginx/ip-https.conf.template
-rg -qF 'try_files $uri =404;' deploy/production/nginx/ip-http.conf.template
-if rg -ni 'strict-transport-security' deploy/production/nginx; then
+grep -qF 'proxy_buffering off;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_set_header Host $host;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_set_header X-Real-IP $remote_addr;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_set_header X-Forwarded-Proto $scheme;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_set_header X-Forwarded-Host $host;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_connect_timeout 5s;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_send_timeout 3600s;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'proxy_read_timeout 3600s;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'client_max_body_size 20m;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'try_files $uri $uri/ /index.html;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'try_files $uri =404;' deploy/production/nginx/ip-http.conf.template
+if grep -ni 'strict-transport-security' deploy/production/nginx/ip-*.conf.template; then
   echo "HSTS must remain disabled for the IP-stage configuration" >&2
   exit 1
 fi

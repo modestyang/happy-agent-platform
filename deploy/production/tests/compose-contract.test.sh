@@ -156,6 +156,8 @@ if grep -n 'proxy_pass' deploy/production/nginx/ip-http.conf.template; then
 fi
 
 grep -qF 'proxy_buffering off;' deploy/production/nginx/ip-https.conf.template
+grep -qF 'add_header Cache-Control "no-cache" always;' deploy/production/nginx/ip-https.conf.template \
+  || { echo 'HTTPS API responses must disable intermediary caching' >&2; exit 1; }
 grep -qF 'proxy_set_header Host $host;' deploy/production/nginx/ip-https.conf.template
 grep -qF 'proxy_set_header X-Real-IP $remote_addr;' deploy/production/nginx/ip-https.conf.template
 grep -qF 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' deploy/production/nginx/ip-https.conf.template

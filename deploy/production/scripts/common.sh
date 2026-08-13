@@ -164,7 +164,12 @@ declared_service_image() {
   local release=$1 service=$2 image
   case "$service" in app|nginx|postgres) ;; *) die 'unsupported Compose service';; esac
   image=$(compose_release "$release" config "$service" \
-    | awk '$1 == "image:" {image = $2; count++} END {if (count == 1) print image; else exit 1}')
+    | awk -v requested="$service" '
+        $0 == "  " requested ":" {inside = 1; next}
+        inside && $0 ~ /^  [^ ]/ {exit}
+        inside && $1 == "image:" {image = $2; count++}
+        END {if (count == 1) print image; else exit 1}
+      ')
   [ -n "$image" ] && [[ "$image" != *[[:space:]]* ]] || die "unable to resolve normalized image for $service"
   printf '%s\n' "$image"
 }

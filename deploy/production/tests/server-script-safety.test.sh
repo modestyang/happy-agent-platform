@@ -279,9 +279,10 @@ case " $* " in
   *' compose '*' ps -q postgres '*) cat "$FAKE_STATE/postgres.id";;
   *' compose '*' ps -q app '*) cat "$FAKE_STATE/app.id";;
   *' compose '*' ps -q nginx '*) cat "$FAKE_STATE/nginx.id";;
-  *' compose '*' config app '*) printf 'services:\n  app:\n    image: %s\n' "$app_image";;
-  *' compose '*' config nginx '*) printf 'services:\n  nginx:\n    image: %s\n' "$web_image";;
-  *' compose '*' config postgres '*) printf 'services:\n  postgres:\n    image: happy-agent-postgres:%s\n' "$release_id";;
+  *' compose '*' config app '*|*' compose '*' config nginx '*|*' compose '*' config postgres '*)
+    printf 'services:\n  app:\n    image: %s\n  nginx:\n    image: %s\n  postgres:\n    image: happy-agent-postgres:%s\n' \
+      "$app_image" "$web_image" "$release_id"
+    ;;
   *' compose '*' ps '*'--format'*' postgres '*) printf 'postgres running healthy\n';;
   *' compose '*' ps '*'--format'*' app '*) printf 'app running healthy\n';;
   *' compose '*' ps '*'--format'*' nginx '*) printf 'nginx running healthy\n';;

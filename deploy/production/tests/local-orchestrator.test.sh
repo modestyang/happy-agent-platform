@@ -261,12 +261,13 @@ case "$action" in
   DescribeInstances)
     ip=$(cat "$FAKE_STATE/aliyun-ip")
     deletion=$(cat "$FAKE_STATE/aliyun-deletion")
+    charge=$(cat "$FAKE_STATE/aliyun-charge")
     group_json=''
     while IFS= read -r group; do
       [ -z "$group_json" ] || group_json="$group_json,"
       group_json="$group_json\"$group\""
     done <"$FAKE_STATE/aliyun-groups"
-    printf '{"Instances":{"Instance":[{"InstanceId":"i-0jlfb8o4hqpjekoudg4x","RegionId":"cn-wulanchabu","PublicIpAddress":{"IpAddress":["%s"]},"SecurityGroupIds":{"SecurityGroupId":[%s]},"DeletionProtection":%s}]}}\n' "$ip" "$group_json" "$deletion"
+    printf '{"Instances":{"Instance":[{"InstanceId":"i-0jlfb8o4hqpjekoudg4x","RegionId":"cn-wulanchabu","InstanceChargeType":"%s","PublicIpAddress":{"IpAddress":["%s"]},"SecurityGroupIds":{"SecurityGroupId":[%s]},"DeletionProtection":%s}]}}\n' "$charge" "$ip" "$group_json" "$deletion"
     ;;
   DescribeSecurityGroupAttribute)
     group=''
@@ -384,6 +385,7 @@ setup_source_state() {
 
 reset_aliyun_state() {
   printf '39.101.65.254\n' >"$FAKE_STATE/aliyun-ip"
+  printf 'PostPaid\n' >"$FAKE_STATE/aliyun-charge"
   printf 'false\n' >"$FAKE_STATE/aliyun-deletion"
   printf 'sg-0jlb5v2njkb2jbzrvurr\n' >"$FAKE_STATE/aliyun-groups"
   printf '22\n3389\n' >"$FAKE_STATE/aliyun-ports"
@@ -517,6 +519,14 @@ run_cloud_tests() {
   "$FIXTURE_REPO/deploy/production/scripts/cloud-guardrails.sh"
   second_mutations=$(grep -Ec 'aliyun ecs (AuthorizeSecurityGroup|RevokeSecurityGroup|ModifyInstanceAttribute)' "$BOUNDARY_LOG")
   [ "$first_mutations" = "$second_mutations" ] || fail 'idempotent guardrail run mutated cloud state'
+
+  reset_aliyun_state
+  printf 'PrePaid\n' >"$FAKE_STATE/aliyun-charge"
+  : >"$BOUNDARY_LOG"
+  "$FIXTURE_REPO/deploy/production/scripts/cloud-guardrails.sh"
+  [ "$(cat "$FAKE_STATE/aliyun-deletion")" = false ] || fail 'prepaid guardrails changed deletion protection'
+  ! grep -Fq 'ModifyInstanceAttribute' "$BOUNDARY_LOG" \
+    || fail 'prepaid guardrails attempted unsupported deletion protection'
 
   reset_aliyun_state
   printf '203.0.113.10\n' >"$FAKE_STATE/aliyun-ip"

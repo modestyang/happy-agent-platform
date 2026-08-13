@@ -14,12 +14,12 @@ command -v aliyun >/dev/null 2>&1 || die 'required command unavailable: aliyun'
 command -v node >/dev/null 2>&1 || die 'required command unavailable: node'
 
 describe_instance() {
-  aliyun ecs DescribeInstances --profile "$ALIYUN_PROFILE" --RegionId "$REGION" \
+  aliyun ecs DescribeInstances --profile "$ALIYUN_PROFILE" --region "$REGION" \
     --InstanceIds "[\"$INSTANCE_ID\"]"
 }
 
 describe_security_group() {
-  aliyun ecs DescribeSecurityGroupAttribute --profile "$ALIYUN_PROFILE" --RegionId "$REGION" \
+  aliyun ecs DescribeSecurityGroupAttribute --profile "$ALIYUN_PROFILE" --region "$REGION" \
     --SecurityGroupId "$SECURITY_GROUP_ID" --Direction ingress
 }
 
@@ -40,8 +40,9 @@ const groups = instance?.SecurityGroupIds?.SecurityGroupId;
 if (instance.InstanceId !== expectedId || instance.RegionId !== expectedRegion ||
     !Array.isArray(ips) || ips.length !== 1 || ips[0] !== expectedIp ||
     !Array.isArray(groups) || groups.length !== 1 || groups[0] !== expectedGroup ||
+    !["PostPaid", "PrePaid"].includes(instance.InstanceChargeType) ||
     typeof instance.DeletionProtection !== "boolean") process.exit(4);
-process.stdout.write(instance.DeletionProtection ? "true\n" : "false\n");
+process.stdout.write(`${instance.InstanceChargeType}\t${instance.DeletionProtection ? "true" : "false"}\n`);
 ' "$INSTANCE_ID" "$REGION" "$PUBLIC_IP" "$SECURITY_GROUP_ID"
 }
 
@@ -98,8 +99,9 @@ tcp_port_allowed() {
 
 instance_json=$(describe_instance)
 security_group_json=$(describe_security_group)
-deletion_protection=$(printf '%s\n' "$instance_json" | parse_instance) \
+instance_state=$(printf '%s\n' "$instance_json" | parse_instance) \
   || die 'instance target, region, public IP, or security group drift detected'
+IFS=$'\t' read -r charge_type deletion_protection <<<"$instance_state"
 permissions=$(printf '%s\n' "$security_group_json" | permission_records) \
   || die 'security-group target or response shape drift detected'
 
@@ -110,29 +112,36 @@ done
 
 for port in 80 443; do
   if ! has_exact_public_rule "$permissions" "$port"; then
-    aliyun ecs AuthorizeSecurityGroup --profile "$ALIYUN_PROFILE" --RegionId "$REGION" \
+    aliyun ecs AuthorizeSecurityGroup --profile "$ALIYUN_PROFILE" --region "$REGION" \
       --SecurityGroupId "$SECURITY_GROUP_ID" --IpProtocol tcp --PortRange "$port/$port" \
       --SourceCidrIp 0.0.0.0/0 --Policy Accept >/dev/null
   fi
 done
 if has_exact_public_rule "$permissions" 3389; then
-  aliyun ecs RevokeSecurityGroup --profile "$ALIYUN_PROFILE" --RegionId "$REGION" \
+  aliyun ecs RevokeSecurityGroup --profile "$ALIYUN_PROFILE" --region "$REGION" \
     --SecurityGroupId "$SECURITY_GROUP_ID" --IpProtocol tcp --PortRange 3389/3389 \
     --SourceCidrIp 0.0.0.0/0 --Policy Accept >/dev/null
 fi
-if [ "$deletion_protection" = false ]; then
-  aliyun ecs ModifyInstanceAttribute --profile "$ALIYUN_PROFILE" --RegionId "$REGION" \
+if [ "$charge_type" = PostPaid ] && [ "$deletion_protection" = false ]; then
+  aliyun ecs ModifyInstanceAttribute --profile "$ALIYUN_PROFILE" --region "$REGION" \
     --InstanceId "$INSTANCE_ID" --DeletionProtection true >/dev/null
 fi
 
 instance_json=$(describe_instance)
 security_group_json=$(describe_security_group)
-deletion_protection=$(printf '%s\n' "$instance_json" | parse_instance) \
+instance_state=$(printf '%s\n' "$instance_json" | parse_instance) \
   || die 'instance target drift detected after guardrail changes'
+IFS=$'\t' read -r final_charge_type deletion_protection <<<"$instance_state"
 permissions=$(printf '%s\n' "$security_group_json" | permission_records) \
   || die 'security-group drift detected after guardrail changes'
 
-[ "$deletion_protection" = true ] || die 'instance deletion protection is not enabled'
+[ "$final_charge_type" = "$charge_type" ] || die 'instance charge type drift detected'
+if [ "$charge_type" = PostPaid ]; then
+  [ "$deletion_protection" = true ] || die 'instance deletion protection is not enabled'
+else
+  [ "$deletion_protection" = false ] || die 'unexpected deletion protection on prepaid instance'
+  log 'prepaid ECS does not support deletion protection; platform limitation accepted'
+fi
 tcp_port_allowed "$permissions" 22 || die 'required TCP port is not allowed: 22'
 for port in 80 443; do
   public_tcp_port_allowed "$permissions" "$port" \

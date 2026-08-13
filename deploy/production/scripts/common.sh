@@ -231,7 +231,8 @@ _recover_previous_release() {
 
 public_smoke() (
   set -euo pipefail
-  local temporary headers body code
+  local temporary headers body code curl_status session_file run_id_file session run_id auth_config
+  umask 077
   install -d -m 0750 "$HAPPY_AGENT_ROOT/logs"
   temporary=$(mktemp -d "$HAPPY_AGENT_ROOT/logs/.public-smoke.XXXXXX")
   temporary=$(validate_descendant "$temporary")
@@ -255,6 +256,30 @@ public_smoke() (
     tr -d '\r' <"$headers" | grep -Eiq "^content-type:[[:space:]]*$expected_type([[:space:]]*;|[[:space:]]*$)" || return 1
   }
 
+  authenticated_stream_request() {
+    local path=$1
+    headers="$temporary/headers"
+    body="$temporary/body"
+    if code=$(curl --silent --show-error --no-buffer --max-time 15 --http1.1 \
+        --config "$auth_config" --header 'Accept: text/event-stream' \
+        --header 'Cache-Control: no-cache' --dump-header "$headers" --output "$body" \
+        --write-out '%{http_code}' "$HAPPY_AGENT_PUBLIC_ORIGIN$path"); then
+      curl_status=0
+    else
+      curl_status=$?
+    fi
+    case "$curl_status" in 0|28) ;; *) return 1;; esac
+    [ "$code" = 200 ] || return 1
+    tr -d '\r' <"$headers" \
+      | grep -Eiq '^content-type:[[:space:]]*text/event-stream([[:space:]]*;|[[:space:]]*$)' \
+      || return 1
+    tr -d '\r' <"$headers" \
+      | grep -Eiq '^cache-control:[[:space:]]*([^,]+,[[:space:]]*)*no-cache([[:space:]]*,|[[:space:]]*$)' \
+      || return 1
+    [ -s "$body" ] || return 1
+    grep -Eq '^(:|data:|event:|id:|retry:)' "$body"
+  }
+
   smoke_request / 200 'text/html' || return 1
   [ -s "$temporary/body" ] || return 1
   smoke_request /api/v1/app/home 401 'application/problem\+json' || return 1
@@ -264,6 +289,21 @@ public_smoke() (
   tr -d '\r' <"$headers" \
     | grep -Eiq '^cache-control:[[:space:]]*([^,]+,[[:space:]]*)*no-cache([[:space:]]*,|[[:space:]]*$)' \
     || return 1
+
+  session_file=$(validate_descendant "$HAPPY_AGENT_ROOT/secrets/public-smoke-session")
+  run_id_file=$(validate_descendant "$HAPPY_AGENT_ROOT/secrets/public-smoke-run-id")
+  require_file "$session_file"
+  require_file "$run_id_file"
+  [ ! -L "$session_file" ] && [ ! -L "$run_id_file" ] || return 1
+  session=$(<"$session_file")
+  run_id=$(<"$run_id_file")
+  [[ "$session" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ "$run_id" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] || return 1
+  auth_config="$temporary/authenticated-curl.conf"
+  printf 'header = "Cookie: FITNESS_SESSION=%s"\n' "$session" >"$auth_config"
+  chmod 0600 "$auth_config"
+  unset session
+  authenticated_stream_request "/api/v1/app/ai/runs/$run_id/events"
 )
 
 certificate_dir() { printf '%s/certificates/production/live/happy-agent-ip\n' "$HAPPY_AGENT_ROOT"; }

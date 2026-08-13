@@ -143,6 +143,13 @@ run_baseline_test() {
   assert_pollution_rejected database-acl 'GRANT TEMP ON DATABASE happy_agent TO fitness_app' 'REVOKE TEMP ON DATABASE happy_agent FROM fitness_app'
   assert_pollution_rejected schema-acl 'GRANT USAGE ON SCHEMA public TO fitness_app' 'REVOKE USAGE ON SCHEMA public FROM fitness_app'
   assert_pollution_rejected object 'CREATE TABLE public.pollution(id integer)' 'DROP TABLE public.pollution'
+  assert_pollution_rejected collation \
+    "CREATE COLLATION public.pollution (provider = libc, locale = 'C')" \
+    'DROP COLLATION public.pollution'
+  assert_pollution_rejected text-search-dictionary \
+    'CREATE TEXT SEARCH DICTIONARY public.pollution (TEMPLATE = pg_catalog.simple)' \
+    'DROP TEXT SEARCH DICTIONARY public.pollution'
+  assert_pollution_rejected publication 'CREATE PUBLICATION pollution' 'DROP PUBLICATION pollution'
   echo 'PASS: real PostgreSQL initial baseline and pollution rejection'
 }
 
@@ -293,7 +300,7 @@ make_bundle() {
   mkdir -p "$target/media-source"
   printf 'dump\n' >"$target/initial.dump"
   printf 'media\n' >"$target/media-source/file"
-  tar -C "$target/media-source" -cf "$target/media.tar" .
+  tar -C "$target/media-source" -cf "$target/media.tar" file
   printf 'master-key-fixture\000bytes' >"$target/agent-master-key"
   media_hash=$(sha256sum "$target/media.tar" | awk '{print $1}')
   tree_hash=$(cd "$target/media-source" && find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256sum "$file"; done | sha256sum | awk '{print $1}')
@@ -307,6 +314,19 @@ make_bundle() {
 refresh_bundle_manifest() {
   local bundle=$1
   (cd "$bundle" && sha256sum initial.dump media.tar agent-master-key metadata.env >SHA256SUMS)
+}
+
+refresh_media_metadata() {
+  local bundle=$1 source=$2 media_hash tree_hash
+  media_hash=$(sha256sum "$bundle/media.tar" | awk '{print $1}')
+  tree_hash=$(cd "$source" && find . -type f -print | LC_ALL=C sort \
+    | while IFS= read -r file; do sha256sum "$file"; done \
+    | sha256sum | awk '{print $1}')
+  sed -e "s/^media_sha256=.*/media_sha256=$media_hash/" \
+    -e "s/^media_tree_sha256=.*/media_tree_sha256=$tree_hash/" \
+    "$bundle/metadata.env" >"$bundle/metadata.env.new"
+  mv "$bundle/metadata.env.new" "$bundle/metadata.env"
+  refresh_bundle_manifest "$bundle"
 }
 
 setup_restore_root() {
@@ -369,7 +389,8 @@ run_restore_preflight_tests() {
   assert_restore_preflight_rejected omitted-confirmation-flag "$case_root" 20260813T020001Z "$bundle"
 
   for label in checksum missing-manifest metadata-duplicate metadata-malformed metadata-unknown \
-    media-hash media-tree-hash key-hash archive-symlink archive-hardlink archive-device archive-duplicate archive-traversal; do
+    media-hash media-tree-hash key-hash archive-symlink archive-hardlink archive-device archive-duplicate \
+    archive-dot-alias archive-inner-dot-alias archive-traversal; do
     case_bundle="$TMP/preflight-$label/bundle"
     case_root="$TMP/preflight-$label/root"
     mkdir -p "$case_bundle"
@@ -415,11 +436,11 @@ run_restore_preflight_tests() {
         ;;
       archive-symlink)
         source="$TMP/preflight-$label/source"; mkdir -p "$source"; printf 'x\n' >"$source/file"; ln -s file "$source/link"
-        tar -C "$source" -cf "$case_bundle/media.tar" .; refresh_bundle_manifest "$case_bundle"
+        tar -C "$source" -cf "$case_bundle/media.tar" file link; refresh_bundle_manifest "$case_bundle"
         ;;
       archive-hardlink)
         source="$TMP/preflight-$label/source"; mkdir -p "$source"; printf 'x\n' >"$source/file"; ln "$source/file" "$source/alias"
-        tar -C "$source" -cf "$case_bundle/media.tar" .; refresh_bundle_manifest "$case_bundle"
+        tar -C "$source" -cf "$case_bundle/media.tar" file alias; refresh_bundle_manifest "$case_bundle"
         ;;
       archive-device)
         tar -C / -cf "$case_bundle/media.tar" dev/null; refresh_bundle_manifest "$case_bundle"
@@ -429,6 +450,22 @@ run_restore_preflight_tests() {
         tar -C "$source" -cf "$case_bundle/media.tar" file
         tar -C "$source" -rf "$case_bundle/media.tar" file
         refresh_bundle_manifest "$case_bundle"
+        ;;
+      archive-dot-alias)
+        source="$TMP/preflight-$label/source"; mkdir -p "$source"; printf 'media\n' >"$source/file"
+        tar -C "$source" -cf "$case_bundle/media.tar" ./file
+        tar -C "$source" -rf "$case_bundle/media.tar" file
+        [ "$(tar -tf "$case_bundle/media.tar")" = $'./file\nfile' ] \
+          || fail 'dot-alias archive fixture did not preserve distinct raw names'
+        refresh_media_metadata "$case_bundle" "$source"
+        ;;
+      archive-inner-dot-alias)
+        source="$TMP/preflight-$label/source"; mkdir -p "$source/dir"; printf 'media\n' >"$source/dir/asset"
+        tar -C "$source" -cf "$case_bundle/media.tar" dir/./asset
+        tar -C "$source" -rf "$case_bundle/media.tar" dir/asset
+        [ "$(tar -tf "$case_bundle/media.tar")" = $'dir/./asset\ndir/asset' ] \
+          || fail 'inner-dot-alias archive fixture did not preserve distinct raw names'
+        refresh_media_metadata "$case_bundle" "$source"
         ;;
       archive-traversal)
         source="$TMP/preflight-$label/source"; mkdir -p "$source/inside"; printf 'x\n' >"$source/escape"
@@ -440,6 +477,10 @@ run_restore_preflight_tests() {
     esac
     timestamp=$(printf '20260813T02%04dZ' $((10#${timestamp:11:4} + 1)))
     assert_restore_preflight_rejected "$label" "$case_root" "$timestamp" "$case_bundle" --initial-empty-target
+    case "$label" in archive-dot-alias|archive-inner-dot-alias)
+      [ ! -s "$FAKE_DOCKER_LOG" ] || fail "$label reached temporary PostgreSQL before rejection"
+      ;;
+    esac
   done
 
   case_root="$TMP/preflight-baseline/root"

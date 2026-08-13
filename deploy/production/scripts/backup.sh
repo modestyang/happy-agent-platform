@@ -5,7 +5,8 @@ source "$SCRIPT_DIR/common.sh"
 
 backup_core() (
   set -euo pipefail
-  local timestamp pending complete release release_id release_manifest_hash generation generation_id
+  local timestamp pending complete release release_id release_manifest_hash generation generation_id media_member
+  local -a media_members=()
   timestamp=${HAPPY_AGENT_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
   [[ "$timestamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die 'unsafe backup timestamp'
   install -d -m 0750 "$HAPPY_AGENT_ROOT/backups"
@@ -28,7 +29,16 @@ backup_core() (
   compose_release "$release" exec -T postgres pg_dump -Fc -U postgres happy_agent \
     >"$pending/database.dump"
   [ -s "$pending/database.dump" ] || die 'database backup is empty'
-  tar -C "$generation/media" -cf "$pending/media.tar" .
+  while IFS= read -r -d '' media_member; do
+    media_member=${media_member#./}
+    case "$media_member" in ''|*'\\'*|*'|'*|*$'\n'*|*$'\r'*) die 'media path cannot be represented safely in an archive';; esac
+    media_members+=("$media_member")
+  done < <(cd "$generation/media" && find . -type f -print0)
+  if [ "${#media_members[@]}" -gt 0 ]; then
+    tar -C "$generation/media" -cf "$pending/media.tar" -- "${media_members[@]}"
+  else
+    tar -C "$generation/media" -cf "$pending/media.tar" -T /dev/null
+  fi
   if [ -f "$generation/agent-master-key" ] && [ ! -L "$generation/agent-master-key" ]; then
     [ -s "$generation/agent-master-key" ] || die 'Agent master key is empty'
     cp -- "$generation/agent-master-key" "$pending/agent-master-key"

@@ -104,21 +104,35 @@ BEGIN
 
     IF EXISTS (
         SELECT 1
-        FROM pg_class relation
-        JOIN pg_namespace namespace_entry ON namespace_entry.oid = relation.relnamespace
-        WHERE namespace_entry.nspname = 'public'
-    ) OR EXISTS (
-        SELECT 1
-        FROM pg_proc function_entry
-        JOIN pg_namespace namespace_entry ON namespace_entry.oid = function_entry.pronamespace
-        WHERE namespace_entry.nspname = 'public'
-    ) OR EXISTS (
-        SELECT 1
-        FROM pg_type type_entry
-        JOIN pg_namespace namespace_entry ON namespace_entry.oid = type_entry.typnamespace
-        WHERE namespace_entry.nspname = 'public'
+        FROM pg_depend namespace_dependency
+        WHERE namespace_dependency.refclassid = 'pg_namespace'::regclass
+          AND namespace_dependency.deptype = 'n'
+          AND namespace_dependency.objid >= 16384
     ) THEN
-        RAISE EXCEPTION 'unexpected application object exists';
+        RAISE EXCEPTION 'unexpected namespace-scoped user object exists';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_cast WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_transform WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_event_trigger WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_publication WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_subscription WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_policy WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_rewrite WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_trigger WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_foreign_data_wrapper WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_foreign_server WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_user_mapping WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_largeobject_metadata WHERE oid >= 16384)
+        OR EXISTS (SELECT 1 FROM pg_am WHERE oid >= 16384)
+        OR EXISTS (
+            SELECT 1
+            FROM pg_language
+            WHERE oid >= 16384
+              AND lanname <> 'plpgsql'
+        )
+        OR EXISTS (SELECT 1 FROM pg_parameter_acl WHERE oid >= 16384) THEN
+        RAISE EXCEPTION 'unexpected database-scoped user object exists';
     END IF;
 
     IF EXISTS (

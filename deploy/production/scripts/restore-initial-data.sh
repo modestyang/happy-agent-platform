@@ -69,15 +69,30 @@ verify_bundle_manifest() {
 }
 
 validate_media_archive() {
-  local archive=$1 member listed='|'
+  local archive=$1 member type normalized component expected listed='|'
+  local -a components
   tar -tf "$archive" >/dev/null || die 'invalid media archive'
+  tar -tvf "$archive" >/dev/null || die 'invalid media archive member listing'
+  exec 8< <(tar -tvf "$archive" | awk '{print substr($0, 1, 1)}')
   while IFS= read -r member || [ -n "$member" ]; do
-    case "$member" in ''|/*|*'\\'*|*'|'*|..|../*|*/../*|*/..) die 'unsafe media archive path';; esac
-    case "$listed" in *"|$member|"*) die 'duplicate media archive member';; esac
-    listed="${listed}${member}|"
+    IFS= read -r type <&8 || die 'media archive listing is inconsistent'
+    case "$type" in -|d) ;; *) die 'media archive contains a link or special member';; esac
+    case "$member" in ''|/*|*'\\'*|*'|'*|*//*|..|../*|*/../*|*/..) die 'unsafe media archive path';; esac
+    IFS='/' read -r -a components <<<"$member"
+    normalized=''
+    for component in "${components[@]}"; do
+      case "$component" in ''|.) continue;; ..) die 'unsafe media archive path';; esac
+      if [ -n "$normalized" ]; then normalized="$normalized/$component"; else normalized=$component; fi
+    done
+    [ -n "$normalized" ] && [ "$normalized" != . ] || die 'empty media archive destination'
+    expected=$normalized
+    [ "$type" != d ] || expected="$expected/"
+    [ "$member" = "$expected" ] || die 'non-canonical media archive member'
+    case "$listed" in *"|$normalized|"*) die 'duplicate media archive destination';; esac
+    listed="${listed}${normalized}|"
   done < <(tar -tf "$archive")
-  tar -tvf "$archive" | awk '{type = substr($0, 1, 1); if (type != "-" && type != "d") exit 1}' \
-    || die 'media archive contains a link or special member'
+  if IFS= read -r type <&8; then die 'media archive listing is inconsistent'; fi
+  exec 8<&-
 }
 
 temporary_postgres_healthy() {

@@ -420,8 +420,14 @@ run_build_tests() {
     "$release/build-metadata.json" || fail 'invalid structured build metadata'
   assert_before "$BOUNDARY_LOG" 'mvnw -Dtest=' 'mvnw -q -pl starter -am'
   assert_before "$BOUNDARY_LOG" 'mvnw -q -pl starter -am' 'mvnw spotless:check'
-  assert_before "$BOUNDARY_LOG" 'mvnw spotless:check' 'npm --prefix frontend test'
-  assert_before "$BOUNDARY_LOG" 'npm --prefix frontend test' 'npm --prefix frontend run typecheck'
+  assert_before "$BOUNDARY_LOG" 'mvnw spotless:check' \
+    'npm --prefix frontend test -- --exclude src/admin/AdminWorkbench.test.tsx'
+  assert_before "$BOUNDARY_LOG" \
+    'npm --prefix frontend test -- --exclude src/admin/AdminWorkbench.test.tsx' \
+    'npm --prefix frontend test -- src/admin/AdminWorkbench.test.tsx'
+  assert_before "$BOUNDARY_LOG" \
+    'npm --prefix frontend test -- src/admin/AdminWorkbench.test.tsx' \
+    'npm --prefix frontend run typecheck'
   assert_before "$BOUNDARY_LOG" 'npm --prefix frontend run typecheck' 'npm --prefix frontend run build'
   assert_before "$BOUNDARY_LOG" 'npm --prefix frontend run build' 'mvnw -DskipTests -pl starter -am package'
   first_build=$(grep -nF 'docker buildx build' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)

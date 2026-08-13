@@ -54,7 +54,8 @@ trap cleanup_build EXIT
     -Dtest='FitnessExperienceIntegrationTest#dailyMealPlanReadEndpointReturnsThePersistedThreeMealPlan' \
     -Dsurefire.failIfNoSpecifiedTests=false test
   ./mvnw spotless:check
-  npm --prefix frontend test
+  npm --prefix frontend test -- --exclude src/admin/AdminWorkbench.test.tsx
+  npm --prefix frontend test -- src/admin/AdminWorkbench.test.tsx
   npm --prefix frontend run typecheck
   npm --prefix frontend run build
   ./mvnw -DskipTests -pl starter -am package

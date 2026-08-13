@@ -9,6 +9,13 @@ frontend/dist/
 coverage/
 deploy/secrets/
 starter/deploy/.local/
+deploy/.local/production/releases/
+deploy/.local/production/migrations/
+deploy/.local/production/recovery/
+deploy/.local/production/staging/
+deploy/.local/production/known_hosts
+deploy/.local/production/public-smoke-session
+deploy/.local/production/public-smoke-run-id
 .DS_Store
 
 # Qoder CLI session state

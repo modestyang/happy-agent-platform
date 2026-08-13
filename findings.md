@@ -325,3 +325,68 @@
 - `FitnessApplicationService.loadForTool()` 当前只承担旧聚合 Tool 的可信用户宽读取；五个方法移除后可连同该入口删除。`mealRecommendationFeedbackContext(UUID)` 是否还能删除需要再次核对所有生产调用，不能与 `loadForTool()` 一并假定。
 - 当前持久化本地数据库的 v16/草稿仍绑定旧键；仅改 V1 baseline 只能保证新库正确。页面验收前必须确认项目对既有开发库的预期迁移方式，避免源码删除后当前发布 Agent 无法解析 Tool。
 - 删除后的已知代价：旧 v1–v16 快照仍可查看，但若未来加入“直接按旧版本重新执行/回滚”的能力，引用已删除 Tool 的旧版本将不可运行。当前实现只运行最新发布版本，审批恢复又只调用冻结的 `fitness.plan.save`，因此现状不受影响。
+
+## 2026-08-12 阿里云 ECS 一键部署方案
+
+- 仓库已经存在 `deploy/ALIYUN_DEPLOY.md`、`deploy/aliyun-deploy.sh`、`deploy/docker-compose.yml`、自定义 PostgreSQL 镜像，以及数据库导出/恢复、密钥生成和持久化验证脚本；新方案应先审计和补强这些资产，避免平行重写。
+- 本地已有 `deploy/.local/data/postgres` 持久数据、应用环境文件和密钥文件，均属于本地私有状态；迁移必须走逻辑导出/恢复流程，不能直接复制正在运行的 PostgreSQL 数据目录。
+- 数据库采用一个 PostgreSQL 实例、`fitness` 与 `agent` 两个独立 schema/DataSource/Flyway；Agent 仍处于预生产单一 V1 baseline 阶段，已有数据迁移需特别处理 Flyway 校验和与当前发布 Agent/Skill 状态，不能只初始化空库。
+- 当前工作区在本轮开始时干净；已存在部署文件来自历史提交，而非本轮未提交实现。
+- 现有 `aliyun-deploy.sh` 采用“宿主机 PostgreSQL + systemd Java + nginx 静态前端”，而 `docker-compose.yml` 只管理本地 PostgreSQL；用户要求的 Docker 环境初始化和生产数据迁移目前没有贯通到同一部署入口。
+- Ubuntu 分支先安装 `postgresql-client`，随后用 `command -v psql` 判断是否安装 PostgreSQL 16 服务端；由于客户端已经提供 `psql`，服务端安装分支会被跳过，新机可能没有 PostgreSQL 服务。
+- 脚本构建前端却没有安装 Node.js/npm，也没有校验 Maven Wrapper、npm、Java、PostgreSQL、nginx 的最终版本和可用性。
+- `deploy/secrets/` 目录虽然在生成密码前 `chown` 给应用用户，但密码与 master key 由 root 以 `0600` 创建且未再次 `chown`；`User=happy` 的 systemd 服务很可能无法读取 master key，密钥权限链路需要统一。
+- 现有导出/恢复脚本固定通过 `docker compose ... postgres` 操作数据库，无法迁移到宿主机 PostgreSQL 方案；恢复使用 `--clean`，属于会删除目标对象的高风险动作，也缺少恢复前备份、空库/覆盖模式区分、版本/校验和预检和失败回滚。
+- 现有脚本直接覆盖 systemd 与 nginx 配置、在源码目录原地构建并启动新 jar，没有 release 目录、原子软链切换、旧版本保留或启动失败自动回滚；重复运行不等于应用发布幂等。
+- 现有 smoke test 对 curl 结果使用 `|| true`，最终不会因业务端点异常失败；文档宣称“报错立刻失败”和“烟雾测试确认可达”与实现不一致。
+- `starter/src/main/resources` 当前只有 `application-local.yml`，没有 `application.yml` 或 `application-prod.yml`；现有阿里云脚本却以 `--spring.profiles.active=prod` 启动，生产数据库密码、media adapter、Agent master key 等配置没有被仓库配置完整承接。
+- 项目历史生产设计已明确目标是阿里云 2C4G ECS、单 Spring Boot/单 PostgreSQL、CI 构建不可变制品、ECS 不安装 Maven/Node、预检后切流、健康失败自动回滚，并给出容器资源上限；当前 `deploy/` 只实现了早期的宿主机构建脚本和本地 PostgreSQL Compose，实际与设计存在明显落差。
+- 现有生产设计要求 OSS 优先使用 ECS RAM Role、生产不保存长期 AccessKey；当前本地 media adapter 将文件写入 `deploy/.local/media`，数据库迁移还必须同步处理已有上传媒体，不能只迁移 PostgreSQL dump。
+- 用户确认迁移源为当前开发机 `deploy/.local/`：PostgreSQL 全量数据、本地媒体、Agent master key 和加密 Provider 凭据都需要保留。
+- 当前本地 PostgreSQL 16 容器健康运行，原始数据目录约 84MB；本地媒体共 2 个文件、约 472KB，迁移体量很小，适合停写后生成一次加密迁移包，而无需引入在线复制。
+- 当前 master key 实际位于 `deploy/secrets/agent-master-key`，文件模式为 `0600`、大小 45 字节；目标机必须原字节保留。重新生成 master key 会导致数据库中已有 Provider 密文无法解密，不能把它当普通可轮换初始化项处理。
+- 两个 DataSource 分别使用 `fitness_schema_history` 与 `agent_schema_history`，Agent Flyway 依赖 Fitness Flyway，且两边均 `cleanDisabled=true`；恢复后启动预检必须先验证两张 history 表与当前 JAR migration checksum，再允许应用迁移/启动。
+- 当前代码的生产 media 分支默认选择 OSS，但构造参数仍是显式 endpoint/bucket/accessKey；历史文档所述 ECS RAM Role 尚未在代码中形成明确配置路径。若本轮目标是最小可靠上线，继续使用宿主机持久化本地媒体需要新增明确的生产本地媒体目录配置，不能沿用相对路径 `deploy/.local/media`。
+- 当前 PostgreSQL 为 16.14，数据库逻辑大小约 24MB；`agent` schema 约 19MB/33 表/估算 41,684 行，`fitness` schema 约 1.7MB/20 表/估算 276 行。该规模适合单次停写、`pg_dump --format=custom`、校验后上传和目标空库恢复。
+- 当前 Flyway 状态为 Fitness V1–V16 全部成功、Agent 单一 V1 成功；迁移包需记录源码 commit、两张 history 表及 checksum，并要求导出与目标首次启动使用同一 commit，避免 Agent V1 基线继续变化造成校验不一致。
+- 当前数据库未安装 `vector` 或 `pg_trgm` 扩展，说明现有业务数据恢复并不依赖扩展对象；目标初始化应根据当前 migration/查询的真实依赖决定是否安装，不能以旧部署文档为唯一依据。
+- 阿里云当前官方文档为 Alibaba Cloud Linux 3 提供 Docker CE、containerd、Buildx 和 Compose plugin 的安装路径，适合作为单一受支持的一键初始化基线；Docker 官方也明确支持 Ubuntu 24.04 LTS，但同时维护两个发行版分支会扩大脚本测试矩阵。
+- Docker 官方提醒容器端口映射可能绕过 ufw/firewalld 规则；生产 Compose 必须只把 Nginx 的 80/443 发布到公网，应用端口只进内部网络，PostgreSQL 最多绑定 `127.0.0.1` 或完全不发布，并继续用阿里云安全组做第一层入站控制。
+
+### 目标 ECS 实际配置
+
+- 通过阿里云 CLI 3.4.11 的 OAuth 临时凭据跨地域只读查询，只发现一台 ECS：`cn-wulanchabu-c`，实例 `i-0jlfb8o4hqpjekoudg4x`，状态 Running。
+- 实例规格 `ecs.e-c1m2.large`：2 vCPU、4GB RAM；系统为 Ubuntu 22.04 64 位，镜像 `ubuntu_22_04_x64_20G_alibase_20260723.vhd`。最终主机初始化只需支持 Ubuntu 22.04，不需要维护 Alibaba Cloud Linux 分支。
+- 实例为包年包月，2026-11-11 00:00（Asia/Shanghai）到期；公网按流量计费，公网出带宽上限 100Mbps、入带宽上限 200Mbps。
+- 公网 IP `39.101.65.254`，内网 IP `172.25.211.159`；默认 VPC `172.16.0.0/12`，默认交换机 `172.25.208.0/20`，位于乌兰察布 C 区。
+- 只有一块 60GB `cloud_essd_entry` 系统盘，未加密、随实例释放、无独立数据盘；当前数据库规模可容纳，但系统和数据库故障域未隔离。
+- 实例未绑定 SSH key pair，DeletionProtection=false；部署前应至少启用实例释放保护，并采用密钥登录或严格限制 SSH 来源。
+- 当前安全组入站仅有 TCP 22、TCP 3389、ICMP，三者都对 `0.0.0.0/0` 开放；80/443 未开放。部署前需删除无用的 3389 全网规则、把 SSH 限定到可信 IP，并增加 80/443（若使用公网 Web）。5432 与 8080 不应进入公网安全组。
+- SSH 到 `39.101.65.254:22` 网络可达，但本机是首次连接，严格主机校验拒绝未登记的密钥；服务器公开的 ED25519 指纹为 `SHA256:DEYhj+NrDYlZW+RhpftmB76wuRybwG2sekWGm57I+PA`，需用户确认信任后再加入本机 `known_hosts`。
+- 用户已确认并成功信任上述主机指纹；但服务器对 `root` 和 `ubuntu` 均返回 `Permission denied (publickey)`，本机唯一默认 `id_ed25519` 未在服务器授权。阿里云云助手在线（2.2.4.1097、无活动任务），可在用户额外授权后无重启地追加本机公钥。
+- `~/.ssh/id_ed25519` 权限为正确的 `0600`，显式 `ssh -i ... -o IdentitiesOnly=yes` 诊断显示客户端确实提供公钥指纹 `SHA256:GMJFIHt8NYe7SJD/PCeLmq76B05nL0iotsXf/wwFOms`，服务端明确拒绝；Downloads/Desktop/Documents/.ssh 中未发现其他 `.pem`/`.key`/ECS 命名候选，因此无需调整私钥权限或重复 `-i`。
+- 用户将当前公钥加入服务器后，显式 `root` SSH 登录成功；服务器是基本干净的 Ubuntu 22.04 x86_64，内核 5.15，运行约 2 天，实际可见内存约 3495MB。
+- 根文件系统为 ext4，59GB 中已用 3.7GB、可用 53GB；无 Swap。Docker/Compose 均未安装，`/opt/happy-agent` 不存在，未发现 Nginx/PostgreSQL/MySQL/现有应用服务，监听端口仅 22、53、36229，80/443/5432/8080 均空闲。
+- 系统时区为 Asia/Shanghai，NTP 已同步；UFW inactive，unattended-upgrades 已启用，阿里云助手运行中，APT/dpkg 锁空闲。主机初始化应创建小型 Swap 或严格控制容器内存，避免 3.5GB 可用内存下突发 OOM。
+- 用户当前没有域名并要求先按无域名方式部署。Let’s Encrypt 自 2026-01-15 起正式支持 IPv4/IPv6 地址证书；Certbot 5.4+ 支持通过 `--preferred-profile shortlived --webroot --ip-address` 申请。IP 证书有效约 160 小时，必须高频自动续期和续期失败可见化；临时入口可安全使用 `https://39.101.65.254`，以后再切域名。
+- 用户提供 Let’s Encrypt 联系邮箱 `modest_yang@126.com`。
+- 手机端 `FITNESS_SESSION` 与管理端 `AGENT_ADMIN_SESSION` 当前都在代码中写死 `.secure(false)`，生产 HTTPS 上线前必须改为可配置的 Secure Cookie 策略并覆盖登录/登出回归测试；本地 HTTP profile 继续使用非 Secure Cookie。
+- 当前未引入 Spring Boot Actuator，旧 Nginx `/healthz -> /actuator/health` 配置无效。部署健康门应基于真实应用启动/数据库迁移结果与现有受保护端点 200/401 探测，或实现一个最小内部健康端点后再引用，不能保留虚假健康检查。
+- 无域名实施建议保持三运行容器（Nginx/App/PostgreSQL），证书签发和续期使用定时的临时 Certbot 5.4+ 容器，不在 ECS 安装 Maven/Node/Java 构建链；80 仅 ACME/跳转，443 对公网，8080/5432 仅 Compose 内网。
+- Certbot 官方 5.4.0 release 明确新增 webroot IP address issuance；当前 5.7.0 文档继续支持 webroot。registry 实测正确标签为 `certbot/certbot:v5.7.0`，`certbot/certbot:5.7.0` 返回 not found；生产应固定 `v5.7.0@sha256:34ee91d2f43008eb78a007d22f23ed4b2eaa9a454cb27ca2c042b49527a695b4`。staging 和 production 必须使用不同 config 目录/lineage，避免 staging 证书污染正式 Nginx 路径。
+- 目标实例唯一安全组 ID 为 `sg-0jlb5v2njkb2jbzrvurr`，当前 `DeletionProtection=false`；实施脚本无需按名称猜测安全组。
+- 首次恢复的生产 PostgreSQL init 不能沿用现有会预建 `fitness`/`agent` schema 的本地 init；应只创建角色，空目标 `pg_restore` 创建 schema 后再执行隔离 SQL。
+- `pg_dump` 不存在 `--no-owner=false` 参数；要保留对象 owner 必须直接省略 `--no-owner`，并在目标预先创建同名角色。
+
+# 2026-08-13 Task 6 迁移演练发现
+
+- 实际 Flyway history 表由应用显式配置为 `fitness.fitness_schema_history` 与
+  `agent.agent_schema_history`；导出和恢复不能使用默认名 `flyway_schema_history`。
+- PostgreSQL 官方 entrypoint 初始化期间会短暂进入 healthy 后 shutdown/restart；首次恢复的
+  临时实例必须观察 `PostgreSQL init process complete; ready for start up.` 后再接受最终
+  healthy，避免在瞬态窗口执行空库断言。
+- `agent.agent_runs` 会被运行时后台活动更新，不适合作为重启持久性固定计数；Provider
+  credential 表是稳定哨兵，且能与原 master key 成功/错误 key 失败的认证边界共同验证。
+- 本地演练最终证明 restore generation、媒体、数据库隔离、credential 解密认证与重启持久；
+  不健康 release 最终保持旧 `current`、旧 PostgreSQL/App 健康。演练没有连接 ECS、阿里云、
+  SSH、公共证书或 DNS。

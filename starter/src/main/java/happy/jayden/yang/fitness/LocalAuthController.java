@@ -1,5 +1,6 @@
 package happy.jayden.yang.fitness;
 
+import happy.jayden.yang.config.SessionCookieFactory;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginRequest;
 import happy.jayden.yang.fitness.service.FitnessDtos.LoginResponse;
@@ -21,9 +22,12 @@ public class LocalAuthController {
 
   public static final String SESSION_COOKIE = "FITNESS_SESSION";
   private final FitnessApplicationService application;
+  private final SessionCookieFactory sessionCookies;
 
-  public LocalAuthController(FitnessApplicationService application) {
+  public LocalAuthController(
+      FitnessApplicationService application, SessionCookieFactory sessionCookies) {
     this.application = application;
+    this.sessionCookies = sessionCookies;
   }
 
   @PostMapping("/login")
@@ -40,25 +44,13 @@ public class LocalAuthController {
   ResponseEntity<Void> logout(
       @CookieValue(name = SESSION_COOKIE, required = false) String sessionToken) {
     application.logout(sessionToken);
-    ResponseCookie expired =
-        ResponseCookie.from(SESSION_COOKIE, "")
-            .httpOnly(true)
-            .sameSite("Lax")
-            .path("/")
-            .maxAge(Duration.ZERO)
-            .build();
+    ResponseCookie expired = sessionCookies.create(SESSION_COOKIE, "", Duration.ZERO);
     return ResponseEntity.noContent().header(HttpHeaders.SET_COOKIE, expired.toString()).build();
   }
 
   private ResponseEntity<LoginResponse> loginResponse(LoginResult login) {
     ResponseCookie cookie =
-        ResponseCookie.from(SESSION_COOKIE, login.sessionToken())
-            .httpOnly(true)
-            .secure(false)
-            .sameSite("Lax")
-            .path("/")
-            .maxAge(Duration.ofDays(14))
-            .build();
+        sessionCookies.create(SESSION_COOKIE, login.sessionToken(), Duration.ofDays(14));
     return ResponseEntity.ok()
         .header(HttpHeaders.SET_COOKIE, cookie.toString())
         .body(new LoginResponse(login.user()));

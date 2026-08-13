@@ -403,6 +403,10 @@ class FitnessExperienceIntegrationTest {
 
     mvc.perform(post("/api/local/logout").cookie(session))
         .andExpect(status().isNoContent())
+        .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("HttpOnly")))
+        .andExpect(
+            header().string("Set-Cookie", org.hamcrest.Matchers.containsString("SameSite=Lax")))
+        .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Path=/")))
         .andExpect(
             header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
 
@@ -1975,6 +1979,7 @@ class FitnessExperienceIntegrationTest {
                         "{\"username\":\"%s\",\"password\":\"%s\"}".formatted(username, password)))
             .andExpect(status().isOk())
             .andExpect(cookie().httpOnly("FITNESS_SESSION", true))
+            .andExpect(cookie().secure("FITNESS_SESSION", false))
             .andExpect(jsonPath("$.user.id").isString())
             .andReturn();
     Cookie session = result.getResponse().getCookie("FITNESS_SESSION");

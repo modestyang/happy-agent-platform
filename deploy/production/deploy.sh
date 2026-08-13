@@ -335,7 +335,9 @@ verify_local_manifest() {
 
 build_release() {
   local release release_id
-  release=$($BUILD_SCRIPT)
+  if ! release=$($BUILD_SCRIPT); then
+    die 'release builder failed'
+  fi
   [ -d "$release" ] && [ ! -L "$release" ] || die 'release builder returned an unsafe artifact path'
   case "$release" in "$RELEASE_ROOT"/*) ;; *) die 'release builder returned a path outside the release root';; esac
   release_id=${release##*/}

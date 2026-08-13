@@ -48,7 +48,11 @@ trap cleanup_build EXIT
 
 (
   cd "$REPOSITORY_ROOT"
-  ./mvnw test
+  ./mvnw -Dtest='*,!FitnessExperienceIntegrationTest#dailyMealPlanReadEndpointReturnsThePersistedThreeMealPlan' \
+    -Dsurefire.failIfNoSpecifiedTests=false test
+  ./mvnw -q -pl starter -am \
+    -Dtest='FitnessExperienceIntegrationTest#dailyMealPlanReadEndpointReturnsThePersistedThreeMealPlan' \
+    -Dsurefire.failIfNoSpecifiedTests=false test
   ./mvnw spotless:check
   npm --prefix frontend test
   npm --prefix frontend run typecheck

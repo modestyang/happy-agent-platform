@@ -418,7 +418,8 @@ run_build_tests() {
   assert_contains "$release/build-metadata.env" 'app_image_id=sha256:bbbb'
   node -e 'const fs=require("fs"); const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(m.releaseId!=="20260813T120000Z-abc1234" || m.targetPlatform!=="linux/amd64" || !m.files["compose.yml"]) process.exit(1)' \
     "$release/build-metadata.json" || fail 'invalid structured build metadata'
-  assert_before "$BOUNDARY_LOG" 'mvnw test' 'mvnw spotless:check'
+  assert_before "$BOUNDARY_LOG" 'mvnw -Dtest=' 'mvnw -q -pl starter -am'
+  assert_before "$BOUNDARY_LOG" 'mvnw -q -pl starter -am' 'mvnw spotless:check'
   assert_before "$BOUNDARY_LOG" 'mvnw spotless:check' 'npm --prefix frontend test'
   assert_before "$BOUNDARY_LOG" 'npm --prefix frontend test' 'npm --prefix frontend run typecheck'
   assert_before "$BOUNDARY_LOG" 'npm --prefix frontend run typecheck' 'npm --prefix frontend run build'
@@ -599,7 +600,7 @@ run_deploy_tests() {
   : >"$BOUNDARY_LOG"
   HAPPY_AGENT_BUILD_TIMESTAMP=20260813T122000Z \
     "$FIXTURE_REPO/deploy/production/deploy.sh" release
-  release_line=$(grep -nF 'mvnw test' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
+  release_line=$(grep -nF 'mvnw -Dtest=' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
   upload_line=$(grep -nF 'scp ' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
   backup_line=$(grep -nF '/scripts/backup.sh' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
   activate_line=$(grep -nF '/scripts/activate-release.sh 20260813T122000Z-abc1234' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)

@@ -883,6 +883,7 @@ run_certificate_backup_status_tests() {
   : >"$FAKE_LOG"
   "$SCRIPTS/issue-certificate.sh"
   assert_contains "$FAKE_LOG" 'certbot/certbot:v5.7.0@sha256:34ee91d2f43008eb78a007d22f23ed4b2eaa9a454cb27ca2c042b49527a695b4'
+  assert_contains "$FAKE_LOG" 'docker tag certbot/certbot:v5.7.0@sha256:34ee91d2f43008eb78a007d22f23ed4b2eaa9a454cb27ca2c042b49527a695b4 certbot/certbot:v5.7.0'
   assert_contains "$FAKE_LOG" '--ip-address 39.101.65.254'
   assert_contains "$FAKE_LOG" '--email modest_yang@126.com'
   assert_contains "$FAKE_LOG" '--preferred-profile shortlived'
@@ -914,6 +915,8 @@ run_certificate_backup_status_tests() {
   export FAKE_CERT_EXPIRES=0
   "$SCRIPTS/renew-certificate.sh"
   unset FAKE_CERT_EXPIRES
+  assert_contains "$FAKE_LOG" 'docker run --pull never --rm'
+  assert_contains "$FAKE_LOG" 'certbot/certbot:v5.7.0 renew --preferred-profile shortlived'
   assert_contains "$FAKE_LOG" 'renew --preferred-profile shortlived'
   assert_contains "$FAKE_LOG" 'nginx -t'
 

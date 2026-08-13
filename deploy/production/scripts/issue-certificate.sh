@@ -4,6 +4,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/common.sh"
 
 readonly CERTBOT_IMAGE='certbot/certbot:v5.7.0@sha256:34ee91d2f43008eb78a007d22f23ed4b2eaa9a454cb27ca2c042b49527a695b4'
+readonly CERTBOT_RUNTIME_IMAGE='certbot/certbot:v5.7.0'
 
 issue_core() (
   set -euo pipefail
@@ -39,6 +40,7 @@ issue_core() (
     --cert-name happy-agent-ip --email modest_yang@126.com \
     --agree-tos --non-interactive
   validate_certificate
+  docker tag "$CERTBOT_IMAGE" "$CERTBOT_RUNTIME_IMAGE"
   systemctl enable --now happy-agent-cert-renew.timer
   log 'production IP certificate validated'
 )

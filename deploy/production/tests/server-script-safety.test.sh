@@ -591,7 +591,7 @@ assert_attempt_reached_failure() {
 
 assert_recovery_order() {
   local up_line identity_line smoke_line
-  up_line=$(awk '/releases\/old\/.env/ && / compose / && / up -d --no-deps app nginx/ {line=NR} END {print line}' "$FAKE_LOG")
+  up_line=$(awk '/releases\/old\/.env/ && / compose / && / up -d --no-deps --force-recreate app nginx/ {line=NR} END {print line}' "$FAKE_LOG")
   [ -n "$up_line" ] || fail 'recovery did not start old App/Nginx'
   identity_line=$(awk -v start="$up_line" 'NR > start && /docker inspect .*app-id/ {print NR; exit}' "$FAKE_LOG")
   [ -n "$identity_line" ] || fail 'recovery did not verify old App identity/health after start'
@@ -722,6 +722,7 @@ run_release_tests() {
   [ "$(cat "$FAKE_STATE/nginx.image")" = happy-agent-web:new ] || fail 'healthy activation did not select target Nginx image'
   assert_only_app_nginx_up
   assert_contains "$FAKE_LOG" '--config'
+  assert_contains "$FAKE_LOG" 'up -d --no-deps --force-recreate app nginx'
   assert_contains "$FAKE_LOG" '/api/v1/app/ai/runs/11111111-1111-4111-8111-111111111111/events'
   assert_not_contains "$FAKE_LOG" '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   backup_line=$(awk '/pg_dump/ {print NR; exit}' "$FAKE_LOG")
@@ -735,6 +736,7 @@ run_release_tests() {
   [ "$(cat "$FAKE_STATE/postgres.image")" = happy-agent-postgres:stable ] || fail 'rollback changed PostgreSQL identity'
   assert_not_contains "$FAKE_LOG" 'pg_restore'
   assert_not_contains "$FAKE_LOG" 'pg_dump'
+  assert_contains "$FAKE_LOG" 'up -d --no-deps --force-recreate app nginx'
   assert_only_app_nginx_up
   echo 'PASS: stateful release and rollback transactions'
 }

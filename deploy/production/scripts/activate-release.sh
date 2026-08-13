@@ -8,7 +8,7 @@ attempt_activation() {
   local target=$1 previous=$2 postgres_before=$3 attempts=$4 interval=$5
   compose_release "$previous" stop app nginx || return 1
   switch_current "$target" || return 1
-  compose_release "$target" up -d --no-deps app nginx || return 1
+  compose_release "$target" up -d --no-deps --force-recreate app nginx || return 1
   wait_application_runtime "$target" "$postgres_before" "$attempts" "$interval" || return 1
   public_smoke || return 1
 }

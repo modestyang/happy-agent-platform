@@ -228,7 +228,7 @@ _recover_previous_release() {
     log 'recovery could not restore the previous release link'
     return 1
   fi
-  compose_release "$previous" up -d --no-deps app nginx || return 1
+  compose_release "$previous" up -d --no-deps --force-recreate app nginx || return 1
   wait_application_runtime "$previous" "$postgres_before" "$attempts" "$interval" || return 1
   public_smoke || return 1
   log 'previous release identity, health, PostgreSQL continuity, and public smoke recovered'

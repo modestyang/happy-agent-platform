@@ -15,7 +15,7 @@ attempt_activation() {
 
 activate_core() {
   [ "$#" = 1 ] || die 'usage: activate-release.sh RELEASE_ID'
-  local target previous generation postgres_before image attempts interval
+  local target previous generation postgres_before attempts interval
   target=$(release_path "$1")
   [ -d "$target" ] || die 'release is missing'
   verify_manifest "$target" .env compose.yml nginx.conf
@@ -28,11 +28,8 @@ activate_core() {
   [ -s "$generation/agent-master-key" ] || die 'active state generation has an empty Agent master key'
   postgres_before=$(postgres_identity "$previous") || die 'PostgreSQL is not healthy before activation'
 
+  ensure_release_images "$target" app nginx || die 'release images could not be pulled'
   backup_core
-  while IFS= read -r -d '' image; do
-    [ -f "$image" ] && [ ! -L "$image" ] || die 'release image archive is unsafe'
-    docker load -i "$image"
-  done < <(find "$target/images" -maxdepth 1 -type f -name '*.tar' -print0 2>/dev/null)
 
   attempts=${HAPPY_AGENT_HEALTH_ATTEMPTS:-12}
   interval=${HAPPY_AGENT_HEALTH_INTERVAL:-5}

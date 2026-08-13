@@ -50,6 +50,7 @@ export HAPPY_AGENT_ROOT="${temp_root}"
 export POSTGRES_PASSWORD_FILE="${temp_root}/secrets/postgres-password"
 export FITNESS_DB_PASSWORD_FILE="${temp_root}/secrets/fitness-db-password"
 export AGENT_DB_PASSWORD_FILE="${temp_root}/secrets/agent-db-password"
+export POSTGRES_IMAGE="crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-postgres:compose-contract"
 
 cd "${project_root}"
 docker compose \
@@ -88,6 +89,7 @@ for (const [name, service] of Object.entries(services)) {
 assert(['1800m', '1887436800'].includes(String(services.app.deploy.resources.limits.memory)), 'app memory limit');
 assert(['768m', '805306368'].includes(String(services.postgres.deploy.resources.limits.memory)), 'postgres memory limit');
 assert(['128m', '134217728'].includes(String(services.nginx.deploy.resources.limits.memory)), 'nginx memory limit');
+assert(services.postgres.image === 'crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-postgres:compose-contract', 'explicit PostgreSQL registry image');
 const postgresCommand = services.postgres.command.join(' ');
 assert(postgresCommand.includes('shared_buffers=128MB') && postgresCommand.includes('work_mem=4MB'), 'postgres tuning');
 

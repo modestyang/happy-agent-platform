@@ -9,10 +9,21 @@ ARTIFACT_ROOT="$REPOSITORY_ROOT/deploy/.local/production"
 RELEASE_ROOT="$ARTIFACT_ROOT/releases"
 STAGING_ROOT="$ARTIFACT_ROOT/staging"
 TARGET_PLATFORM=linux/amd64
+readonly ACR_REGISTRY=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com
+readonly ACR_NAMESPACE=modest_yy
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "required command unavailable: $1"; }
+file_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+private_credential_file() {
+  local raw=$1 label=$2
+  case "$raw" in ''|/|~*|*'?'*|*'['*|*'*'*|!/*) die "$label path must be a safe absolute path";; esac
+  [ -f "$raw" ] && [ ! -L "$raw" ] && [ -r "$raw" ] \
+    || die "$label is missing, unreadable, or indirect"
+  [ "$(file_mode "$raw")" = 600 ] || die "$label must have mode 0600"
+  realpath "$raw"
+}
 
 for command_name in docker git node npm sha256sum; do require_command "$command_name"; done
 [ -x "$REPOSITORY_ROOT/mvnw" ] || die 'Maven wrapper is not executable'
@@ -30,12 +41,21 @@ release_id="$timestamp-$source_short"
 
 umask 077
 install -d -m 0700 "$ARTIFACT_ROOT" "$RELEASE_ROOT" "$STAGING_ROOT"
+acr_username_file=$(private_credential_file \
+  "${HAPPY_AGENT_ACR_USERNAME_FILE:-$ARTIFACT_ROOT/acr-username}" 'ACR username file')
+acr_password_file=$(private_credential_file \
+  "${HAPPY_AGENT_ACR_PASSWORD_FILE:-$ARTIFACT_ROOT/acr-password}" 'ACR password file')
+acr_username=$(cat "$acr_username_file")
+[[ "$acr_username" =~ ^[A-Za-z0-9._@-]+$ ]] \
+  && [ "$(wc -l <"$acr_username_file" | tr -d ' ')" = 1 ] \
+  || die 'ACR username file must contain one safe line'
+[ -s "$acr_password_file" ] || die 'ACR password file must not be empty'
 pending="$RELEASE_ROOT/.pending-$release_id"
 complete="$RELEASE_ROOT/$release_id"
 build_tmp="$STAGING_ROOT/.build-$release_id-$$"
 [ ! -e "$pending" ] && [ ! -e "$complete" ] && [ ! -e "$build_tmp" ] \
   || die 'release id already exists'
-install -d -m 0700 "$pending" "$pending/images" "$pending/scripts" "$pending/postgres" \
+install -d -m 0700 "$pending" "$pending/scripts" "$pending/postgres" \
   "$pending/systemd" "$build_tmp"
 
 cleanup_build() {
@@ -101,9 +121,9 @@ install -m 0600 "${starter_jars[0]}" "$app_context/starter/target/${starter_jars
   || die 'frontend build output contains a link or special member'
 cp -R "$REPOSITORY_ROOT/frontend/dist/." "$web_context/frontend/dist/"
 
-app_image="happy-agent-app:$release_id"
-web_image="happy-agent-web:$release_id"
-postgres_image="happy-agent-postgres:$release_id"
+app_image="$ACR_REGISTRY/$ACR_NAMESPACE/happy-agent-app:$release_id"
+web_image="$ACR_REGISTRY/$ACR_NAMESPACE/happy-agent-web:$release_id"
+postgres_image="$ACR_REGISTRY/$ACR_NAMESPACE/happy-agent-postgres:$release_id"
 (
   cd "$REPOSITORY_ROOT"
   docker buildx build --platform "$TARGET_PLATFORM" -f deploy/production/app.Dockerfile \
@@ -114,10 +134,13 @@ postgres_image="happy-agent-postgres:$release_id"
     -t "$postgres_image" --load "$postgres_context"
 )
 
-docker image save -o "$pending/images/app.tar" "$app_image"
-docker image save -o "$pending/images/web.tar" "$web_image"
-docker image save -o "$pending/images/postgres.tar" "$postgres_image"
-chmod 0600 "$pending/images"/*.tar
+docker_config="$build_tmp/docker-config"
+install -d -m 0700 "$docker_config"
+DOCKER_CONFIG="$docker_config" docker login --username "$acr_username" --password-stdin \
+  "$ACR_REGISTRY" <"$acr_password_file"
+DOCKER_CONFIG="$docker_config" docker push "$app_image"
+DOCKER_CONFIG="$docker_config" docker push "$web_image"
+DOCKER_CONFIG="$docker_config" docker push "$postgres_image"
 
 app_image_id=$(docker image inspect --format '{{.Id}}' "$app_image")
 web_image_id=$(docker image inspect --format '{{.Id}}' "$web_image")
@@ -141,8 +164,8 @@ sed -e 's#__TLS_CERTIFICATE_PATH__#/etc/letsencrypt/production/live/happy-agent-
 install -m 0600 "$PRODUCTION_ROOT/nginx/ip-http.conf.template" "$pending/nginx-http.conf"
 ! grep -Eq '__TLS_(CERTIFICATE|PRIVATE_KEY)_PATH__' "$pending/nginx.conf" \
   || die 'HTTPS Nginx template was not fully rendered'
-printf 'RELEASE_ID=%s\nAPP_IMAGE=%s\nWEB_IMAGE=%s\n' \
-  "$release_id" "$app_image" "$web_image" >"$pending/.env"
+printf 'RELEASE_ID=%s\nAPP_IMAGE=%s\nWEB_IMAGE=%s\nPOSTGRES_IMAGE=%s\n' \
+  "$release_id" "$app_image" "$web_image" "$postgres_image" >"$pending/.env"
 chmod 0600 "$pending/.env" "$pending/nginx.conf" "$pending/nginx-http.conf"
 
 for script_name in common.sh bootstrap-host.sh issue-certificate.sh renew-certificate.sh backup.sh \

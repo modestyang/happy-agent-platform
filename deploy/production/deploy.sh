@@ -30,6 +30,7 @@ readonly EXPECTED_INSTANCE_ID=i-0jlfb8o4hqpjekoudg4x
 readonly EXPECTED_SECURITY_GROUP_ID=sg-0jlb5v2njkb2jbzrvurr
 readonly EXPECTED_PUBLIC_IP=39.101.65.254
 readonly EXPECTED_PROFILE=ecs-audit
+readonly ACR_REGISTRY=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com
 readonly REMOTE_USER=root
 readonly REMOTE_ROOT=/opt/happy-agent
 readonly REGION=${HAPPY_AGENT_REGION:-$EXPECTED_REGION}
@@ -53,6 +54,14 @@ ensure_private_directory() {
   else
     install -d -m 0700 "$1"
   fi
+}
+private_credential_file() {
+  local raw=$1 label=$2
+  case "$raw" in ''|/|~*|*'?'*|*'['*|*'*'*|!/*) die "$label path must be a safe absolute path";; esac
+  [ -f "$raw" ] && [ ! -L "$raw" ] && [ -r "$raw" ] \
+    || die "$label is missing, unreadable, or indirect"
+  [ "$(file_mode "$raw")" = 600 ] || die "$label must have mode 0600"
+  realpath "$raw"
 }
 
 [ "$REGION" = "$EXPECTED_REGION" ] && [ "$INSTANCE_ID" = "$EXPECTED_INSTANCE_ID" ] \
@@ -101,6 +110,24 @@ ensure_private_directory "$RELEASE_ROOT"
 ensure_private_directory "$MIGRATION_ROOT"
 ensure_private_directory "$RECOVERY_ROOT"
 ensure_private_directory "$STAGING_ROOT"
+ACR_USERNAME=''
+ACR_USERNAME_FILE=''
+ACR_PASSWORD_FILE=''
+
+load_acr_credentials() {
+  [ -z "$ACR_USERNAME" ] || return 0
+  ACR_USERNAME_FILE=$(private_credential_file \
+    "${HAPPY_AGENT_ACR_USERNAME_FILE:-$ARTIFACT_ROOT/acr-username}" 'ACR username file')
+  ACR_PASSWORD_FILE=$(private_credential_file \
+    "${HAPPY_AGENT_ACR_PASSWORD_FILE:-$ARTIFACT_ROOT/acr-password}" 'ACR password file')
+  ACR_USERNAME=$(cat "$ACR_USERNAME_FILE")
+  [[ "$ACR_USERNAME" =~ ^[A-Za-z0-9._@-]+$ ]] \
+    && [ "$(wc -l <"$ACR_USERNAME_FILE" | tr -d ' ')" = 1 ] \
+    || die 'ACR username file must contain one safe line'
+  [ -s "$ACR_PASSWORD_FILE" ] || die 'ACR password file must not be empty'
+  export HAPPY_AGENT_ACR_USERNAME_FILE="$ACR_USERNAME_FILE"
+  export HAPPY_AGENT_ACR_PASSWORD_FILE="$ACR_PASSWORD_FILE"
+}
 
 SSH_OPTIONS=(
   -o BatchMode=yes
@@ -112,6 +139,14 @@ SSH_OPTIONS=(
 
 remote_exec() {
   ssh -n "${SSH_OPTIONS[@]}" "$REMOTE" "$@"
+}
+
+remote_registry_login() {
+  load_acr_credentials
+  ssh "${SSH_OPTIONS[@]}" "$REMOTE" docker login --username "$ACR_USERNAME" \
+    --password-stdin "$ACR_REGISTRY" <"$ACR_PASSWORD_FILE"
+  remote_exec chmod 0700 /root/.docker
+  remote_exec chmod 0600 /root/.docker/config.json
 }
 
 remote_control() {
@@ -203,6 +238,14 @@ case "$action" in
     [ ! -e "$root/bootstrap/$id" ] || exit 1
     mv -T -- "$pending" "$root/bootstrap/$id"
     ;;
+  pull-release)
+    [ "$#" = 1 ] || exit 2
+    id=$1; release="$root/releases/$id"
+    valid_identifier "$id" || exit 2
+    verify_manifest "$release"
+    HAPPY_AGENT_ROOT="$root" docker compose -p happy-agent --env-file "$release/.env" \
+      -f "$release/compose.yml" pull postgres app nginx
+    ;;
   start-bootstrap)
     [ "$#" = 1 ] || exit 2
     id=$1; bundle="$root/bootstrap/$id"
@@ -223,8 +266,8 @@ case "$action" in
     id=$1; release="$root/releases/http-$id"
     valid_identifier "$id" || exit 2
     verify_manifest "$release"
-    while IFS= read -r -d '' archive; do docker load -i "$archive"; done \
-      < <(find "$release/images" -maxdepth 1 -type f -name '*.tar' -print0)
+    HAPPY_AGENT_ROOT="$root" /bin/bash -c \
+      'source "$1/scripts/common.sh"; ensure_release_images "$1" nginx' _ "$release"
     if docker container inspect happy-agent-bootstrap-nginx >/dev/null 2>&1; then
       docker rm -f happy-agent-bootstrap-nginx
     fi
@@ -492,6 +535,7 @@ run_bootstrap() {
 
 run_release() {
   local release release_id backup_timestamp activation_timestamp
+  load_acr_credentials
   release=$(build_release)
   release_id=${release##*/}
   cleanup_release() {
@@ -500,7 +544,9 @@ run_release() {
     return "$status"
   }
   trap cleanup_release EXIT
+  remote_registry_login
   upload_directory release "$release_id" "$release"
+  remote_control pull-release "$release_id"
   trap - EXIT
   cleanup_release
   backup_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -537,6 +583,7 @@ run_migrate() {
     *) die 'remote initial migration state is ambiguous';;
   esac
 
+  load_acr_credentials
   release=$(build_release)
   release_id=${release##*/}
   session_file=${PUBLIC_SMOKE_SESSION_FILE:-"$SOURCE_STATE_ROOT/deploy/.local/production/public-smoke-session"}
@@ -562,9 +609,11 @@ run_migrate() {
     return "$status"
   }
   trap cleanup_migrate EXIT
+  remote_registry_login
   upload_directory release "$release_id" "$release"
   upload_directory release "http-$release_id" "$http_release"
   upload_directory migration "$migration_id" "$migration"
+  remote_control pull-release "$release_id"
   remote_control prepare-staging smoke "$release_id"
   scp "${SSH_OPTIONS[@]}" "$session_file" \
     "$REMOTE:$REMOTE_ROOT/staging/.pending-smoke-$release_id/public-smoke-session"
@@ -600,5 +649,9 @@ case "$command_name" in
     remote_exec "$REMOTE_ROOT/current/scripts/backup.sh"
     pull_latest_backup
     ;;
-  rollback) remote_exec "$REMOTE_ROOT/current/scripts/rollback.sh" "$rollback_release_id";;
+  rollback)
+    load_acr_credentials
+    remote_registry_login
+    remote_exec "$REMOTE_ROOT/current/scripts/rollback.sh" "$rollback_release_id"
+    ;;
 esac

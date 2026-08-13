@@ -2,7 +2,7 @@ name: happy-agent
 
 services:
   postgres:
-    image: happy-agent-postgres:${RELEASE_ID}
+    image: ${POSTGRES_IMAGE}
     environment:
       POSTGRES_DB: happy_agent
       POSTGRES_USER: postgres

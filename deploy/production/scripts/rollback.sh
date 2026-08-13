@@ -26,6 +26,7 @@ rollback_core() {
     || die 'active state generation has an indirect Agent master key'
   [ -s "$generation/agent-master-key" ] || die 'active state generation has an empty Agent master key'
   postgres_before=$(postgres_identity "$previous") || die 'PostgreSQL is not healthy before rollback'
+  ensure_release_images "$target" app nginx || die 'rollback images could not be pulled'
   attempts=${HAPPY_AGENT_HEALTH_ATTEMPTS:-12}
   interval=${HAPPY_AGENT_HEALTH_INTERVAL:-5}
   [[ "$attempts" =~ ^[1-9][0-9]*$ ]] || die 'invalid health attempt count'

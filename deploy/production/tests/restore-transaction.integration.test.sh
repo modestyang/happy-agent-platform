@@ -225,6 +225,7 @@ write_restore_docker_fake() {
 set -euo pipefail
 printf 'docker %s\n' "$*" >>"$FAKE_DOCKER_LOG"
 case " $* " in
+  *' logs postgres-id '*) printf 'PostgreSQL init process complete; ready for start up.\n';;
   *' inspect --format {{.State.Status}} postgres-id '*) printf '%s\n' "$(cat "$FAKE_POSTGRES_STATUS")";;
   *' inspect '*'postgres-id'*)
     status=$(cat "$FAKE_POSTGRES_STATUS")
@@ -251,12 +252,12 @@ case " $* " in
       printf 'HAPPY_AGENT_INITIAL_TARGET_EMPTY\n'
     fi
     ;;
-  *' compose '*' exec '*' psql '*'flyway_schema_history'*)
+  *' compose '*' exec '*' psql '*'fitness_schema_history'*'agent_schema_history'*)
     if [ -n "${FAKE_RESTORE_VERIFY_VALUE:-}" ]; then printf '%s\n' "$FAKE_RESTORE_VERIFY_VALUE";
     elif [ "${FAKE_RESTORE_VERIFY_FAIL:-0}" = 1 ]; then printf '9|9|9|9\n'; else printf '1|1|4|1\n'; fi
     ;;
   *' compose '*' exec '*' psql '*'-Atqc'*)
-    if [[ "$*" == *flyway_schema_history* ]]; then
+    if [[ "$*" == *fitness_schema_history*agent_schema_history* ]]; then
       if [ -n "${FAKE_RESTORE_VERIFY_VALUE:-}" ]; then printf '%s\n' "$FAKE_RESTORE_VERIFY_VALUE";
       elif [ "${FAKE_RESTORE_VERIFY_FAIL:-0}" = 1 ]; then printf '9|9|9|9\n'; else printf '1|1|4|1\n'; fi
     else
@@ -292,14 +293,14 @@ EOF
 
 make_release() {
   local root=$1 id=$2 release="$1/releases/$2"
-  mkdir -p "$release/postgres" "$release/images"
+  mkdir -p "$release/postgres"
   cp "$ROOT_DIR/compose.yml" "$release/compose.yml"
   cp "$ROOT_DIR/postgres/init-roles.sh" "$release/postgres/init-roles.sh"
   cp "$ROOT_DIR/postgres/init-roles.sql" "$release/postgres/init-roles.sql"
   cp "$ROOT_DIR/postgres/enforce-isolation.sql" "$release/postgres/enforce-isolation.sql"
   [ ! -f "$ROOT_DIR/postgres/assert-initial-empty-target.sql" ] || cp "$ROOT_DIR/postgres/assert-initial-empty-target.sql" "$release/postgres/assert-initial-empty-target.sql"
-  printf 'RELEASE_ID=%s\nAPP_IMAGE=app:%s\nWEB_IMAGE=web:%s\n' "$id" "$id" "$id" >"$release/.env"
-  printf 'image\n' >"$release/images/$id.tar"
+  printf 'RELEASE_ID=%s\nAPP_IMAGE=app:%s\nWEB_IMAGE=web:%s\nPOSTGRES_IMAGE=happy-agent-postgres:%s\n' \
+    "$id" "$id" "$id" "$id" >"$release/.env"
   printf 'server {}\n' >"$release/nginx.conf"
   (cd "$release" && find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | sed 's#^./##' | while IFS= read -r file; do sha256sum "$file"; done >SHA256SUMS)
 }

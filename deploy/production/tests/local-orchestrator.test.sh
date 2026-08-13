@@ -78,6 +78,12 @@ BOUNDARY_LOG="$TMP/boundary.log"
 mkdir -p "$FIXTURE_REPO/deploy" "$FIXTURE_REPO/agentbuilder/agentbuilder-infrastructure/src/main/resources/db/agent" \
   "$FIXTURE_REPO/starter/target" "$FIXTURE_REPO/frontend/dist" "$FAKE" "$FAKE_STATE"
 cp -R "$PRODUCTION_ROOT" "$FIXTURE_REPO/deploy/production"
+mkdir -p "$FIXTURE_REPO/deploy/.local/production"
+chmod 0700 "$FIXTURE_REPO/deploy/.local/production"
+printf 'acr-user-fixture\n' >"$FIXTURE_REPO/deploy/.local/production/acr-username"
+printf 'acr-password-fixture\n' >"$FIXTURE_REPO/deploy/.local/production/acr-password"
+chmod 0600 "$FIXTURE_REPO/deploy/.local/production/acr-username" \
+  "$FIXTURE_REPO/deploy/.local/production/acr-password"
 cp -R "$WORKTREE_ROOT/deploy/postgres" "$FIXTURE_REPO/deploy/postgres"
 cp "$WORKTREE_ROOT/agentbuilder/agentbuilder-infrastructure/src/main/resources/db/agent/V1__agent_baseline.sql" \
   "$FIXTURE_REPO/agentbuilder/agentbuilder-infrastructure/src/main/resources/db/agent/V1__agent_baseline.sql"
@@ -147,6 +153,25 @@ cat >"$FAKE/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'docker %s\n' "$*" >>"$BOUNDARY_LOG"
+if [ "${1:-}" = login ]; then
+  password=$(/bin/cat)
+  [ "$password" = acr-password-fixture ] || exit 63
+  [ "${2:-}" = --username ] && [ "${3:-}" = acr-user-fixture ] \
+    && [ "${4:-}" = --password-stdin ] \
+    && [ "${5:-}" = crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com ] \
+    || exit 64
+  : >"$FAKE_STATE/local-registry-login"
+  exit
+fi
+if [ "${1:-}" = push ]; then
+  [ -e "$FAKE_STATE/local-registry-login" ] || exit 65
+  if [ -n "${FAKE_DOCKER_FAIL_PUSH_TAG:-}" ] \
+      && [ "${2:-}" = "$FAKE_DOCKER_FAIL_PUSH_TAG" ]; then
+    exit 66
+  fi
+  printf '%s\n' "${2:-}" >>"$FAKE_STATE/pushed-images"
+  exit
+fi
 if [ "${1:-}" = compose ] && [ "${2:-}" != version ] \
     && [ -n "${FAKE_DOCKER_REQUIRED_ENV_FILE:-}" ]; then
   args=("$@")
@@ -171,10 +196,10 @@ if [ "${1:-}" = buildx ] && [ "${2:-}" = build ]; then
       -f|--file) ((i+=1)); dockerfile=${args[$i]};;
     esac
   done
-  [ -n "$tag" ] && [ -f "$dockerfile" ] || exit 65
-  if [ -n "${FAKE_DOCKER_FAIL_TAG:-}" ] && [ "$tag" = "$FAKE_DOCKER_FAIL_TAG" ]; then exit 66; fi
+  [ -n "$tag" ] && [ -f "$dockerfile" ] || exit 67
+  if [ -n "${FAKE_DOCKER_FAIL_TAG:-}" ] && [ "$tag" = "$FAKE_DOCKER_FAIL_TAG" ]; then exit 68; fi
   case "$tag" in
-    happy-agent-postgres:*) grep -F 'postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' "$dockerfile" >/dev/null || exit 67;;
+    */happy-agent-postgres:*) grep -F 'postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' "$dockerfile" >/dev/null || exit 69;;
   esac
   printf '%s\n' "$tag" >>"$FAKE_STATE/built-images"
   exit
@@ -182,7 +207,7 @@ fi
 if [ "${1:-}" = image ] && [ "${2:-}" = inspect ]; then
   format=${4:-}; image=${5:-}
   case "$format" in
-    *RepoDigests*) printf '["%s@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]\n' "${image%%:*}";;
+    *RepoDigests*) printf '["%s@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]\n' "${image%:*}";;
     *Id*) printf 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n';;
     *) exit 68;;
   esac
@@ -329,8 +354,20 @@ cat >"$FAKE/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'ssh %s\n' "$*" >>"$BOUNDARY_LOG"
+case " $* " in
+  *' docker login --username acr-user-fixture --password-stdin crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com '*)
+    password=$(/bin/cat)
+    [ "$password" = acr-password-fixture ] || exit 78
+    : >"$FAKE_STATE/remote-registry-login"
+    exit
+    ;;
+esac
 /bin/cat >/dev/null || :
 case " $* " in
+  *' pull-release '*)
+    [ -e "$FAKE_STATE/remote-registry-login" ] || exit 79
+    [ "${FAKE_REMOTE_PULL_FAIL:-0}" != 1 ] || exit 80
+    ;;
   *' latest-backup '*)
     count=0
     [ ! -f "$FAKE_STATE/backup-counter" ] || count=$(cat "$FAKE_STATE/backup-counter")
@@ -415,8 +452,9 @@ reset_aliyun_state() {
 }
 
 run_build_tests() {
-  local release failed_release first_build line
+  local release failed_release failed_push_release first_build line
   : >"$BOUNDARY_LOG"
+  /bin/rm -f -- "$FAKE_STATE/local-registry-login" "$FAKE_STATE/pushed-images"
   (
     cd "$FIXTURE_REPO"
     HAPPY_AGENT_BUILD_TIMESTAMP=20260813T120000Z \
@@ -426,19 +464,20 @@ run_build_tests() {
   [ -d "$release" ] || fail 'release was not atomically published'
   assert_mode "$release" 700
   verify_closed_manifest "$release"
-  for file in "$release/images/app.tar" "$release/images/web.tar" "$release/images/postgres.tar" \
-    "$release/.env" "$release/build-metadata.env" "$release/build-metadata.json"; do
+  for file in "$release/.env" "$release/build-metadata.env" "$release/build-metadata.json"; do
     [ -f "$file" ] || fail "missing release file: ${file#$release/}"
     assert_mode "$file" 600
   done
+  [ ! -e "$release/images" ] || fail 'release retained image archives after registry push'
   for file in "$release/postgres/init-roles.sh" "$release/postgres/init-roles.sql" \
     "$release/postgres/enforce-isolation.sql" \
     "$release/postgres/assert-initial-empty-target.sql"; do
     assert_mode "$file" 644
   done
   assert_contains "$release/.env" 'RELEASE_ID=20260813T120000Z-abc1234'
-  assert_contains "$release/.env" 'APP_IMAGE=happy-agent-app:20260813T120000Z-abc1234'
-  assert_contains "$release/.env" 'WEB_IMAGE=happy-agent-web:20260813T120000Z-abc1234'
+  assert_contains "$release/.env" 'APP_IMAGE=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-app:20260813T120000Z-abc1234'
+  assert_contains "$release/.env" 'WEB_IMAGE=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-web:20260813T120000Z-abc1234'
+  assert_contains "$release/.env" 'POSTGRES_IMAGE=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-postgres:20260813T120000Z-abc1234'
   assert_contains "$release/build-metadata.env" 'source_dirty=true'
   assert_contains "$release/build-metadata.env" 'target_platform=linux/amd64'
   assert_contains "$release/build-metadata.env" 'app_image_id=sha256:bbbb'
@@ -461,8 +500,11 @@ run_build_tests() {
   [ "$line" -lt "$first_build" ] || fail 'image build started before required checks/builds'
   [ "$(grep -Fc 'docker buildx build --platform linux/amd64' "$BOUNDARY_LOG")" = 3 ] \
     || fail 'expected three linux/amd64 image builds'
-  [ "$(grep -Fc 'docker image save -o' "$BOUNDARY_LOG")" = 3 ] \
-    || fail 'expected three image archives'
+  [ "$(grep -Fc 'docker push crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-' "$BOUNDARY_LOG")" = 3 ] \
+    || fail 'expected three ACR image pushes'
+  assert_contains "$BOUNDARY_LOG" 'docker login --username acr-user-fixture --password-stdin crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com'
+  assert_not_contains "$BOUNDARY_LOG" 'docker image save'
+  assert_not_contains "$BOUNDARY_LOG" 'acr-password-fixture'
   assert_not_contains "$BOUNDARY_LOG" '--load .'
   assert_not_contains "$release/SHA256SUMS" 'public-smoke-session'
   assert_not_contains "$release/SHA256SUMS" 'agent-master-key'
@@ -471,10 +513,18 @@ run_build_tests() {
 
   : >"$BOUNDARY_LOG"
   failed_release="$FIXTURE_REPO/deploy/.local/production/releases/20260813T120100Z-abc1234"
-  expect_fail bash -c 'cd "$1" && HAPPY_AGENT_BUILD_TIMESTAMP=20260813T120100Z FAKE_DOCKER_FAIL_TAG=happy-agent-web:20260813T120100Z-abc1234 deploy/production/scripts/build-release.sh' _ "$FIXTURE_REPO"
+  expect_fail bash -c 'cd "$1" && HAPPY_AGENT_BUILD_TIMESTAMP=20260813T120100Z FAKE_DOCKER_FAIL_TAG=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-web:20260813T120100Z-abc1234 deploy/production/scripts/build-release.sh' _ "$FIXTURE_REPO"
   [ ! -e "$failed_release" ] || fail 'failed build published a complete release'
   [ ! -e "$FIXTURE_REPO/deploy/.local/production/releases/.pending-20260813T120100Z-abc1234" ] \
     || fail 'failed build leaked its pending release'
+
+  : >"$BOUNDARY_LOG"
+  /bin/rm -f -- "$FAKE_STATE/local-registry-login"
+  failed_push_release="$FIXTURE_REPO/deploy/.local/production/releases/20260813T120200Z-abc1234"
+  expect_fail bash -c 'cd "$1" && HAPPY_AGENT_BUILD_TIMESTAMP=20260813T120200Z FAKE_DOCKER_FAIL_PUSH_TAG=crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com/modest_yy/happy-agent-web:20260813T120200Z-abc1234 deploy/production/scripts/build-release.sh' _ "$FIXTURE_REPO"
+  [ ! -e "$failed_push_release" ] || fail 'failed ACR push published a complete release'
+  [ ! -e "$FIXTURE_REPO/deploy/.local/production/releases/.pending-20260813T120200Z-abc1234" ] \
+    || fail 'failed ACR push leaked its pending release'
   echo 'PASS: local release build transaction'
 }
 
@@ -600,7 +650,7 @@ assert_transport_options() {
 
 run_deploy_tests() {
   local identity known_hosts marker reusable_release release_line upload_line backup_line activate_line
-  local backup_timestamp activation_timestamp
+  local backup_timestamp activation_timestamp registry_login_line pull_line
   local smoke_override session_override run_id_override
   setup_source_state
   reset_aliyun_state
@@ -633,10 +683,14 @@ run_deploy_tests() {
   HAPPY_AGENT_BUILD_TIMESTAMP=20260813T122000Z \
     "$FIXTURE_REPO/deploy/production/deploy.sh" release
   release_line=$(grep -nF 'mvnw -Dtest=' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
+  registry_login_line=$(grep -nF 'docker login --username acr-user-fixture --password-stdin' "$BOUNDARY_LOG" | tail -n1 | cut -d: -f1)
   upload_line=$(grep -nF 'scp ' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
+  pull_line=$(grep -nF 'pull-release 20260813T122000Z-abc1234' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
   backup_line=$(grep -nF '/scripts/backup.sh' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
   activate_line=$(grep -nF '/scripts/activate-release.sh 20260813T122000Z-abc1234' "$BOUNDARY_LOG" | head -n1 | cut -d: -f1)
-  [ "$release_line" -lt "$upload_line" ] && [ "$upload_line" -lt "$backup_line" ] \
+  [ "$release_line" -lt "$registry_login_line" ] \
+    && [ "$registry_login_line" -lt "$upload_line" ] \
+    && [ "$upload_line" -lt "$pull_line" ] && [ "$pull_line" -lt "$backup_line" ] \
     && [ "$backup_line" -lt "$activate_line" ] || fail 'release orchestration order is wrong'
   assert_contains "$BOUNDARY_LOG" '/.env '
   backup_timestamp=$(grep -F '/scripts/backup.sh' "$BOUNDARY_LOG" | head -n1 \
@@ -648,6 +702,7 @@ run_deploy_tests() {
     && [ "$backup_timestamp" != "$activation_timestamp" ] \
     || fail 'release backup and activation did not use distinct safe timestamps'
   assert_contains "$BOUNDARY_LOG" 'latest-backup'
+  assert_not_contains "$BOUNDARY_LOG" 'acr-password-fixture'
   assert_transport_options
 
   reusable_release="$FIXTURE_REPO/deploy/.local/production/releases/20260813T122000Z-abc1234"
@@ -657,6 +712,15 @@ run_deploy_tests() {
   assert_not_contains "$BOUNDARY_LOG" 'mvnw '
   assert_contains "$BOUNDARY_LOG" \
     '/scripts/activate-release.sh 20260813T122000Z-abc1234'
+
+  : >"$BOUNDARY_LOG"
+  export FAKE_REMOTE_PULL_FAIL=1
+  expect_fail env HAPPY_AGENT_RELEASE_PATH="$reusable_release" \
+    "$FIXTURE_REPO/deploy/production/deploy.sh" release
+  unset FAKE_REMOTE_PULL_FAIL
+  assert_contains "$BOUNDARY_LOG" 'pull-release 20260813T122000Z-abc1234'
+  assert_not_contains "$BOUNDARY_LOG" '/scripts/backup.sh'
+  assert_not_contains "$BOUNDARY_LOG" '/scripts/activate-release.sh'
 
   : >"$BOUNDARY_LOG"
   HAPPY_AGENT_BUILD_TIMESTAMP=20260813T123000Z HAPPY_AGENT_EXPORT_TIMESTAMP=20260813T123100Z \

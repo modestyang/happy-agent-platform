@@ -277,8 +277,8 @@ cp "$PRODUCTION_ROOT/postgres/"* "$GOOD_RELEASE/postgres/"
 sed -e 's#__TLS_CERTIFICATE_PATH__#/etc/letsencrypt/production/live/happy-agent-ip/fullchain.pem#g' \
   -e 's#__TLS_PRIVATE_KEY_PATH__#/etc/letsencrypt/production/live/happy-agent-ip/privkey.pem#g' \
   "$PRODUCTION_ROOT/nginx/ip-https.conf.template" >"$GOOD_RELEASE/nginx.conf"
-printf 'RELEASE_ID=%s\nAPP_IMAGE=%s\nWEB_IMAGE=%s\n' \
-  "$RELEASE_ID" "$APP_IMAGE" "$WEB_IMAGE" >"$GOOD_RELEASE/.env"
+printf 'RELEASE_ID=%s\nAPP_IMAGE=%s\nWEB_IMAGE=%s\nPOSTGRES_IMAGE=%s\n' \
+  "$RELEASE_ID" "$APP_IMAGE" "$WEB_IMAGE" "$POSTGRES_IMAGE" >"$GOOD_RELEASE/.env"
 for secret in postgres-password fitness-db-password agent-db-password; do
   openssl rand -base64 24 >"$ROOT/secrets/$secret"
 done

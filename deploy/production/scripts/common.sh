@@ -174,6 +174,25 @@ declared_service_image() {
   printf '%s\n' "$image"
 }
 
+ensure_release_images() {
+  [ "$#" -ge 2 ] || die 'release and service names are required'
+  local release=$1 service image
+  local -a requested missing=()
+  shift
+  requested=("$@")
+  for service in "${requested[@]}"; do
+    image=$(declared_service_image "$release" "$service") || return 1
+    if ! docker image inspect "$image" >/dev/null 2>&1; then missing+=("$service"); fi
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    compose_release "$release" pull "${missing[@]}" || return 1
+  fi
+  for service in "${requested[@]}"; do
+    image=$(declared_service_image "$release" "$service") || return 1
+    docker image inspect "$image" >/dev/null 2>&1 || return 1
+  done
+}
+
 service_runtime() {
   local release=$1 service=$2 container_id lines
   container_id=$(compose_release "$release" ps -q "$service")

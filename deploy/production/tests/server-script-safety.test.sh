@@ -264,14 +264,20 @@ args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   if [ "${args[$i]}" = --env-file ]; then ((i+=1)); release_env=${args[$i]}; fi
 done
-release_id=''; app_image=''; web_image=''
+release_id=''; app_image=''; web_image=''; postgres_image=''
 if [ -n "$release_env" ] && [ -f "$release_env" ]; then
   release_id=$(sed -n 's/^RELEASE_ID=//p' "$release_env")
   app_image=$(sed -n 's/^APP_IMAGE=//p' "$release_env")
   web_image=$(sed -n 's/^WEB_IMAGE=//p' "$release_env")
+  postgres_image=$(sed -n 's/^POSTGRES_IMAGE=//p' "$release_env")
 fi
 
 case " $* " in
+  *' image inspect '*)
+    image=${!#}
+    if [ "${FAKE_TARGET_IMAGES_MISSING:-0}" = 1 ] && [[ "$image" == *:new ]]; then exit 1; fi
+    printf 'sha256:fixture\n'
+    ;;
   *' inspect '*'postgres-id'*|*' inspect '*'app-id'*|*' inspect '*'nginx-id'*)
     id=${!#}; service=${id%-id}
     printf '%s|%s|%s|%s\n' "$(cat "$FAKE_STATE/$service.id")" "$(cat "$FAKE_STATE/$service.image")" "$(cat "$FAKE_STATE/$service.status")" "$(cat "$FAKE_STATE/$service.health")"
@@ -280,12 +286,16 @@ case " $* " in
   *' compose '*' ps -q app '*) cat "$FAKE_STATE/app.id";;
   *' compose '*' ps -q nginx '*) cat "$FAKE_STATE/nginx.id";;
   *' compose '*' config app '*|*' compose '*' config nginx '*|*' compose '*' config postgres '*)
-    printf 'services:\n  app:\n    image: %s\n  nginx:\n    image: %s\n  postgres:\n    image: happy-agent-postgres:%s\n' \
-      "$app_image" "$web_image" "$release_id"
+    printf 'services:\n  app:\n    image: %s\n  nginx:\n    image: %s\n  postgres:\n    image: %s\n' \
+      "$app_image" "$web_image" "$postgres_image"
     ;;
   *' compose '*' ps '*'--format'*' postgres '*) printf 'postgres running healthy\n';;
   *' compose '*' ps '*'--format'*' app '*) printf 'app running healthy\n';;
   *' compose '*' ps '*'--format'*' nginx '*) printf 'nginx running healthy\n';;
+  *' compose '*' pull '*)
+    [ "${FAKE_PULL_FAIL:-0}" != 1 ] || exit 1
+    : >"$FAKE_STATE/pull-$release_id"
+    ;;
   *' compose '*' up '*)
     services=" $* "
     if [[ "$services" == *' postgres '* ]]; then
@@ -374,14 +384,14 @@ done
 
 make_release() {
   local root=$1 id=$2 release="$1/releases/$2"
-  mkdir -p "$release/images" "$release/postgres"
+  mkdir -p "$release/postgres"
   cp "$ROOT_DIR/compose.yml" "$release/compose.yml"
   cp "$ROOT_DIR/postgres/init-roles.sh" "$release/postgres/init-roles.sh"
   cp "$ROOT_DIR/postgres/init-roles.sql" "$release/postgres/init-roles.sql"
   cp "$ROOT_DIR/postgres/enforce-isolation.sql" "$release/postgres/enforce-isolation.sql"
   [ ! -f "$ROOT_DIR/postgres/assert-initial-empty-target.sql" ] || cp "$ROOT_DIR/postgres/assert-initial-empty-target.sql" "$release/postgres/assert-initial-empty-target.sql"
-  printf 'RELEASE_ID=%s\nAPP_IMAGE=happy-agent-app:%s\nWEB_IMAGE=happy-agent-web:%s\n' "$id" "$id" "$id" >"$release/.env"
-  printf 'image-%s\n' "$id" >"$release/images/$id.tar"
+  printf 'RELEASE_ID=%s\nAPP_IMAGE=happy-agent-app:%s\nWEB_IMAGE=happy-agent-web:%s\nPOSTGRES_IMAGE=happy-agent-postgres:%s\n' \
+    "$id" "$id" "$id" "$id" >"$release/.env"
   printf 'server { # %s\n}\n' "$id" >"$release/nginx.conf"
   (cd "$release" && find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | sed 's#^./##' | while IFS= read -r file; do sha256sum "$file"; done >SHA256SUMS)
 }
@@ -436,7 +446,7 @@ setup_operation() {
     FAKE_TARGET_UNHEALTHY_SERVICE FAKE_RECOVERY_WRONG_IMAGE_SERVICE \
     FAKE_RECOVERY_UNHEALTHY_SERVICE FAKE_CERT_LEAF_MISMATCH FAKE_CERT_KEY_MISMATCH \
     FAKE_CERT_CHAIN_MISMATCH FAKE_CERT_TRUST_FAIL FAKE_EXTRA_SAN FAKE_WRONG_SAN FAKE_CERT_EXPIRES \
-    FAKE_RENEW_INVALID FAKE_RENEW_FAIL
+    FAKE_RENEW_INVALID FAKE_RENEW_FAIL FAKE_PULL_FAIL FAKE_TARGET_IMAGES_MISSING
 }
 
 assert_old_runtime_restored() {
@@ -624,7 +634,37 @@ run_rollback_recovery_case() {
 }
 
 run_release_tests() {
-  local output backup_line up_line
+  local output backup_line image_check_line up_line
+
+  setup_operation cached-registry-images 010098
+  export FAKE_PULL_FAIL=1
+  "$SCRIPTS/activate-release.sh" new
+  unset FAKE_PULL_FAIL
+  [ "$(readlink "$HAPPY_AGENT_ROOT/current")" = releases/new ] \
+    || fail 'cached release images were not activated'
+  assert_not_contains "$FAKE_LOG" 'pull app nginx'
+
+  setup_operation registry-pull 010100
+  export FAKE_PULL_FAIL=1 FAKE_TARGET_IMAGES_MISSING=1
+  expect_fail "$SCRIPTS/activate-release.sh" new
+  unset FAKE_PULL_FAIL FAKE_TARGET_IMAGES_MISSING
+  [ "$(readlink "$HAPPY_AGENT_ROOT/current")" = releases/old ] \
+    || fail 'failed registry pull changed the active release'
+  assert_postgres_unchanged
+  assert_contains "$FAKE_LOG" 'compose -p happy-agent'
+  assert_contains "$FAKE_LOG" 'pull app nginx'
+  assert_not_contains "$FAKE_LOG" 'pg_dump'
+  assert_not_contains "$FAKE_LOG" 'stop app nginx'
+
+  setup_operation rollback-registry-pull 010099
+  export FAKE_PULL_FAIL=1 FAKE_TARGET_IMAGES_MISSING=1
+  expect_fail "$SCRIPTS/rollback.sh" new
+  unset FAKE_PULL_FAIL FAKE_TARGET_IMAGES_MISSING
+  [ "$(readlink "$HAPPY_AGENT_ROOT/current")" = releases/old ] \
+    || fail 'failed rollback registry pull changed the active release'
+  assert_postgres_unchanged
+  assert_contains "$FAKE_LOG" 'pull app nginx'
+  assert_not_contains "$FAKE_LOG" 'stop app nginx'
 
   setup_operation partial 010101
   export FAKE_PARTIAL_UP_ONCE=1
@@ -725,8 +765,11 @@ run_release_tests() {
   assert_contains "$FAKE_LOG" 'up -d --no-deps --force-recreate app nginx'
   assert_contains "$FAKE_LOG" '/api/v1/app/ai/runs/11111111-1111-4111-8111-111111111111/events'
   assert_not_contains "$FAKE_LOG" '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  image_check_line=$(awk '/docker image inspect happy-agent-app:new/ {print NR; exit}' "$FAKE_LOG")
   backup_line=$(awk '/pg_dump/ {print NR; exit}' "$FAKE_LOG")
   up_line=$(awk '/ compose .* up / {print NR; exit}' "$FAKE_LOG")
+  [ "$image_check_line" -lt "$backup_line" ] \
+    || fail 'release image availability check did not precede activation backup'
   [ "$backup_line" -lt "$up_line" ] || fail 'activation backup did not precede replacement'
   assert_contains "$HAPPY_AGENT_ROOT/backups/$HAPPY_AGENT_TIMESTAMP/state-metadata" 'generation_id=migrated'
 

@@ -17,7 +17,7 @@ services:
       - work_mem=4MB
     volumes:
       - type: bind
-        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/data/postgres
+        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/state/current/postgres
         target: /var/lib/postgresql/data
       - type: bind
         source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/current/postgres/init-roles.sh
@@ -30,6 +30,10 @@ services:
       - type: bind
         source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/current/postgres/enforce-isolation.sql
         target: /usr/local/share/happy-agent-enforce-isolation.sql
+        read_only: true
+      - type: bind
+        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/current/postgres/assert-initial-empty-target.sql
+        target: /usr/local/share/happy-agent-assert-initial-empty-target.sql
         read_only: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
@@ -60,10 +64,10 @@ services:
       HAPPY_AGENT_MASTER_KEY_FILE: /run/secrets/agent-master-key
     volumes:
       - type: bind
-        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/data/media
+        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/state/current/media
         target: /app/deploy/.local/media
       - type: bind
-        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/secrets/agent-master-key
+        source: ${HAPPY_AGENT_ROOT:-/opt/happy-agent}/state/current/agent-master-key
         target: /run/secrets/agent-master-key
         read_only: true
     healthcheck:

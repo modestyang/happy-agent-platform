@@ -1,42 +1,51 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); source "$SCRIPT_DIR/common.sh"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$SCRIPT_DIR/common.sh"
 source "$SCRIPT_DIR/backup.sh"
-activate() {
-  [ "$#" = 1 ] || die "usage: activate-release.sh RELEASE_ID"
-  local target old='' image attempt attempts interval
-  target=$(release_path "$1"); [ -d "$target" ] || die "release is missing"; verify_manifest "$target" .env compose.yml nginx.conf
-  [ ! -L "$HAPPY_AGENT_ROOT/current" ] || old=$(current_release)
-  backup_core
-  for image in "$target"/images/*.tar; do [ -e "$image" ] || continue; docker load -i "$image"; done
-  attempts=${HAPPY_AGENT_HEALTH_ATTEMPTS:-12}; interval=${HAPPY_AGENT_HEALTH_INTERVAL:-5}
-  if attempt_activation "$target" "$attempts" "$interval"; then log "release activated: $1"; return; fi
-  if recover_previous "$target" "$old"; then die "release activation failed; previous release recovered"; fi
-  die "release activation failed; previous release recovery failed"
-}
+
 attempt_activation() {
-  local target=$1 attempts=$2 interval=$3 attempt
-  compose_release "$target" up -d postgres app nginx || return 1
-  for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if all_services_healthy "$target" && public_smoke; then switch_current "$target" || return 1; return; fi
-    sleep "$interval"
-  done
-  return 1
+  local target=$1 previous=$2 postgres_before=$3 attempts=$4 interval=$5
+  compose_release "$previous" stop app nginx || return 1
+  switch_current "$target" || return 1
+  compose_release "$target" up -d --no-deps app nginx || return 1
+  wait_application_runtime "$target" "$postgres_before" "$attempts" "$interval" || return 1
+  public_smoke || return 1
 }
-recover_previous() {
-  local attempted=$1 previous=$2 stop_ok=0
-  compose_release "$attempted" stop app nginx && stop_ok=1 || log "attempted release stop failed; continuing recovery"
-  [ -n "$previous" ] || return 1
-  compose_release "$previous" up -d app nginx || return 1
-  all_services_healthy "$previous" || return 1
-  switch_current "$previous"
-  log "previous release recovered after attempted stop=$stop_ok"
+
+activate_core() {
+  [ "$#" = 1 ] || die 'usage: activate-release.sh RELEASE_ID'
+  local target previous generation postgres_before image attempts interval
+  target=$(release_path "$1")
+  [ -d "$target" ] || die 'release is missing'
+  verify_manifest "$target" .env compose.yml nginx.conf
+  previous=$(current_release)
+  verify_manifest "$previous" .env compose.yml nginx.conf
+  generation=$(current_generation)
+  require_file "$generation/agent-master-key"
+  [ ! -L "$generation/agent-master-key" ] \
+    || die 'active state generation has an indirect Agent master key'
+  [ -s "$generation/agent-master-key" ] || die 'active state generation has an empty Agent master key'
+  postgres_before=$(postgres_identity "$previous") || die 'PostgreSQL is not healthy before activation'
+
+  backup_core
+  while IFS= read -r -d '' image; do
+    [ -f "$image" ] && [ ! -L "$image" ] || die 'release image archive is unsafe'
+    docker load -i "$image"
+  done < <(find "$target/images" -maxdepth 1 -type f -name '*.tar' -print0 2>/dev/null)
+
+  attempts=${HAPPY_AGENT_HEALTH_ATTEMPTS:-12}
+  interval=${HAPPY_AGENT_HEALTH_INTERVAL:-5}
+  [[ "$attempts" =~ ^[1-9][0-9]*$ ]] || die 'invalid health attempt count'
+  [[ "$interval" =~ ^[0-9]+$ ]] || die 'invalid health interval'
+  if attempt_activation "$target" "$previous" "$postgres_before" "$attempts" "$interval"; then
+    log "release activated: $1"
+    return 0
+  fi
+  if _recover_previous_release "$target" "$previous" "$postgres_before" "$attempts" "$interval"; then
+    die 'release activation failed; previous release recovered'
+  fi
+  die 'release activation failed; previous release recovery failed'
 }
-public_smoke() {
-  local endpoint code
-  for endpoint in /api/app/bootstrap /admin / /api/app/events; do
-    code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "https://39.101.65.254${endpoint}") || return 1
-    case "$endpoint:$code" in /api/app/bootstrap:401|/admin:401|/:200|/api/app/events:401) ;; *) return 1;; esac
-  done
-}
-with_lock activate "$@"
+
+with_lock activate_core "$@"

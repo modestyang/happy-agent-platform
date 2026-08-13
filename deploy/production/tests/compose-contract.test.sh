@@ -27,21 +27,24 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p \
-  "${temp_root}/data/postgres" \
-  "${temp_root}/data/media" \
   "${temp_root}/data/acme-webroot" \
   "${temp_root}/certificates" \
+  "${temp_root}/state/generations/test/postgres" \
+  "${temp_root}/state/generations/test/media" \
   "${temp_root}/current/postgres" \
   "${temp_root}/secrets"
+
+ln -s generations/test "${temp_root}/state/current"
 
 printf 'fake-postgres-password\n' > "${temp_root}/secrets/postgres-password"
 printf 'fake-fitness-password\n' > "${temp_root}/secrets/fitness-db-password"
 printf 'fake-agent-password\n' > "${temp_root}/secrets/agent-db-password"
-printf 'fake-master-key\n' > "${temp_root}/secrets/agent-master-key"
+printf 'fake-master-key\n' > "${temp_root}/state/generations/test/agent-master-key"
 printf 'events {}\n' > "${temp_root}/current/nginx.conf"
 printf '#!/bin/sh\n' > "${temp_root}/current/postgres/init-roles.sh"
 printf 'SELECT 1;\n' > "${temp_root}/current/postgres/init-roles.sql"
 printf 'SELECT 1;\n' > "${temp_root}/current/postgres/enforce-isolation.sql"
+printf 'SELECT 1;\n' > "${temp_root}/current/postgres/assert-initial-empty-target.sql"
 
 export HAPPY_AGENT_ROOT="${temp_root}"
 export POSTGRES_PASSWORD_FILE="${temp_root}/secrets/postgres-password"
@@ -114,7 +117,10 @@ function bindSource(service, target) {
 assert(bindSource(services.postgres, '/docker-entrypoint-initdb.d/00-init-roles.sh') === `${happyAgentRoot}/current/postgres/init-roles.sh`, 'postgres init role script canonical source');
 assert(bindSource(services.postgres, '/usr/local/share/happy-agent-init-roles.sql') === `${happyAgentRoot}/current/postgres/init-roles.sql`, 'postgres init role SQL canonical source');
 assert(bindSource(services.postgres, '/usr/local/share/happy-agent-enforce-isolation.sql') === `${happyAgentRoot}/current/postgres/enforce-isolation.sql`, 'postgres isolation SQL canonical source');
-assert(bindSource(services.app, '/app/deploy/.local/media') === `${happyAgentRoot}/data/media`, 'app media canonical source');
+assert(bindSource(services.postgres, '/usr/local/share/happy-agent-assert-initial-empty-target.sql') === `${happyAgentRoot}/current/postgres/assert-initial-empty-target.sql`, 'postgres empty-target assertion canonical source');
+assert(bindSource(services.postgres, '/var/lib/postgresql/data') === `${happyAgentRoot}/state/current/postgres`, 'postgres state generation canonical source');
+assert(bindSource(services.app, '/app/deploy/.local/media') === `${happyAgentRoot}/state/current/media`, 'app media generation canonical source');
+assert(bindSource(services.app, '/run/secrets/agent-master-key') === `${happyAgentRoot}/state/current/agent-master-key`, 'app master-key generation canonical source');
 assert(bindSource(services.nginx, '/etc/nginx/conf.d/default.conf') === `${happyAgentRoot}/current/nginx.conf`, 'nginx config canonical source');
 assert(bindSource(services.nginx, '/var/www/acme') === `${happyAgentRoot}/data/acme-webroot`, 'ACME webroot canonical source');
 assert(services.nginx.depends_on.app.condition === 'service_healthy', 'nginx app dependency');

@@ -214,6 +214,7 @@ password_hash=$(sha256sum /opt/happy-agent/secrets/postgres-password | awk '{pri
 for secret in postgres-password fitness-db-password agent-db-password; do
   [ -s "/opt/happy-agent/secrets/$secret" ] || { echo "FAIL: bootstrap generated empty $secret" >&2; exit 1; }
   [ "$(stat -c %a "/opt/happy-agent/secrets/$secret")" = 600 ] || { echo "FAIL: bootstrap mode for $secret is not 0600" >&2; exit 1; }
+  [ "$(stat -c %u:%g "/opt/happy-agent/secrets/$secret")" = 70:70 ] || { echo "FAIL: bootstrap owner for $secret is not the pinned PostgreSQL runtime" >&2; exit 1; }
 done
 [ "$(sha256sum /opt/happy-agent/secrets/postgres-password | awk '{print $1}')" = "$password_hash" ] || { echo 'FAIL: bootstrap overwrote an existing password' >&2; exit 1; }
 [ "$(stat -c %a /swapfile)" = 600 ] || { echo 'FAIL: bootstrap swap mode is not 0600' >&2; exit 1; }

@@ -9,6 +9,8 @@ readonly SWAPFILE=/swapfile
 readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
 readonly APT_KEYRING_DIR=/etc/apt/keyrings
 readonly APT_SOURCES_DIR=/etc/apt/sources.list.d
+readonly POSTGRES_RUNTIME_UID=70
+readonly POSTGRES_RUNTIME_GID=70
 
 bootstrap_preflight() {
   validate_root
@@ -98,6 +100,7 @@ create_host_layout() {
       umask 077
       openssl rand -hex 32 >"$HAPPY_AGENT_ROOT/secrets/$secret"
     fi
+    chown "$POSTGRES_RUNTIME_UID:$POSTGRES_RUNTIME_GID" "$HAPPY_AGENT_ROOT/secrets/$secret"
     chmod 0600 "$HAPPY_AGENT_ROOT/secrets/$secret"
   done
   [ ! -e "$HAPPY_AGENT_ROOT/secrets/agent-master-key" ] \

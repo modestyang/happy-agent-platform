@@ -137,10 +137,10 @@ postgres_image="$ACR_REGISTRY/$ACR_NAMESPACE/happy-agent-postgres:$release_id"
 docker_config="$build_tmp/docker-config"
 install -d -m 0700 "$docker_config"
 DOCKER_CONFIG="$docker_config" docker login --username "$acr_username" --password-stdin \
-  "$ACR_REGISTRY" <"$acr_password_file"
-DOCKER_CONFIG="$docker_config" docker push "$app_image"
-DOCKER_CONFIG="$docker_config" docker push "$web_image"
-DOCKER_CONFIG="$docker_config" docker push "$postgres_image"
+  "$ACR_REGISTRY" <"$acr_password_file" >&2
+DOCKER_CONFIG="$docker_config" docker push "$app_image" >&2
+DOCKER_CONFIG="$docker_config" docker push "$web_image" >&2
+DOCKER_CONFIG="$docker_config" docker push "$postgres_image" >&2
 
 app_image_id=$(docker image inspect --format '{{.Id}}' "$app_image")
 web_image_id=$(docker image inspect --format '{{.Id}}' "$web_image")

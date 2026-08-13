@@ -32,31 +32,20 @@ final class ReflectiveAgentToolHandler implements AgentToolHandler {
   }
 
   @Override
+  public void validate(Map<String, Object> modelArguments) {
+    Objects.requireNonNull(modelArguments, "modelArguments");
+    mapArguments(modelArguments);
+  }
+
+  @Override
   public Object invoke(Map<String, Object> modelArguments, ToolExecutionContext context)
       throws Exception {
     Objects.requireNonNull(modelArguments, "modelArguments");
     Objects.requireNonNull(context, "context");
     requireScopes(context);
-    var unexpected = new HashSet<>(modelArguments.keySet());
-    unexpected.removeAll(modelArgumentNames);
-    if (!unexpected.isEmpty()) {
-      throw new IllegalArgumentException("unexpected model Tool arguments " + unexpected);
-    }
-
-    var arguments = new Object[method.contractMethod().getParameterCount()];
+    var arguments = mapArguments(modelArguments);
     if (method.contextParameterIndex() >= 0) {
       arguments[method.contextParameterIndex()] = context;
-    }
-    for (var parameter : method.modelParameters()) {
-      var present = modelArguments.containsKey(parameter.name());
-      if (!present && parameter.metadata().required() && parameter.rawType() != Optional.class) {
-        throw new IllegalArgumentException(
-            "missing required model Tool argument " + parameter.name());
-      }
-      arguments[parameter.methodIndex()] =
-          present
-              ? convert(modelArguments.get(parameter.name()), parameter.type())
-              : absent(parameter);
     }
 
     try {
@@ -74,6 +63,28 @@ final class ReflectiveAgentToolHandler implements AgentToolHandler {
     } catch (IllegalAccessException exception) {
       throw new IllegalStateException("Tool method is not invocable", exception);
     }
+  }
+
+  private Object[] mapArguments(Map<String, Object> modelArguments) {
+    var unexpected = new HashSet<>(modelArguments.keySet());
+    unexpected.removeAll(modelArgumentNames);
+    if (!unexpected.isEmpty()) {
+      throw new IllegalArgumentException("unexpected model Tool arguments " + unexpected);
+    }
+
+    var arguments = new Object[method.contractMethod().getParameterCount()];
+    for (var parameter : method.modelParameters()) {
+      var present = modelArguments.containsKey(parameter.name());
+      if (!present && parameter.metadata().required() && parameter.rawType() != Optional.class) {
+        throw new IllegalArgumentException(
+            "missing required model Tool argument " + parameter.name());
+      }
+      arguments[parameter.methodIndex()] =
+          present
+              ? convert(modelArguments.get(parameter.name()), parameter.type())
+              : absent(parameter);
+    }
+    return arguments;
   }
 
   private Object absent(ToolMethodParameter parameter) {

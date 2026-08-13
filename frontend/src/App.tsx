@@ -135,9 +135,9 @@ function Header({ nickname, title, subtitle }: { nickname: string; title: string
   </header>;
 }
 
-function Navigation() {
+function Navigation({ hidden = false }: { hidden?: boolean }) {
   const { pathname } = useLocation();
-  if (pathname.startsWith('/meal/') || pathname.startsWith('/workout/') || pathname.startsWith('/report/')) return null;
+  if (hidden || pathname.startsWith('/meal/') || pathname.startsWith('/workout/') || pathname.startsWith('/report/')) return null;
   const items = [
     { to: '/', label: '今天', icon: Home },
     { to: '/plan', label: '计划', icon: CalendarDays },
@@ -330,7 +330,7 @@ function CurrentGoalReportPage({ onOpenRecord }: { onOpenRecord: (tab: RecordTab
   </section>;
 }
 
-function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () => Promise<void> }) {
+function AiPage({ data, onDataChanged, onComposerFocusChange }: { data: Dashboard; onDataChanged: () => Promise<void>; onComposerFocusChange: (focused: boolean) => void }) {
   const [searchParams] = useSearchParams();
   const preparedPrompt = searchParams.get('prompt') ?? '';
   const preparedSent = useRef('');
@@ -343,7 +343,9 @@ function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () =>
   const [sending, setSending] = useState(false);
   const conversationGeneration = useRef(0);
   const conversationScroll = useRef<HTMLDivElement>(null);
+  const composerInput = useRef<HTMLInputElement>(null);
   const activeStream = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => onComposerFocusChange(false), [onComposerFocusChange]);
   useEffect(() => {
     try {
       if (sessionId || messages.length) window.localStorage.setItem(sessionKey, JSON.stringify({ sessionId, updatedAt: Date.now(), messages }));
@@ -358,6 +360,7 @@ function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () =>
 
   async function submit(message: string) {
     if (!message.trim() || sending) return;
+    dismissComposer();
     const generation = conversationGeneration.current;
     setMessages((list) => [...list, { role: 'user', content: message }]); setValue(''); setSending(true); setError('');
     try {
@@ -371,7 +374,7 @@ function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () =>
       const response = await api.createAiMessage(targetSessionId, message.trim(), newClientId());
       if (conversationGeneration.current !== generation) return;
       const runId = response.runId;
-      setMessages((list) => [...list, { role: 'assistant', content: '', runId, progress: ['已提交给花爷'] }]);
+      setMessages((list) => [...list, { role: 'assistant', content: '', runId, progress: ['正在理解你的需求'] }]);
       const controller = new AbortController();
       activeStream.current = controller;
       await consumeAgentRunStream(response.eventStreamUrl, (event) => applyEvent(runId, event), controller.signal);
@@ -379,6 +382,12 @@ function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () =>
       if (conversationGeneration.current !== generation) return;
       setError(err instanceof ApiError && err.status === 503 ? '花爷还没接上大模型，请先在 Agent 工作台配置 Provider。' : errorText(err));
     } finally { if (conversationGeneration.current === generation) setSending(false); }
+  }
+
+  function dismissComposer() {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest('.composer')) active.blur();
+    else composerInput.current?.blur();
   }
 
   async function startNewConversation() {
@@ -423,12 +432,12 @@ function AiPage({ data, onDataChanged }: { data: Dashboard; onDataChanged: () =>
 
   return <section className="page ai-page">
     <header className="ai-head"><div className="ai-avatar"><Bot /><i /></div><div><small>你的 AI 健身伴侣</small><h1>花爷</h1></div><button aria-label="新建会话" onClick={() => void startNewConversation()}><MessageCirclePlus /></button></header>
-    <div className="ai-scroll" ref={conversationScroll}>{isWelcome ? <>
+    <div className="ai-scroll" ref={conversationScroll} onPointerDown={dismissComposer}>{isWelcome ? <>
       <section className="ai-greeting"><Mascot small /><div><strong>嗨，{data.user.nickname}。</strong><p>今天想让我陪你做点什么？</p></div><Sparkles /></section>
       <section className="ai-capabilities" role="region" aria-label="花爷快捷能力">{aiFeatures.map(({ title, description, prompt, icon: Icon, tone }) => <button key={title} aria-label={`${title}：${description}`} className={`ai-capability ai-capability--${tone}`} onClick={() => void submit(prompt)}><span><Icon /></span><strong>{title}</strong><small>{description}</small><ChevronRight /></button>)}</section>
       {!data.ai.configured && <p className="ai-offline"><Bot /> 大模型尚未配置，其他记录与训练功能不受影响。</p>}
-    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={message.runId ?? `${message.content}-${index}`}>{message.role === 'assistant' && <Bot />}<div className="message-body">{message.role === 'assistant' ? <AgentRunMessage message={message} onDecision={(approvalId, decision) => message.runId && void decide(message.runId, approvalId, decision)} /> : <span>{message.content}</span>}</div></div>)}{sending && messages.at(-1)?.role !== 'assistant' && <div className="typing" aria-label="花爷正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
-    <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input aria-label="问花爷" value={value} onChange={(event) => setValue(event.target.value)} placeholder="告诉花爷你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
+    </> : <section className="conversation" aria-label="当前对话">{messages.map((message, index) => <div className={`message message--${message.role}`} key={message.runId ?? `${message.content}-${index}`}><div className="message-body">{message.role === 'assistant' ? <AgentRunMessage message={message} onDecision={(approvalId, decision) => message.runId && void decide(message.runId, approvalId, decision)} /> : <span>{message.content}</span>}</div></div>)}{sending && messages.at(-1)?.role !== 'assistant' && <div className="typing" aria-label="花爷正在回复"><i /><i /><i /></div>}{error && <p className="error">{error}</p>}</section>}</div>
+    <div className="fixed-composer">{!isWelcome && <div className="prompt-row" aria-label="推荐问题">{['具体怎么做', '换一个选择', '看看近期依据'].map((chip) => <button key={chip} onClick={() => setValue(chip)}>{chip}</button>)}</div>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void submit(value); }}><Plus aria-hidden="true" /><input ref={composerInput} aria-label="问花爷" value={value} onFocus={() => onComposerFocusChange(true)} onBlur={() => onComposerFocusChange(false)} onChange={(event) => setValue(event.target.value)} placeholder="告诉花爷你今天的情况…" /><button className="send" aria-label="发送" disabled={sending}><Send /></button></form><small className="session-note">会话 24 小时无操作后自动结束</small></div>
   </section>;
 }
 
@@ -637,6 +646,7 @@ function FirstSetup({ onComplete }: { onComplete: () => Promise<void> }) {
 
 function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => Promise<void>; onLoggedOut: () => void }) {
   const [recordTab, setRecordTab] = useState<RecordTab>();
+  const [composerFocused, setComposerFocused] = useState(false);
   const restoreFocus = useRef<HTMLElement | null>(null);
   const openRecord = useCallback((tab: RecordTab) => {
     restoreFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -646,7 +656,8 @@ function Shell({ data, reload, onLoggedOut }: { data: Dashboard; reload: () => P
     restoreFocus.current?.focus();
     setRecordTab(undefined);
   }, []);
-  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} onGenerated={reload} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/report/current" element={<CurrentGoalReportPage onOpenRecord={openRecord} />} /><Route path="/ai" element={<AiPage data={data} onDataChanged={reload} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} reload={reload} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
+  const handleComposerFocusChange = useCallback((focused: boolean) => setComposerFocused(focused), []);
+  return <div className="desktop"><main className={`phone${recordTab ? ' page-modal' : ''}${composerFocused ? ' phone--composer-active' : ''}`} aria-label="Happy Agent Platform"><Routes><Route path="/" element={<HomePage data={data} onOpenRecord={openRecord} />} /><Route path="/meal/today" element={<MealRecommendationPage recommendations={data.mealRecommendations ?? []} onGenerated={reload} />} /><Route path="/plan" element={<PlanPage data={data} reload={reload} />} /><Route path="/workout/:planId" element={<WorkoutPlayer plan={data.plan} exerciseLibrary={data.exercises} reload={reload} />} /><Route path="/report/current" element={<CurrentGoalReportPage onOpenRecord={openRecord} />} /><Route path="/ai" element={<AiPage data={data} onDataChanged={reload} onComposerFocusChange={handleComposerFocusChange} />} /><Route path="/library" element={<LibraryPage data={data} />} /><Route path="/me" element={<MePage data={data} reload={reload} onLoggedOut={onLoggedOut} />} /><Route path="*" element={<HomePage data={data} onOpenRecord={openRecord} />} /></Routes><Navigation hidden={composerFocused} />{recordTab && <RecordDrawer initialTab={recordTab} initialRecord={data.bodyRecords[0]} onClose={closeRecord} onSaved={reload} />}</main></div>;
 }
 
 function MobileApp() {

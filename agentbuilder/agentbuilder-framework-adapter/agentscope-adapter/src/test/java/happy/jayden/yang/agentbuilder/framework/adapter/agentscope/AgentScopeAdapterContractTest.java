@@ -26,6 +26,7 @@ import happy.jayden.yang.agentbuilder.core.tool.AgentToolHandler;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
 import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
+import happy.jayden.yang.agentbuilder.core.tool.ToolInputException;
 import happy.jayden.yang.agentbuilder.core.tool.ToolLifecycleStatus;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRiskLevel;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchema;
@@ -35,6 +36,7 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultBlock;
+import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.GenerateOptions;
@@ -266,6 +268,43 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
     var result = (RunResult) events.get(events.size() - 1).data().get("result");
     assertEquals(RunFailureCode.TOOL, result.failure().orElseThrow().code());
     assertEquals("Tool lookup failed", result.failure().orElseThrow().message());
+  }
+
+  @Test
+  void returnsCorrectableToolInputFailuresToTheModelLoop() {
+    var transport = new CorrectingToolModelTransport();
+    var invocations = new AtomicInteger();
+    AgentToolHandler handler =
+        new AgentToolHandler() {
+          @Override
+          public void validate(Map<String, Object> arguments) throws Exception {
+            if ("bad".equals(arguments.get("query"))) {
+              throw new ToolInputException("query 参数无效");
+            }
+          }
+
+          @Override
+          public Object invoke(Map<String, Object> arguments, ToolExecutionContext context) {
+            invocations.incrementAndGet();
+            return Map.of("workouts", 1);
+          }
+        };
+
+    var events =
+        new AgentScopeAdapter(transport)
+            .run(requestWithTool(tool(handler), config(2), List.of()))
+            .collectList()
+            .block();
+
+    assertEquals(3, transport.modelCalls.get());
+    assertEquals(1, invocations.get(), transport.observedResults.toString());
+    assertEquals(ToolResultState.ERROR, transport.invalidResultState);
+    assertTrue(transport.invalidResult.contains("\"code\":\"INVALID_ARGUMENT\""));
+    assertTrue(transport.invalidResult.contains("\"retryable\":true"));
+    assertTrue(events.stream().anyMatch(event -> event.type() == RunEvent.Type.TOOL_FAILED));
+    assertTrue(events.stream().anyMatch(event -> event.type() == RunEvent.Type.TOOL_RESULT));
+    assertFalse(events.stream().anyMatch(event -> event.type() == RunEvent.Type.RUN_FAILED));
+    assertEquals(RunEvent.Type.RUN_COMPLETED, events.get(events.size() - 1).type());
   }
 
   @Test
@@ -1012,6 +1051,74 @@ class AgentScopeAdapterContractTest extends FrameworkAdapterContract {
     public void close() {
       closed.set(true);
       cancelled.set(true);
+    }
+  }
+
+  private static final class CorrectingToolModelTransport implements AgentScopeModelTransport {
+    private final AtomicInteger modelCalls = new AtomicInteger();
+    private final List<String> observedResults = new ArrayList<>();
+    private String invalidResult = "";
+    private ToolResultState invalidResultState;
+
+    @Override
+    public Flux<ChatResponse> stream(
+        List<Msg> messages,
+        List<io.agentscope.core.model.ToolSchema> tools,
+        GenerateOptions options) {
+      var turn = modelCalls.getAndIncrement();
+      if (turn == 0) {
+        return toolCall("invalid-call", Map.of("query", "bad"));
+      }
+      var results =
+          messages.stream()
+              .flatMap(message -> message.getContentBlocks(ToolResultBlock.class).stream())
+              .toList();
+      observedResults.addAll(
+          results.stream()
+              .flatMap(result -> result.getOutput().stream())
+              .filter(TextBlock.class::isInstance)
+              .map(TextBlock.class::cast)
+              .map(TextBlock::getText)
+              .toList());
+      if (turn == 1) {
+        var failed = results.get(results.size() - 1);
+        invalidResultState = failed.getState();
+        invalidResult =
+            failed.getOutput().stream()
+                .filter(TextBlock.class::isInstance)
+                .map(TextBlock.class::cast)
+                .map(TextBlock::getText)
+                .findFirst()
+                .orElse("");
+        return toolCall("corrected-call", Map.of("query", "today"));
+      }
+      return Flux.just(
+          ChatResponse.builder()
+              .id("corrected-response")
+              .content(List.of(TextBlock.builder().text("已完成").build()))
+              .finishReason("stop")
+              .build());
+    }
+
+    private static Flux<ChatResponse> toolCall(String id, Map<String, Object> input) {
+      return Flux.just(
+          ChatResponse.builder()
+              .id(id)
+              .content(
+                  List.of(
+                      ToolUseBlock.builder()
+                          .id(id)
+                          .name("lookup")
+                          .input(input)
+                          .content(new ObjectMapper().valueToTree(input).toString())
+                          .build()))
+              .finishReason("tool_calls")
+              .build());
+    }
+
+    @Override
+    public String getModelName() {
+      return "correcting-model";
     }
   }
 

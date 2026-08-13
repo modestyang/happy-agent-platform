@@ -15,10 +15,12 @@ import happy.jayden.yang.agentbuilder.core.defaults.RuntimeLimits;
 import happy.jayden.yang.agentbuilder.core.runtime.FrameworkAdapterContract;
 import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
+import happy.jayden.yang.agentbuilder.core.runtime.RunResult;
 import happy.jayden.yang.agentbuilder.core.tool.AgentToolHandler;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
 import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
+import happy.jayden.yang.agentbuilder.core.tool.ToolInputException;
 import happy.jayden.yang.agentbuilder.core.tool.ToolLifecycleStatus;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRiskLevel;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchema;
@@ -37,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -214,6 +217,76 @@ class SpringAiAlibabaAdapterContractTest extends FrameworkAdapterContract {
   }
 
   @Test
+  void returnsCorrectableToolInputFailuresToTheModelLoop() {
+    var model = new CorrectingChatModel();
+    var invocations = new AtomicInteger();
+    AgentToolHandler handler =
+        new AgentToolHandler() {
+          @Override
+          public void validate(Map<String, Object> arguments) throws Exception {
+            if ("bad".equals(arguments.get("query"))) {
+              throw new ToolInputException("query 参数无效");
+            }
+          }
+
+          @Override
+          public Object invoke(Map<String, Object> arguments, ToolExecutionContext context) {
+            invocations.incrementAndGet();
+            return Map.of("workouts", 1);
+          }
+        };
+
+    var events =
+        adapter(model)
+            .run(request(new ArrayList<>(), handler, false, RetryPolicy.NONE, 2, 2))
+            .collectList()
+            .block();
+
+    org.junit.jupiter.api.Assertions.assertEquals(3, model.calls.get());
+    org.junit.jupiter.api.Assertions.assertEquals(1, invocations.get());
+    org.junit.jupiter.api.Assertions.assertTrue(
+        model.invalidResult.contains("\"code\":\"INVALID_ARGUMENT\""));
+    org.junit.jupiter.api.Assertions.assertTrue(model.invalidResult.contains("\"retryable\":true"));
+    org.junit.jupiter.api.Assertions.assertTrue(
+        events.stream().anyMatch(event -> event.type() == RunEvent.Type.TOOL_FAILED));
+    org.junit.jupiter.api.Assertions.assertTrue(
+        events.stream().anyMatch(event -> event.type() == RunEvent.Type.TOOL_RESULT));
+    org.junit.jupiter.api.Assertions.assertFalse(
+        events.stream().anyMatch(event -> event.type() == RunEvent.Type.RUN_FAILED));
+    org.junit.jupiter.api.Assertions.assertEquals(
+        RunEvent.Type.RUN_COMPLETED, terminal(events).type());
+  }
+
+  @Test
+  void mapsNestedProviderHttpFailuresWithoutLeakingResponseContent() {
+    var providerFailure =
+        org.springframework.web.reactive.function.client.WebClientResponseException.create(
+            404,
+            "Not Found",
+            org.springframework.http.HttpHeaders.EMPTY,
+            "secret provider response".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            java.nio.charset.StandardCharsets.UTF_8);
+    var adapter =
+        new SpringAiAlibabaAdapter(
+            (request, sequence) -> {
+              throw new IllegalStateException("outer framework wrapper", providerFailure);
+            });
+
+    var events =
+        adapter
+            .run(request(new ArrayList<>(), (arguments, context) -> Map.of("workouts", 1), false))
+            .collectList()
+            .block();
+    var failure = ((RunResult) terminal(events).data().get("result")).failure().orElseThrow();
+
+    org.junit.jupiter.api.Assertions.assertEquals(
+        happy.jayden.yang.agentbuilder.core.runtime.RunFailureCode.MODEL, failure.code());
+    org.junit.jupiter.api.Assertions.assertTrue(failure.message().contains("HTTP 404"));
+    org.junit.jupiter.api.Assertions.assertFalse(failure.message().contains("secret"));
+    org.junit.jupiter.api.Assertions.assertFalse(failure.message().contains("outer framework"));
+  }
+
+  @Test
   void nativeReadSkillUsesNeutralHooksEventsAndSharedBudget() {
     var execution = new ArrayList<String>();
     var handlerCalls = new AtomicInteger();
@@ -271,15 +344,14 @@ class SpringAiAlibabaAdapterContractTest extends FrameworkAdapterContract {
                     request.toolExecutionContext())));
 
     org.junit.jupiter.api.Assertions.assertTrue(encoded.contains("2026-08-05"));
-    org.junit.jupiter.api.Assertions.assertThrows(
-        RuntimeException.class,
-        () ->
-            callback.call(
-                "{\"tags\":[],\"level\":\"invalid\",\"score\":11}",
-                new org.springframework.ai.chat.model.ToolContext(
-                    Map.of(
-                        SpringAiAlibabaRuntimeBridge.TRUSTED_CONTEXT_KEY,
-                        request.toolExecutionContext()))));
+    var invalid =
+        callback.call(
+            "{\"tags\":[],\"level\":\"invalid\",\"score\":11}",
+            new org.springframework.ai.chat.model.ToolContext(
+                Map.of(
+                    SpringAiAlibabaRuntimeBridge.TRUSTED_CONTEXT_KEY,
+                    request.toolExecutionContext())));
+    org.junit.jupiter.api.Assertions.assertTrue(invalid.contains("\"code\":\"INVALID_ARGUMENT\""));
   }
 
   @Test
@@ -656,6 +728,49 @@ class SpringAiAlibabaAdapterContractTest extends FrameworkAdapterContract {
     @Override
     public Flux<ChatResponse> stream(Prompt prompt) {
       return Flux.<ChatResponse>never().doOnCancel(() -> cancelled.set(true));
+    }
+
+    @Override
+    public ChatOptions getDefaultOptions() {
+      return org.springframework.ai.openai.OpenAiChatOptions.builder().build();
+    }
+  }
+
+  private static final class CorrectingChatModel implements ChatModel {
+    private final AtomicInteger calls = new AtomicInteger();
+    private String invalidResult = "";
+
+    @Override
+    public ChatResponse call(Prompt prompt) {
+      return switch (calls.incrementAndGet()) {
+        case 1 -> toolCall("invalid-call", "{\"query\":\"bad\"}");
+        case 2 -> {
+          invalidResult =
+              prompt.getInstructions().stream()
+                  .filter(ToolResponseMessage.class::isInstance)
+                  .map(ToolResponseMessage.class::cast)
+                  .flatMap(message -> message.getResponses().stream())
+                  .map(ToolResponseMessage.ToolResponse::responseData)
+                  .reduce((left, right) -> right)
+                  .orElse("");
+          yield toolCall("corrected-call", "{\"query\":\"today\"}");
+        }
+        default -> response(new AssistantMessage("已完成"));
+      };
+    }
+
+    private static ChatResponse toolCall(String id, String arguments) {
+      return response(
+          AssistantMessage.builder()
+              .content("")
+              .toolCalls(
+                  List.of(new AssistantMessage.ToolCall(id, "function", "lookup", arguments)))
+              .build());
+    }
+
+    @Override
+    public Flux<ChatResponse> stream(Prompt prompt) {
+      return Flux.just(call(prompt));
     }
 
     @Override

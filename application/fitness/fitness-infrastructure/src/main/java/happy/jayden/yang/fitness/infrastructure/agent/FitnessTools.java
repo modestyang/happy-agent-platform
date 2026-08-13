@@ -368,6 +368,32 @@ public final class FitnessTools {
   @AgentTool(
       key = "fitness.plan.save",
       version = 1,
+      runtimeName = "fitness_plan_save_v1",
+      displayName = "保存训练计划（旧版）",
+      description = "提交一份 DAY 或 WEEK 训练计划给运行时确认。",
+      whenToUse = "仅用于执行已发布 Agent 的旧版训练计划保存契约。",
+      whenNotToUse = "新计划应使用当前版本，不要主动选择旧版契约。",
+      applicationKey = "fitness",
+      group = "plan",
+      tags = {"健身", "训练计划", "写入"},
+      sideEffect = ToolSideEffect.WRITE,
+      risk = ToolRiskLevel.MEDIUM,
+      idempotent = true,
+      requiredScopes = {"fitness.write"})
+  public SavePlanToolResult savePlanV1(
+      @AgentToolParam(
+              name = "request",
+              description = "旧版 DAY 或 WEEK 训练计划",
+              example =
+                  "{\"scope\":\"DAY\",\"days\":[{\"scheduledFor\":\"2026-08-15\",\"title\":\"全身训练\",\"estimatedMinutes\":30,\"exerciseIds\":[\"00000000-0000-0000-0000-000000000001\"]}]}")
+          LegacySavePlanToolRequest request,
+      ToolExecutionContext context) {
+    return savePlanDays(request.approvalId(), request.days(), context);
+  }
+
+  @AgentTool(
+      key = "fitness.plan.save",
+      version = 2,
       runtimeName = "fitness_plan_save",
       displayName = "保存训练计划",
       description = "提交一份具体训练计划给运行时确认；运行时会冻结参数，只有用户点击确认卡后才写入当前账户。",
@@ -385,16 +411,20 @@ public final class FitnessTools {
               name = "request",
               description = "已由服务端冻结并与当前审批绑定的训练计划",
               example =
-                  "{\"approvalId\":\"00000000-0000-0000-0000-000000000001\",\"scope\":\"DAY\",\"days\":[]}")
+                  "{\"days\":[{\"scheduledFor\":\"2026-08-15\",\"title\":\"全身训练\",\"estimatedMinutes\":30,\"exerciseIds\":[\"00000000-0000-0000-0000-000000000001\"]}]}")
           SavePlanToolRequest request,
       ToolExecutionContext context) {
+    return savePlanDays(request.approvalId(), request.days(), context);
+  }
+
+  private SavePlanToolResult savePlanDays(
+      UUID approvalId, List<? extends PlanDay> days, ToolExecutionContext context) {
     var saved =
         fitness.saveTrainingPlan(
             UUID.fromString(context.userId()),
             new SaveTrainingPlanRequest(
-                request.approvalId(),
-                request.scope(),
-                request.days().stream()
+                approvalId,
+                days.stream()
                     .map(
                         day ->
                             new TrainingPlanDayInput(
@@ -457,8 +487,9 @@ public final class FitnessTools {
 
   public record ExerciseCandidateRequest(
       @AgentToolParam(
-              description = "优先目标部位，最多 3 个；可用臀腿、核心、胸部、背部、肩部、手臂、心肺；全身必须单独使用并表示无部位偏好；可省略",
-              required = false)
+              description = "优先目标部位；可用臀腿、核心、胸部、背部、肩部、手臂、心肺的任意不重复组合；全身必须单独使用并表示无部位偏好；可省略",
+              required = false,
+              maxItems = 7)
           List<String> focusAreas,
       @AgentToolParam(
               description = "额外收紧的最高冲击等级：LOW、MEDIUM 或 HIGH；可省略",
@@ -506,14 +537,72 @@ public final class FitnessTools {
 
   public record SavePlanToolRequest(
       @AgentToolParam(description = "确认后由服务端注入的确认记录 ID", required = false) UUID approvalId,
+      @AgentToolParam(description = "1 到 31 个任意且不重复的训练日期，不要求连续", minItems = 1, maxItems = 31)
+          List<ToolPlanDay> days) {
+    public SavePlanToolRequest {
+      if (days == null || days.isEmpty() || days.size() > 31) {
+        throw new IllegalArgumentException("days 必须包含 1 到 31 个训练日");
+      }
+      var sorted =
+          days.stream()
+              .map(day -> Objects.requireNonNull(day, "days 不能包含空值"))
+              .sorted(java.util.Comparator.comparing(ToolPlanDay::scheduledFor))
+              .toList();
+      if (sorted.stream().map(ToolPlanDay::scheduledFor).distinct().count() != sorted.size()) {
+        throw new IllegalArgumentException("days 不能包含重复训练日期");
+      }
+      days = List.copyOf(sorted);
+    }
+  }
+
+  private interface PlanDay {
+    LocalDate scheduledFor();
+
+    String title();
+
+    int estimatedMinutes();
+
+    List<UUID> exerciseIds();
+  }
+
+  public record LegacySavePlanToolRequest(
+      @AgentToolParam(description = "确认后由服务端注入的确认记录 ID", required = false) UUID approvalId,
       @AgentToolParam(description = "计划范围：DAY 或 WEEK") String scope,
-      @AgentToolParam(description = "需要保存的逐日计划") List<ToolPlanDay> days) {}
+      @AgentToolParam(description = "需要保存的逐日计划") List<LegacyToolPlanDay> days) {}
+
+  public record LegacyToolPlanDay(
+      @AgentToolParam(description = "训练日期") LocalDate scheduledFor,
+      @AgentToolParam(description = "训练标题") String title,
+      @AgentToolParam(description = "预计时长，分钟") int estimatedMinutes,
+      @AgentToolParam(description = "动作库中的动作 ID") List<UUID> exerciseIds)
+      implements PlanDay {}
 
   public record ToolPlanDay(
       @AgentToolParam(description = "训练日期") LocalDate scheduledFor,
       @AgentToolParam(description = "训练标题") String title,
       @AgentToolParam(description = "预计时长，分钟") int estimatedMinutes,
-      @AgentToolParam(description = "动作库中的动作 ID") List<UUID> exerciseIds) {}
+      @AgentToolParam(description = "动作库中的 1 到 12 个不重复动作 ID", minItems = 1, maxItems = 12)
+          List<UUID> exerciseIds)
+      implements PlanDay {
+    public ToolPlanDay {
+      Objects.requireNonNull(scheduledFor, "scheduledFor");
+      if (title == null || title.isBlank() || title.trim().length() > 160) {
+        throw new IllegalArgumentException("title 必须包含 1 到 160 个字符");
+      }
+      if (estimatedMinutes < 1 || estimatedMinutes > 240) {
+        throw new IllegalArgumentException("estimatedMinutes 必须在 1 到 240 之间");
+      }
+      if (exerciseIds == null
+          || exerciseIds.isEmpty()
+          || exerciseIds.size() > 12
+          || exerciseIds.stream().anyMatch(Objects::isNull)
+          || exerciseIds.stream().distinct().count() != exerciseIds.size()) {
+        throw new IllegalArgumentException("exerciseIds 必须包含 1 到 12 个不重复动作 ID");
+      }
+      title = title.trim();
+      exerciseIds = List.copyOf(exerciseIds);
+    }
+  }
 
   public record SavePlanToolResult(
       @AgentToolParam(description = "已保存的训练计划 ID") List<UUID> planIds) {}

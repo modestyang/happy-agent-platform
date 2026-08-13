@@ -133,6 +133,29 @@ describe('App', () => {
     }
   });
 
+  it('renders assistant answers as full-width prose without bubble chrome', () => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync('src/app.css', 'utf8');
+    document.head.append(style);
+
+    try {
+      render(<section className="page ai-page"><div className="ai-scroll"><section className="conversation">
+        <div className="message message--assistant"><div className="message-body">训练建议</div></div>
+        <div className="message message--user"><div className="message-body">今天练腿</div></div>
+      </section></div></section>);
+
+      const assistantMessage = screen.getByText('训练建议').closest('.message') as HTMLElement;
+      const assistantBody = screen.getByText('训练建议') as HTMLElement;
+      const userMessage = screen.getByText('今天练腿').closest('.message') as HTMLElement;
+      expect(getComputedStyle(assistantMessage).maxWidth).toBe('100%');
+      expect(getComputedStyle(assistantBody).paddingLeft).toBe('0px');
+      expect(getComputedStyle(assistantBody).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+      expect(getComputedStyle(userMessage).maxWidth).not.toBe('100%');
+    } finally {
+      style.remove();
+    }
+  });
+
   it.each([
     ['当前目标卡片', '查看目标进度'],
     ['报告卡片', '报告'],
@@ -233,6 +256,71 @@ describe('App', () => {
     } finally {
       style.remove();
     }
+  });
+
+  it('hides the bottom navigation while composing and restores it after tapping the conversation', async () => {
+    mockFetch();
+    window.history.replaceState({}, '', '/ai');
+    const user = userEvent.setup();
+    render(<App />);
+
+    const input = await screen.findByRole('textbox', { name: '问花爷' });
+    await user.click(input);
+    expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(document.querySelector('.ai-scroll') as HTMLElement);
+    expect(input).not.toHaveFocus();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+  });
+
+  it('dismisses the composer after submitting from the mobile keyboard', async () => {
+    mockFetch();
+    window.history.replaceState({}, '', '/ai');
+    const user = userEvent.setup();
+    render(<App />);
+
+    const input = await screen.findByRole('textbox', { name: '问花爷' });
+    await user.click(input);
+    await user.type(input, '今天练什么');
+    await user.keyboard('{Enter}');
+
+    expect(input).not.toHaveFocus();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+  });
+
+  it('shows a transient public stage as soon as the AI run starts', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/app/bootstrap') return new Response(JSON.stringify(dashboard), { status: 200 });
+      if (path === '/api/v1/app/ai/sessions') return new Response(JSON.stringify({ sessionId: 'server-session-id' }), { status: 201 });
+      if (path === '/api/v1/app/ai/sessions/server-session-id/messages') return new Response(JSON.stringify({ runId: 'run-1', eventStreamUrl: '/events/run-1' }), { status: 202 });
+      if (path === '/events/run-1') return new Promise<Response>(() => undefined);
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState({}, '', '/ai');
+    const user = userEvent.setup();
+    render(<App />);
+
+    const input = await screen.findByRole('textbox', { name: '问花爷' });
+    await user.type(input, '帮我安排训练');
+    await user.keyboard('{Enter}');
+
+    expect(await screen.findByRole('status')).toHaveTextContent('正在理解你的需求');
+  });
+
+  it('does not repeat the assistant avatar beside every restored answer', async () => {
+    window.localStorage.setItem('happy-fitness-ai-session:user-1', JSON.stringify({
+      sessionId: 'persisted-session',
+      updatedAt: Date.now(),
+      messages: [{ role: 'assistant', content: '恢复后的训练建议' }],
+    }));
+    mockFetch();
+    window.history.replaceState({}, '', '/ai');
+    render(<App />);
+
+    const answer = await screen.findByText('恢复后的训练建议');
+    expect(answer.closest('.message')?.querySelector(':scope > svg')).toBeNull();
   });
 
   it('opens today meal recommendations instead of the meal record drawer', async () => {

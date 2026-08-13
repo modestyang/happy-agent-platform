@@ -1,5 +1,72 @@
 # Happy Agent Platform implementation plan
 
+## 2026-08-14 ACR 日常发布到阿里云 ECS（当前阶段）
+
+### Goal
+
+将当前工作区中已经验证的 AI Tool/SAA、训练计划和移动端对话体验改动，通过仓库现有 ACR 发布链部署到 `39.101.65.254`，保留生产数据库、媒体和 Agent 主密钥，并在切换前创建完整备份。
+
+### Phases
+
+1. [complete] 完整读取部署文档，审计本地凭据、工具、工作区改动与发布脚本边界。
+2. [complete] 只读核对阿里云目标、SSH、当前 release、容器健康、备份能力与本地构建前置条件。
+3. [complete] 运行仓库发布门禁，构建 `linux/amd64` App/Web/PostgreSQL 镜像并推送私有 ACR。
+4. [complete] 复用闭合校验通过的 release，上传后远端拉取镜像、创建发布前备份并原子切换 App/Web。
+5. [complete] 验证容器、数据库不变性、IP/域名入口、健身端与管理端 API，并记录 recovery package。
+
+### Constraints
+
+- 用户已明确授权本次 ACR/ECS 发布；不包含提交、推送 Git、数据库迁移或域名证书切换。
+- 使用 `deploy/production/deploy.sh release`，不手工拼接 ACR/SSH/Docker 发布步骤，不绕过 manifest、云门禁、备份或健康检查。
+- 当前工作区是有意的未提交版本；release metadata 必须记录 `source_dirty=true` 和差异摘要，不擅自 commit。
+- 普通发布不得重启或替换生产 PostgreSQL，不得搬运数据库、媒体或 Secret。
+- 第一次主动中断留下的本地权限 `0700` build temp 只含 Web 构建上下文和生成的 PostgreSQL Dockerfile，不含 Docker config/Secret；用户授权后已精确删除并验证路径不存在。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| 本机构建预检中 `sha256sum` 尚未出现在默认 PATH | 1 | 找到 gitignored、权限 `0700` 的项目专用 `deploy/.local/production/bin/sha256sum`，验证散列与 `--check --strict` 调用接口；发布时仅前置该目录，不安装依赖 |
+| Docker Desktop 经本地 `127.0.0.1:7897` 代理推送 PostgreSQL 独有大层极慢 | 1 | 先证明 SSH 上行 2 MiB/1.33 秒且生产未变；流式把同一 `linux/amd64` 镜像送入 ECS，由同地域 ECS 推送 ACR，获得 digest `sha256:6fa943…e438`；清理失败构建后以同一 release id 重跑全部门禁 |
+| `deploy.sh` 用命令替换接收构建产物路径时混入真实 Docker 标准输出，报 `release builder returned an unsafe artifact path` | 1 | 部署时先用内置 `HAPPY_AGENT_RELEASE_PATH` 安全复用闭合 release；随后以真实风格 Docker stdout 取得回归 RED，并将 login/push 进度重定向到 stderr，保证 builder stdout 只有发布目录 |
+| macOS LibreSSL 不支持 `openssl x509 -ext subjectAltName` | 1 | 改用同一证书的 `-text` 输出精确提取 SAN；确认当前仅含 `IP Address:39.101.65.254` |
+
+## 2026-08-14 移动端 AI 对话体验修复（当前阶段）
+
+### Goal
+
+在保留已确认 Tool/SAA 后端修复的同时，收紧移动端 AI 对话的信息密度与键盘交互：发送和点击非输入区收起键盘，键盘拉起时底部 Tab 不上浮，移除无意义收起条与助手灰线，并将处理进度改为首段回答前的瞬时状态。
+
+### Phases
+
+1. [complete] 只读审计现有对话组件、样式、键盘/visual viewport 与 Run 事件投影。
+2. [complete] 向用户提交 bounded 交互设计并取得确认。
+3. [complete] 按 TDD 实现消息密度、键盘、底部 Tab 与瞬时进度行为。
+4. [complete] 运行前端定向测试、类型检查、Lint、构建和跨模块架构门禁；真实 iPhone 视口留待部署后验收。
+
+### Constraints
+
+- 不丢弃已确认但尚未执行的 Tool/SAA 修复计划。
+- 不新增依赖，不改变后端事件协议；优先由现有 Run 状态派生瞬时进度。
+- 设计确认前不修改产品代码；不提交、不部署。
+- 用户此前明确要求继续在 `main` 工作；本轮沿用该偏好在当前 checkout 原位实施，不创建额外 worktree。
+
+### Errors Encountered
+
+| Error | Attempt | Resolution |
+|---|---:|---|
+| jsdom 将 CSS `transparent` 的计算值规范化为 `rgba(0, 0, 0, 0)` | 1 | 仅修正测试的浏览器标准序列化期望，不放宽透明背景行为断言 |
+| 根 reactor 无法用短 artifactId `agentbuilder-infrastructure` 选择嵌套模块 | 1 | 按实际聚合树改用路径 `agentbuilder/agentbuilder-infrastructure`，不把项目选择错误计为产品 RED |
+| `fitness.plan.save@2` 在空历史启动时报“新 Tool 必须从 v1 开始” | 1 | 先补同构建完整版本序列 RED，再让 Scanner 顺序验证 v1/v2；运行时保留 v1 兼容并默认选择 v2 |
+| AgentScope 增量测试类是 IDE 遗留的 unresolved bytecode，JUnit 报 `ConformanceEvidence` 不存在 | 1 | 生成 core test-jar 并对精确 adapter 模块执行一次 clean test，随后取得可信行为 RED；未放宽测试 |
+
+### Verification
+
+- 前端全量测试 137/137、TypeScript、ESLint 与生产构建通过；构建仅有既有的 500 kB chunk 提示。
+- Tool/Fitness/AgentScope/SAA/审批运行时定向 Maven 回归通过，包含真实 PostgreSQL 训练计划保存用例。
+- Architecture Tests、Spotless、OpenAPI contract lint（110 fixtures）和 `git diff --check` 通过。
+- 测试进程关闭 Testcontainers 后仍有既有后台 Worker 的数据库连接噪声，但 Maven 最终退出码为 0。
+
 ## 2026-08-12 训练播放器媒体、计时与语音修复（当前阶段）
 
 ### Goal
@@ -554,41 +621,32 @@
 | 本地持久库已应用旧 Agent V1，部署时 Flyway 校验和不一致 | 1 | 按预生产单一 V1 基线规则只修复本地 schema history 校验和，再通过管理 API 更新草稿/Skill 并发布 v17；不新增 migration、不重置业务数据。 |
 | 管理 API 检查命令依赖本机未安装的 `jq` | 1 | 改用仓库已有 Node.js 读取 JSON，不新增依赖。 |
 
-# 2026-08-12 阿里云 ECS 一键部署方案
+# 2026-08-14 训练计划 Tool 校验与 Agent 错误循环
 
 ## 目标
 
-基于当前项目现状设计阿里云 ECS 单机一键部署方案，覆盖宿主机依赖初始化、应用与 PostgreSQL 容器编排、现有数据库数据的安全迁移/恢复、密钥管理、反向代理、健康检查、备份与回滚；先形成并确认设计，不在确认前修改部署实现。
+定位并修复 `fitness.plan.save` 的 DAY/WEEK、`focusAreas` 参数错误，以及 Tool 失败未回传模型导致 Run 直接中断的问题；保留业务不变量，并让模型在有界循环内基于结构化错误修正参数。
 
 ## 阶段
 
-1. [complete] 只读审计现有 `deploy/`、构建产物、运行配置、数据库初始化/备份恢复与近期部署相关提交。
-2. [complete] 逐项确认目标 ECS 操作系统、域名/TLS、部署输入和现有数据来源等边界；用户已确认迁移当前 `deploy/.local/` 全量 PostgreSQL 数据、媒体和 Agent master key/加密凭据，并通过阿里云 CLI 确认目标机为乌兰察布 Ubuntu 22.04 2C4G ECS；当前先以公网 IP + 可信 HTTPS 上线，域名稍后提供，服务器 root SSH 已验证可用。
-3. [complete] 给出 3 种部署路径、权衡与推荐方案；用户授权采用可信构建机生成不可变制品、SSH 发布到 ECS 的方案。
-4. [complete] 提交并确认架构、首次迁移、重复部署、备份恢复、安全与验收设计。
-5. [complete] 正式设计文档已获用户确认；按 TDD、空库恢复、云变更门禁和生产验收拆解为 9 个实施 Task。
-6. [complete] 用户选择 Subagent-Driven；创建隔离 worktree 与本地提交基线，`main` 保持干净。
-7. [in_progress] 按 Task 1–6 逐项 TDD 实施、独立复核、全量验证与可丢弃迁移演练。
-8. [pending] 执行 ECS bootstrap、首次停写迁移、IP HTTPS、备份/回滚/重启验收。
+1. [complete] 只读追踪模型参数、Tool Schema、业务校验和 Framework Adapter 的异常传播链，并用现有合同测试确认当前终止语义。
+2. [complete] 用户认可统一设计；已将任意非连续训练日期（单批最多 31 天）、目标部位契约、模型可纠正 Tool 错误循环及 SAA endpoint/错误诊断固化为书面规格。
+3. [pending] 用户复核书面规格后，按 TDD 增加失败用例，再实施参数契约和错误回传修复。
+4. [pending] 运行定向后端、Adapter/Runtime 与必要前端回归及格式检查。
+5. [pending] 如需发布或部署，另行取得授权；本轮默认不提交、不部署、不修改数据库。
 
-## 当前约束
+## 约束
 
-- 本轮在设计确认前不新增或修改部署脚本、Docker/Compose、CI/CD、migration 和生产数据。
-- 保护仓库中已有规划记录和任何既有改动，不覆盖 `deploy/.local/` 数据。
-- 不把 `.env`、数据库口令、Agent master key 或云凭证提交到 Git。
-- 现有数据迁移采用选项 A：以当前本机 `deploy/.local/` 为源，全量保留用户、Agent 配置/版本、会话、Run、后台任务、媒体与可解密凭据。
-- 当前没有域名，用户要求先按无域名方式部署。Let’s Encrypt 已支持公网 IP 短期证书，临时正式入口调整为 `https://39.101.65.254`；80 仅用于 ACME HTTP-01 与跳转，证书自动续期，后续域名切换不迁移数据。
-- 实施固定 Certbot 5.7.0；5.4.0 是 webroot 支持 IP 证书的最低版本，不使用浮动 `latest`。
-- 实施计划保存于 `docs/superpowers/plans/2026-08-13-aliyun-ecs-ip-https-deployment.md`，设计规格状态已更新为“已确认，可进入实施”。
+- 不放宽 DAY/WEEK 连续日期、每个计划最多 3 个目标部位等领域约束，先确认错误来自模型参数、Tool Schema 或运行时翻译层。
+- Tool 校验错误应成为模型可见的结构化 observation；重试必须有总步数上限和重复错误保护。
+- 鉴权、审批、权限和基础设施错误不得伪装成可重试业务校验错误。
+- 保留当前工作树中的既有内容；未经授权不改 migration、依赖、部署脚本，不提交或部署。
 
 ## Errors Encountered
 
 | Error | Attempt | Resolution |
 |---|---:|---|
-| 初次 `rg --files -g 'deploy/**'` 将 gitignored 的本地 PostgreSQL 数据目录全部列出，输出被截断 | 1 | 后续只读取受版本控制的部署文件，显式排除 `deploy/.local/` 与 `deploy/secrets/`。 |
-| 阿里云 CLI 四个只读详情请求并行执行时至少一个调用长期未返回 | 1 | 用户中断后改为逐条查询；实例、云盘、安全组、VPC 与交换机结果均已取得，未执行云端写操作。 |
-| `DescribeVSwitches` CLI 调用约 3 分钟无即时输出 | 1 | 终止等待时命令已返回所需子网信息；后续不再执行非必要云查询。 |
-| 首次 SSH 只读体检因本机尚未信任 ECS 主机密钥而失败 | 1 | 保持严格主机校验，读取公开 ED25519 指纹并等待用户确认后再写入 `known_hosts`，不使用 `StrictHostKeyChecking=no`。 |
-| 已信任主机指纹后，`root` 与 `ubuntu` 均拒绝本机现有公钥 | 1 | 确认 22 端口与主机身份正常；云助手在线，等待用户明确授权后再决定是否追加本机公钥恢复 SSH，当前未修改服务器。 |
-| 用户提供通用 SSH 排查建议后，显式 `-i ~/.ssh/id_ed25519` 仍被拒绝 | 1 | 依据调试日志确认客户端确实提供指纹 `SHA256:GMJFIHt8NYe7SJD/PCeLmq76B05nL0iotsXf/wwFOms`，服务端再次仅允许 publickey 并拒绝；常见目录无其他 `.pem`/`.key` 候选，根因收敛为缺少匹配的原私钥/服务器未授权当前公钥。 |
-| 首次 Tavily CLI 查询沿用旧参数名 `--search-depth` / `--format` | 1 | 读取当前 CLI help 后改为 `--depth advanced --json`；官方结果确认 Certbot 5.7.0 当前发布与 5.4.0 webroot IP 支持。 |
+| 首次读取 `using-superpowers` 的 Codex 参考文件使用了错误的相对路径 | 1 | 通过 `rg --files` 定位到 skill 根目录下的 `references/codex-tools.md` 并完整读取。 |
+| 定向测试搜索把 `application/**/src/test` 作为未加引号的 zsh 参数，zsh 在无直接匹配时提前报错 | 1 | 后续改为从仓库根搜索并用 `--glob '**/src/test/**'` 过滤，避免 shell 展开。 |
+| 首次用 JShell 验证 Spring URI 拼接时只加入 `spring-web`，缺少 `spring-core`/`spring-jcl` | 2 | 补齐本机已有依赖后得到确定结果：以 `/v1` 结尾的 baseUrl 加默认 `/v1/chat/completions` 会生成双 `/v1`。 |
+| 首次写实施计划的大型 `apply_patch` 有一行代码块内容漏掉补丁前缀，补丁校验失败 | 1 | 原子失败、未创建文件；改为程序化逐行生成 Add File patch 后成功写入，并在计划自检中补齐共享错误类型与输入/输出 Schema 分类边界。 |

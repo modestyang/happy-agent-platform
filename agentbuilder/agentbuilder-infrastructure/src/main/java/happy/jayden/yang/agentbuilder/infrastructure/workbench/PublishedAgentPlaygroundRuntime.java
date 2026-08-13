@@ -23,6 +23,7 @@ import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
 import happy.jayden.yang.agentbuilder.core.runtime.RuntimeHookExecutor;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRegistry;
+import happy.jayden.yang.agentbuilder.core.tool.ToolSchemaCodec;
 import happy.jayden.yang.agentbuilder.infrastructure.security.AesGcmCredentialCipher;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationMessage;
 import happy.jayden.yang.agentbuilder.infrastructure.workbench.WorkspaceDtos.ConversationSummary;
@@ -852,6 +853,10 @@ public final class PublishedAgentPlaygroundRuntime {
     if (frozenArguments.isEmpty() && raw.get("toolCallId") instanceof String toolCallId) {
       frozenArguments = argumentsFromToolCallBlocks(events, toolCallId);
     }
+    if ("fitness.plan.save".equals(toolKey)) {
+      frozenArguments = canonicalPlanArguments(frozenArguments);
+    }
+    validatePendingArguments(request, toolKey, frozenArguments);
     Map<String, Object> proposal =
         "fitness.plan.save".equals(toolKey)
             ? planProposal(
@@ -860,6 +865,21 @@ public final class PublishedAgentPlaygroundRuntime {
                 .orElse(Map.of())
             : Map.of();
     return new PendingApproval(toolKey, titleFor(toolKey), frozenArguments, proposal);
+  }
+
+  private static void validatePendingArguments(
+      RunRequest request, String toolKey, Map<String, Object> arguments) {
+    var tool =
+        request.tools().stream()
+            .filter(candidate -> candidate.descriptor().toolKey().equals(toolKey))
+            .findFirst()
+            .orElseThrow(() -> new PlaygroundRuntimeUnavailableException("确认事件引用了未绑定 Tool"));
+    try {
+      ToolSchemaCodec.validateInput(arguments, tool.descriptor().inputSchema().document());
+      tool.handler().validate(arguments);
+    } catch (Exception error) {
+      throw new PlaygroundRuntimeUnavailableException("确认 Tool 参数无效: " + safeMessage(error), error);
+    }
   }
 
   private Map<String, String> trustedExerciseNames(
@@ -1016,6 +1036,8 @@ public final class PublishedAgentPlaygroundRuntime {
       return Map.copyOf(arguments);
     }
     var frozenRequest = new LinkedHashMap<>(stringKeyedMap(requestMap));
+    frozenRequest.remove("scope");
+    frozenRequest.remove("approvalId");
     frozenRequest.put("approvalId", approval.approvalId().toString());
     arguments.put("request", Map.copyOf(frozenRequest));
     return Map.copyOf(arguments);
@@ -1028,7 +1050,7 @@ public final class PublishedAgentPlaygroundRuntime {
       return java.util.Optional.empty();
     }
     Map<String, Object> plan = stringKeyedMap(value);
-    if (!(plan.get("scope") instanceof String) || !(plan.get("days") instanceof List<?> rawDays)) {
+    if (!(plan.get("days") instanceof List<?> rawDays)) {
       return java.util.Optional.empty();
     }
     var days = new ArrayList<Map<String, Object>>();
@@ -1068,9 +1090,34 @@ public final class PublishedAgentPlaygroundRuntime {
       days.add(Map.copyOf(day));
     }
     var proposal = new LinkedHashMap<String, Object>();
-    proposal.put("scope", plan.get("scope"));
+    proposal.put("scope", days.size() == 1 ? "DAY" : "MULTI_DAY");
     proposal.put("days", List.copyOf(days));
     return java.util.Optional.of(Map.copyOf(proposal));
+  }
+
+  private static Map<String, Object> canonicalPlanArguments(Map<String, Object> arguments) {
+    var canonicalArguments = new LinkedHashMap<>(arguments);
+    if (!(canonicalArguments.get("request") instanceof Map<?, ?> rawRequest)) {
+      return Map.copyOf(canonicalArguments);
+    }
+    var request = new LinkedHashMap<>(stringKeyedMap(rawRequest));
+    request.remove("scope");
+    request.remove("approvalId");
+    if (request.get("days") instanceof List<?> rawDays) {
+      var days = new ArrayList<Map<String, Object>>();
+      for (var rawDay : rawDays) {
+        if (!(rawDay instanceof Map<?, ?> day)) {
+          throw new PlaygroundRuntimeUnavailableException("训练计划日期项必须是对象");
+        }
+        days.add(stringKeyedMap(day));
+      }
+      days.sort(
+          java.util.Comparator.comparing(
+              day -> String.valueOf(day.getOrDefault("scheduledFor", ""))));
+      request.put("days", List.copyOf(days));
+    }
+    canonicalArguments.put("request", Map.copyOf(request));
+    return Map.copyOf(canonicalArguments);
   }
 
   private static Map<String, Object> stringKeyedMap(Map<?, ?> values) {

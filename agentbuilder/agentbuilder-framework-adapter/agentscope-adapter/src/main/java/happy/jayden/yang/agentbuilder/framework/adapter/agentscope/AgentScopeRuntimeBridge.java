@@ -5,6 +5,8 @@ import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
 import happy.jayden.yang.agentbuilder.core.runtime.RunResult;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
+import happy.jayden.yang.agentbuilder.core.tool.ToolErrorResponse;
+import happy.jayden.yang.agentbuilder.core.tool.ToolInputException;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchemaCodec;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
@@ -23,6 +25,7 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.permission.PermissionDecision;
 import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.skill.AgentSkill;
@@ -481,6 +484,16 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
                     Map.of("toolName", getName(), "arguments", arguments));
                 return invoke(param, arguments);
               })
+          .onErrorResume(
+              ToolInputException.class,
+              error -> {
+                emit(
+                    RunEvent.Type.TOOL_FAILED,
+                    Map.of("toolName", getName(), "errorMessage", errorMessage(error)));
+                return Mono.just(
+                    ToolResultBlock.error(ToolErrorResponse.invalidArgument(error).json())
+                        .withIdAndName(param.getToolUseBlock().getId(), getName()));
+              })
           .onErrorMap(
               error -> error instanceof ToolFailure ? error : new ToolFailure(getName(), error))
           .doOnError(
@@ -492,16 +505,25 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
               });
     }
 
+    @Override
+    public Mono<PermissionDecision> checkPermissions(
+        Map<String, Object> input, PermissionContextState state) {
+      return Mono.fromCallable(
+          () -> {
+            try {
+              validateInput(Map.copyOf(new LinkedHashMap<>(input)));
+              return PermissionDecision.passthrough(getName());
+            } catch (ToolInputException error) {
+              return PermissionDecision.allow(getName());
+            }
+          });
+    }
+
     private Mono<ToolResultBlock> invoke(ToolCallParam param, Map<String, Object> arguments) {
       var invocation =
           Mono.fromCallable(
                   () -> {
-                    if (!Collections.disjoint(arguments.keySet(), TRUSTED_ARGUMENT_NAMES)) {
-                      throw new IllegalArgumentException(
-                          "trusted execution context fields are not accepted as model arguments");
-                    }
-                    ToolSchemaCodec.validateInput(
-                        arguments, tool.descriptor().inputSchema().document());
+                    validateInput(arguments);
                     var trusted =
                         param
                             .getContext()
@@ -511,7 +533,14 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
                     if (trusted == null) {
                       throw new IllegalStateException("trusted tool context is missing");
                     }
-                    var result = tool.handler().invoke(arguments, trusted);
+                    Object result;
+                    try {
+                      result = tool.handler().invoke(arguments, trusted);
+                    } catch (ToolInputException error) {
+                      throw error;
+                    } catch (IllegalArgumentException error) {
+                      throw new ToolInputException(error.getMessage(), error);
+                    }
                     var json =
                         ToolSchemaCodec.encode(result, tool.descriptor().outputSchema().document());
                     emit(
@@ -526,7 +555,25 @@ final class AgentScopeRuntimeBridge implements AutoCloseable {
           ? invocation
           : invocation.retryWhen(
               Retry.max(retries)
-                  .filter(error -> !(error instanceof ToolSchemaCodec.InvalidToolValueException)));
+                  .filter(
+                      error ->
+                          !(error instanceof ToolSchemaCodec.InvalidToolValueException)
+                              && !(error instanceof ToolInputException)));
+    }
+
+    private void validateInput(Map<String, Object> arguments) throws Exception {
+      if (!Collections.disjoint(arguments.keySet(), TRUSTED_ARGUMENT_NAMES)) {
+        throw new SecurityException(
+            "trusted execution context fields are not accepted as model arguments");
+      }
+      try {
+        ToolSchemaCodec.validateInput(arguments, tool.descriptor().inputSchema().document());
+        tool.handler().validate(arguments);
+      } catch (ToolInputException error) {
+        throw error;
+      } catch (ToolSchemaCodec.InvalidToolValueException | IllegalArgumentException error) {
+        throw new ToolInputException(error.getMessage(), error);
+      }
     }
 
     private long safeRetryCount() {

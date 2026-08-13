@@ -1,5 +1,38 @@
 # Progress
 
+## 2026-08-14 ACR/ECS 日常发布
+
+- 已完成 README、阿里云部署文档、构建/发布/状态脚本全量审计；目标实例、地域、IP、安全组、SSH、ACR 凭据和宿主机容量只读预检均通过。
+- 发布前基线：current `20260813T143649Z-1e3b3bb`，state `restore-20260813T150954Z`；PostgreSQL/App/Nginx 全部 healthy，PostgreSQL ID 为 `d5ca5d…cc63c`。
+- 当前工作区有意未提交；发布元数据已记录 `source_dirty=true`、source commit `8dc1a3081fb0d1f55f26fca104c5806c0e2d5d28` 和差异摘要，未 commit/push。
+- 首轮完整 Maven/前端/格式/类型/生产构建均通过；本机 Docker 代理推送 PostgreSQL 层持续但过慢，生产尚未触碰。
+- 经只读吞吐诊断改由 ECS 同地域推送 PostgreSQL 镜像，ACR 返回 digest `sha256:6fa943dbe41f561c134e66cc66e9628a46a888bbe78860da66c22a65d4f8e438`；主动中断本机慢上传后 `.pending` 清理且生产三容器 ID/健康不变。
+- 以同一 release id `20260813T181929Z-8dc1a30` 重跑门禁：Maven reactor `BUILD SUCCESS`（Starter 124、Architecture 7，0 failures），隔离复验通过，前端 116/116 与管理端 21/21 通过，类型检查、Vite build、Maven package、三镜像构建和 ACR 去重推送通过。
+- 自动编排在构建完成后因 Docker 标准输出污染单值路径边界而 fail-closed；闭合 release 已存在、`SHA256SUMS --check --strict` 通过，线上 current/state/三容器仍与基线一致。部署时使用编排器正式支持的 `HAPPY_AGENT_RELEASE_PATH` 继续上传、备份与切换。
+- 复用 release 的正式入口退出码 0：远端 manifest 校验、三镜像 pull、发布前备份和 App/Nginx 激活均通过；日志为 `release activated: 20260813T181929Z-8dc1a30`、`recovery package pulled: 20260813T191545Z`、`release deployed: 20260813T181929Z-8dc1a30`。进入独立验收。
+- 独立验收通过：current 为新 release，App/Nginx 新容器 healthy；PostgreSQL ID 仍为发布前 `d5ca5d…cc63c`、旧镜像和 healthy，state generation 仍为 `restore-20260813T150954Z`。远端 release manifest 与 `source_dirty=true` 通过校验。
+- IP `/healthz` 返回 `ok`，根页面和 `/admin` 均返回 200 且引用本次 `index-oIyUf9K3.js`；未登录 `/api/app/bootstrap` 与 `/api/admin/auth/session` 均返回预期 401。激活阶段的认证 SSE 公网 smoke 已通过。
+- 阿里公共 DoH 确认 `fitness.modest.vip` 与 `agent.modest.vip` 均为 `39.101.65.254`；两条域名路由在忽略证书校验时 200。证书 SAN 仍仅为 IP，域名 HTTPS 证书不在本次发布授权范围。
+- 本机 recovery `20260813T191545Z` 权限 0700、7 个文件、2,919,760 bytes，闭合校验通过；远端 staging 为空、无发布进程、根工作区无 `secrets/`，`git diff --check` 通过。
+- 用户授权后已精确删除第一次主动中断残留的 `deploy/.local/production/staging/.build-20260813T181929Z-8dc1a30-61091`，并验证路径不存在；该删除不可恢复。
+- 发布脚本缺陷已按 TDD 修复：旧实现面对真实风格 Docker stdout 时 RED 为 `release builder stdout contains Docker chatter`；Docker login/push stdout 改送 stderr 后，构建定向测试和完整本地编排测试均通过。
+
+## 2026-08-14 移动端 AI 对话体验
+
+- 已读取用户提供的三张手机截图并完成视觉对照；当前仍是只读设计阶段，尚未修改前端产品代码。
+- 已读取 `brainstorming`、`frontend-design` 与 `planning-with-files` 说明；本批次按已有流程上的 bounded 改造处理，设计确认前暂停实现。
+- 已定位 UI 根因和最小文件边界：`App.tsx`、`AgentRunMessage.tsx`、`app.css` 及对应测试；未发现需要新增依赖或修改 API 的理由。
+- 已检查 `.phone`、`.page`、`.ai-page`、消息与底部导航布局以及最近提交；现有布局足以原位修复，不升级为架构型任务。
+- 用户已确认 UI 交互设计；开始 TDD。已完整读取测试质量、TDD、系统化调试、worktree 与执行计划说明；因既有明确 `main` 偏好在当前 checkout 原位实施，且不使用未经用户请求的子 Agent。
+- UI 基线：`npm --prefix frontend test -- src/App.test.tsx src/components/AgentRunMessage.test.tsx` 退出码 0，52/52 通过；现有失败可归因于随后新增行为测试，而非脏基线。
+- UI RED：同一命令新增 6 个行为测试后退出码 1，精确失败为旧进度无 `status` 且仍留存、助手 `max-width` 仍为 87%、主导航聚焦时仍存在、Enter 提交后 input 仍聚焦、每条助手消息仍有 Bot SVG；50 个既有用例继续通过。
+- 补充首阶段 RED：`npm --prefix frontend test -- src/App.test.tsx -t "shows a transient public stage as soon as the AI run starts"` 退出码 1，旧 `已提交给花爷` 不属于公开阶段，Run 创建后页面找不到 `role=status`。
+- UI 首轮 GREEN 运行中 56/57 通过；唯一失败是 jsdom 把透明色序列化为 `rgba(0, 0, 0, 0)` 而测试写成字面量 `transparent`，产品行为已正确，现仅校正独立期望。
+- UI 定向 GREEN：`npm --prefix frontend test -- src/App.test.tsx src/components/AgentRunMessage.test.tsx` 退出码 0，57/57 通过。产品代码现已实现提交/外部点击 blur、聚焦时卸载 Tab 并收紧底部间距、助手全宽纯正文、移除逐条 Bot、仅显示最新真实阶段且首个输出时清理进度。
+- Task 1 首次 Maven 命令因嵌套 reactor 不接受短 `-pl agentbuilder-infrastructure` 退出 1；已确认真实模块路径，属于命令选择错误，尚不计 RED。
+- Task 1 RED：修正模块路径后编译因 `ToolInputException`、`ToolErrorResponse` 缺失退出 1；测试同时引用新数组注解和 preflight，失败原因与目标契约一致。
+- Task 1 GREEN：`./mvnw -q -pl agentbuilder/agentbuilder-infrastructure -am -Dtest=SpringToolCatalogScannerTest,DefaultToolRegistryTest,ToolErrorResponseTest -Dsurefire.failIfNoSpecifiedTests=false test` 退出码 0；数组边界、纯参数预检转发和闭合安全错误 JSON 已通过。
+
 ## 2026-08-11 管理后台目录与 Trace 交互
 
 - 已确认模型、提示词、技能、Trace 的真实页面问题并固化设计与实施计划。
@@ -268,41 +301,43 @@
 - 本地 Agent V1 校验和按预生产单一基线规则同步；现有 Plan Skill 更新为 8 个必要 Tool、草稿更新为 18 个现行 Tool，管理校验无错误/警告并发布 `fitness.coach` v17。
 - 390×844 页面验收通过：处理进度先展开“理解需求 → 查看记录”，正文开始后在回复前自动收起；输入“全身”时 `fitness_exercise_candidates_query` 成功返回；确认卡展示 6 个动作中文名，无 UUID；确认保存后 8 月 13 日计划页展示完整 6 个动作，浏览器控制台无错误。
 
-## 2026-08-12 阿里云 ECS 一键部署方案
+## 2026-08-14 训练计划 Tool 校验与 Agent 错误循环
 
-- 已启动只读方案调研，确认本轮先设计、后确认，暂不修改部署实现、CI/CD、migration 或生产数据。
-- 已发现仓库已有一套阿里云部署文档/脚本和数据库导出恢复工具；下一步将逐文件审计其完整性、幂等性、安全边界及对现有数据的支持情况。
-- 已按 `planning-with-files` 将目标、约束、初步发现与进度追加到既有规划文件，未覆盖历史记录。
-- 已完成第一轮部署资产审计：现有阿里云脚本与 Compose/数据库迁移工具采用两套不一致的运行模型，并存在依赖安装、密钥归属、恢复安全和发布回滚缺口，暂不建议直接上 ECS 执行。
-- 已核对运行配置与历史生产设计：当前仓库缺少可工作的 `prod` 配置闭环，历史目标架构尚未实现；方案需要把“主机初始化”和“应用发布”拆成两个幂等阶段，并将数据 dump、Agent master key 和媒体对象作为同一迁移批次处理。
-- 用户已确认采用全量本地状态迁移（选项 A）；开始读取数据库/媒体的非敏感元数据，为迁移预检和容量规划提供依据。
-- 已确认当前 PostgreSQL 容器健康、数据目录约 84MB、媒体约 472KB，适合短暂停写的一次性逻辑备份迁移；master key 必须作为不可重新生成的迁移资产原样复制。
-- 已完成数据库只读盘点：PostgreSQL 16.14、逻辑数据约 24MB、Fitness V16、Agent V1，当前无 vector/pg_trgm 扩展；未查看业务正文或密钥内容。
-- 已通过阿里云和 Docker 官方资料核对当前安装支持；下一步需确认唯一目标操作系统，避免所谓“一键脚本”实际上包含未验证的多发行版分支。
-- 已按用户授权通过 Homebrew 安装阿里云 CLI 3.4.11，并使用 OAuth 临时凭据完成只读 ECS 审计；未创建长期 AccessKey、未修改云资源。
-- 已确认目标 ECS 是乌兰察布 Ubuntu 22.04 2C4G、60GB 单系统盘、公网 IP `39.101.65.254`；安全组当前未开放 80/443，22/3389/ICMP 均对全网开放，且实例未启用释放保护。
-- 云详情查询曾因并行 CLI 请求长期等待而被用户中断；已改为逐条执行并获取全部必要结果，不再继续非必要云查询。
-- 用户进一步要求正式方案直接采用域名方式，域名后续提供，并确认服务器可通过 SSH 登录；开始进行服务器只读运行环境体检。
-- 首次 SSH 因严格主机校验正常拒绝；已取得公开 ED25519 指纹，未绕过验证、未写入本机 SSH 配置，等待用户确认信任。
-- 用户已允许信任并完成指纹复核；SSH 主机验证通过，但 `root`/`ubuntu` 都不接受本机公钥。只读确认云助手在线，尚未下发远程命令或修改服务器 SSH 配置。
-- 已按系统化调试复核私钥路径、模式、指纹和服务端认证日志；根因已定位为服务器未授权本机现有公钥或原私钥缺失，本机常见目录也没有其他候选密钥。未修改 `sshd_config`、未开启 root 密码登录。
-- 用户追加公钥后 SSH root 登录成功。两轮只读体检确认服务器为空白 Ubuntu 22.04：53GB 可用磁盘、无 Docker/Compose、无现有 Web/DB 服务、关键端口空闲；无 Swap、UFW 未启用、系统自动更新和 NTP 正常。
-- 用户要求先按无域名方式处理；官方资料确认当前可为公网 IP 签发 Let’s Encrypt 可信短期证书，方案调整为 IP HTTPS + 自动续期，而不是公网明文 HTTP。
-- 用户已提供证书通知邮箱。生产安全复核发现两个会话 Cookie 均写死 `Secure=false`、旧 `/actuator/health` 实际不存在；已纳入部署前必要代码修复范围，尚未修改生产代码。
-- 用户明确授权实施完整范围。设计规格已写入 `docs/superpowers/specs/2026-08-13-aliyun-ecs-ip-https-deployment-design.md` 并完成占位符、内部一致性、范围和歧义自检；按 brainstorming 书面复核门等待用户确认后再修改生产代码或服务器。
-- 用户已确认书面规格，规格状态更新为“已确认，可进入实施”。
-- 已按 writing-plans 要求完成 9-Task TDD 实施计划 `docs/superpowers/plans/2026-08-13-aliyun-ecs-ip-https-deployment.md`，覆盖 Secure Cookie、prod profile、三容器 Compose、roles-only 空库恢复、Host bootstrap、IP 证书、首次迁移、发布回滚和重启验收。
-- 官方发布信息复核确认 Certbot 5.7.0 是当前版本，5.4.0 起 webroot 支持 IP 证书；registry 实测发现正确镜像标签是 `certbot/certbot:v5.7.0`，不带 `v` 的标签不存在。计划锁定其 digest，staging 与 production 使用隔离证书目录，不使用 `latest`。
-- 计划自检已修正 `pg_dump --no-owner=false` 这一无效写法，明确为省略 `--no-owner` 以保留 owner；远端云命令已固定安全组 `sg-0jlb5v2njkb2jbzrvurr` 和严格 known_hosts，不留省略号占位。
-- 用户选择 Subagent-Driven 并授权隔离分支与本地 commit；已创建 `codex/aliyun-ecs-ip-https-deployment` worktree，`main` 保持干净。下一步建立 SDD ledger 和基线测试，尚未修改生产代码、部署脚本或 ECS。
+- 已启动只读根因调查；使用系统化调试追踪计划参数和 Tool 异常传播，使用 brainstorming 在实施前确认设计。
+- 已定位两条用户可见错误的生产抛出点，并确认代码层存在统一 ToolResult `ERROR` 语义；下一步读取 `fitness.plan.save` Schema、参数转换和两个 Framework Adapter 的执行循环。
+- 尚未修改产品代码、数据库、依赖或部署配置，未提交、未部署。
+- 排查记录：首次读取 skill 参考文件路径错误，已通过 `rg --files` 找到正确位置，未影响仓库文件。
+- 已确认 `fitness.plan.save` 当前示例自身是无效的 DAY 请求（0 天），且说明未表达 DAY/WEEK 的互斥形状约束；继续检查自动生成 JSON Schema 和执行桥接。
+- 一次测试搜索因 zsh 提前展开无匹配 glob 而失败；已改用 `rg --glob` 的计划，不涉及产品运行。
+- 已完成两个 Framework 的异常链追踪：AgentScope 与 SAA 都在 Tool bridge 主动把 handler 异常升级为整个 Run 失败；这正是现场“没有 loop”的直接原因。
+- 已确认 Schema 能表达数值/字符串边界但不能表达列表项数，也没有 DAY/WEEK 跨字段条件能力；下一步区分哪些业务异常允许模型纠正，并核对审批前参数校验时机。
+- 已核对 AgentScope 依赖 API：原生错误 ToolResult 和 ERROR 状态均可用；现有总 Tool 调用预算可作为循环上限。
+- 已发现审批时序缺口：保存计划的领域校验晚于确认卡。设计必须把纯参数校验前移，否则模型即使能收到普通 Tool 错误，也无法修正批准后才发现的坏计划。
+- 根因调查阶段结束；准备向用户确认“多天=固定 7 天还是任意连续 2–7 天”，确认后才进入 TDD 实施。
+- 用户确认计划支持任意非连续日期，单批上限 31；旧 DAY/WEEK 形状约束不再是目标语义。
+- 已完成 SAA 只读根因验证：当前 Spring AI 默认路径与已含 `/v1` 的 Provider endpoint 组合成双 `/v1`，匿名探测为错误路径 404、正确路径 401；通用 failure mapper 又把底层 Provider 错误隐藏成 `Framework execution failed`。
+- 尚未触发真实模型调用、未读取或输出 Provider Secret，未修改产品代码。
+- 用户已认可方案 A；书面规格已创建，正进行占位符、内部一致性、范围和歧义自检。因未获 commit 授权，规格保持未提交。
+- 书面规格自检已通过：无 TBD/TODO，占位符、范围矛盾或双重解释；`git diff --check` 通过。尚未进入实现，规格保持未提交等待用户复核。
+- 用户明确要求修复；已使用 writing-plans 将实施拆成 Schema/预校验、Fitness 契约、AgentScope 循环、SAA 循环、SAA endpoint、审批与前端兼容、集成验证七个 TDD 批次。
+- 移动端对话 UI 已按确认方案完成定向 RED/GREEN：发送/点击正文收键盘、聚焦时隐藏底部导航、助手正文改为全宽无气泡/头像/灰线、进度仅在首段回答前瞬时显示；定向前端 57/57 通过。
+- Tool 基础设施 RED/GREEN 已通过：Schema 支持数组 minItems/maxItems，handler 支持审批前纯参数预校验，并新增安全、定长的 `ToolErrorResponse`；定向 Maven 测试退出码 0。
+- Fitness 契约 RED 先由旧 `SavePlanToolRequest(scope, days)` 构造签名命中；实现任意 1–31 个不重复日期、服务端排序、`fitness.plan.save@2` 无 scope，以及目标部位最多 7 个已知值。
+- 首轮 GREEN 暴露 Tool 版本治理只接受外部历史、不接受同一构建携带完整 v1/v2；新增精确 RED 后让 Scanner 顺序验证完整当前版本，并保留兼容 v1、默认暴露 v2。
+- Fitness/Scanner 定向单测与真实 PostgreSQL 集成用例 `confirmedPlanToolSavesArbitraryTrainingDatesIdempotentlyWithoutOverwritingCompletedHistory` 均退出码 0；下一步实现 AgentScope 与 SAA 的可纠正 Tool 错误回传循环。
+- AgentScope correction-loop RED 已命中：预校验失败后旧桥接没有执行修正调用；实现只捕获 `ToolInputException` 并返回原生 ERROR ToolResult 后，整类 26/26 退出码 0，第二轮修正成功，基础设施/安全失败仍终止。
+- AgentScope 测试首次增量运行读取到 IDE 遗留的 unresolved test bytecode；安装 core test-jar 并对精确 adapter 模块执行一次 `clean test` 后取得真实行为 RED/GREEN，未修改依赖或仓库配置。
+- SAA correction-loop RED 命中：旧 callback 跳过 `handler.validate`，无效参数和修正参数都执行了 handler；实现可纠正错误 JSON 回传后，模型三轮完成且 handler 只执行一次，SAA 合同整类退出码 0。
+- SAA endpoint/错误映射先以缺少 `OpenAiEndpoint`/`endpoint(URI)` 取得 RED；现已将 origin 与 completionsPath 分开配置，百炼、MiniMax、OpenAI 三类地址及不安全 URI 拒绝测试通过，嵌套 HTTP 404 只暴露状态而不泄露 Provider body。
+- 审批兼容 RED 精确得到旧冻结参数仍含 `scope` 且三日 proposal 错标 `WEEK`；实现冻结前移除 scope/approvalId、按日期排序、服务端派生 DAY/MULTI_DAY，并在确认前再次执行纯参数预校验。Runtime 9/9 真实 PostgreSQL 测试退出码 0。
+- OpenAPI 与前端 MULTI_DAY 先以 UI 错标“当天”取得 RED；public/admin 源契约保留历史 WEEK、新增 MULTI_DAY、上限改 31，重新生成两个 TS 文件后 contract lint 110 fixtures、前端组件 14/14、typecheck 均通过。
+- 收尾验证通过：前端全量 137/137、TypeScript、ESLint、生产构建；Tool/Fitness/AgentScope/SAA/审批运行时定向 Maven 回归；Architecture Tests、Spotless、OpenAPI contract lint 110 fixtures 与 `git diff --check` 均退出码 0。
+- Maven 收尾时仍输出既有后台 Worker 在 Testcontainers 关闭后访问数据库的噪声日志，但最终退出码为 0；本轮未扩改 Worker 生命周期。
+- 未提交、未部署，也未修改数据库 migration、依赖或部署配置；真实手机上的键盘与安全区观感待后续部署后验收。
+# 2026-08-14 ACR 日常发布到阿里云 ECS
 
-# 2026-08-13 Task 6 本地迁移演练
-
-- 新增可丢弃生产迁移演练：显式只读源状态、独立 roles-only PostgreSQL、生产 restore、
-  App/Web 镜像、Flyway/业务计数/media/跨 schema 隔离、Provider credential key 认证、
-  重启持久性和不健康 release 恢复。
-- 演练 RED 暴露并修正生产 Flyway history 表名以及 PostgreSQL 初始化重启窗口竞态。
-- `bash deploy/production/tests/migration-rehearsal.sh` 最终退出 0；所有唯一命名容器、网络、
-  镜像、dump、Secret 副本和临时目录由受限 cleanup 移除。
-- 当前仍为 `https://39.101.65.254`；`fitness.modest.vip` 与 `agent.modest.vip` 仅记录为域名
-  审批后的替换点，本轮未操作 DNS 或域名证书。
+- 用户明确要求读取 README 并通过现有 ACR 方式把前序改动部署到 ECS。
+- 已完整读取 README、部署手册和 build/release 主链；确认本次是普通 `release`，不是 bootstrap/migrate，不应迁移或重启生产数据库。
+- 已完成第一轮本地只读预检：凭据/known_hosts/SSH key 权限正确，Docker/buildx/Compose 可用；尚未构建、推送、SSH 或修改云端。
+- 已找到并验证 gitignored 的项目专用 `sha256sum` 兼容入口；发布命令将仅临时前置 `deploy/.local/production/bin`，未安装新依赖、未修改产品脚本。
+- 已完成云端只读预检：目标/安全组无漂移，SSH 可用，三个生产容器 healthy，state generation、磁盘、Swap 和最近备份正常。准备记录 PostgreSQL 身份并启动正式 release。

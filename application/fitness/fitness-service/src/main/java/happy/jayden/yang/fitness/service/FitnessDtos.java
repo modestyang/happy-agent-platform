@@ -392,8 +392,7 @@ public final class FitnessDtos {
   public record TrainingPlanDayInput(
       LocalDate scheduledFor, String title, int estimatedMinutes, List<UUID> exerciseIds) {}
 
-  public record SaveTrainingPlanRequest(
-      UUID approvalId, String scope, List<TrainingPlanDayInput> days) {}
+  public record SaveTrainingPlanRequest(UUID approvalId, List<TrainingPlanDayInput> days) {}
 
   public record SavedTrainingPlanResult(List<UUID> planIds) {}
 

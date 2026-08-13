@@ -122,6 +122,33 @@ public final class SpringAiAlibabaAdapter implements AgentFrameworkAdapter {
       if (find(error, HookFailure.class) != null) {
         return new RunFailure(RunFailureCode.HOOK, message(error), false);
       }
+      var webClientResponse =
+          find(
+              error,
+              org.springframework.web.reactive.function.client.WebClientResponseException.class);
+      if (webClientResponse != null) {
+        return new RunFailure(
+            RunFailureCode.MODEL,
+            "Model provider HTTP " + webClientResponse.getStatusCode().value(),
+            webClientResponse.getStatusCode().is5xxServerError()
+                || webClientResponse.getStatusCode().value() == 429);
+      }
+      var restClientResponse =
+          find(error, org.springframework.web.client.HttpStatusCodeException.class);
+      if (restClientResponse != null) {
+        return new RunFailure(
+            RunFailureCode.MODEL,
+            "Model provider HTTP " + restClientResponse.getStatusCode().value(),
+            restClientResponse.getStatusCode().is5xxServerError()
+                || restClientResponse.getStatusCode().value() == 429);
+      }
+      if (find(
+                  error,
+                  org.springframework.web.reactive.function.client.WebClientRequestException.class)
+              != null
+          || find(error, org.springframework.web.client.ResourceAccessException.class) != null) {
+        return new RunFailure(RunFailureCode.MODEL, "Model provider network request failed", true);
+      }
       var cause = unwrap(error);
       if (cause instanceof IllegalArgumentException) {
         return new RunFailure(RunFailureCode.VALIDATION, message(cause), false);

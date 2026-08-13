@@ -4,6 +4,7 @@ import happy.jayden.yang.agentbuilder.core.tool.ToolDescriptor;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
@@ -44,7 +45,25 @@ final class ToolContractHistory {
   }
 
   void validate(ToolDescriptor descriptor) {
-    var history = versions.get(descriptor.toolKey());
+    validateAgainst(versions, descriptor);
+  }
+
+  void validateAll(List<ToolDescriptor> descriptors) {
+    Objects.requireNonNull(descriptors, "descriptors");
+    var complete = new HashMap<String, NavigableMap<Integer, ToolDescriptor>>();
+    versions.forEach((toolKey, history) -> complete.put(toolKey, new TreeMap<>(history)));
+    for (var descriptor : descriptors) {
+      validateAgainst(complete, Objects.requireNonNull(descriptor, "descriptors item"));
+      complete
+          .computeIfAbsent(descriptor.toolKey(), ignored -> new TreeMap<>())
+          .putIfAbsent(descriptor.contractVersion(), descriptor);
+    }
+  }
+
+  private static void validateAgainst(
+      Map<String, ? extends NavigableMap<Integer, ToolDescriptor>> complete,
+      ToolDescriptor descriptor) {
+    var history = complete.get(descriptor.toolKey());
     if (history == null) {
       if (descriptor.contractVersion() != 1) {
         throw new IllegalStateException(

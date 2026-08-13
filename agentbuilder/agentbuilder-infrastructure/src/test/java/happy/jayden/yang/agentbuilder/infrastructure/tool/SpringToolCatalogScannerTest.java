@@ -81,6 +81,34 @@ class SpringToolCatalogScannerTest {
   }
 
   @Test
+  void publishesArrayBoundsForModelVisibleLists() {
+    var input = scanner().scan(new BoundedListTools()).inputSchema().document();
+    var values = property(property(input, "request"), "values");
+
+    assertEquals("array", values.get("type"));
+    assertEquals(1, values.get("minItems"));
+    assertEquals(7, values.get("maxItems"));
+  }
+
+  @Test
+  void rejectsInvalidArrayConstraintDeclarations() {
+    assertTrue(
+        assertThrows(
+                IllegalArgumentException.class, () -> scanner().scan(new NegativeListBoundTools()))
+            .getMessage()
+            .contains("below -1"));
+    assertTrue(
+        assertThrows(
+                IllegalArgumentException.class, () -> scanner().scan(new ReversedListBoundTools()))
+            .getMessage()
+            .contains("minItems"));
+    assertTrue(
+        assertThrows(IllegalArgumentException.class, () -> scanner().scan(new NonListBoundTools()))
+            .getMessage()
+            .contains("array field"));
+  }
+
+  @Test
   void rejectsDuplicateRuntimeNamesAcrossDiscoveredBeans() {
     var exception =
         assertThrows(
@@ -258,6 +286,15 @@ class SpringToolCatalogScannerTest {
     assertTrue(exception.getMessage().contains("historical maximum"));
   }
 
+  @Test
+  void acceptsACompleteVersionSequenceShippedInOneBuild() {
+    var registrations = scanner().scanRegistrations(List.of(new CompleteCurrentVersions()));
+
+    assertEquals(
+        List.of(1, 2),
+        registrations.stream().map(item -> item.descriptor().contractVersion()).toList());
+  }
+
   private static SpringToolCatalogScanner scanner() {
     return new SpringToolCatalogScanner("build-2026.08.05", List.of());
   }
@@ -286,6 +323,87 @@ class SpringToolCatalogScannerTest {
   record HistoryResult(
       @AgentToolParam(name = "completed_count", description = "完成训练数", example = "3")
           int completedCount) {}
+
+  record BoundedListRequest(
+      @AgentToolParam(description = "候选值", minItems = 1, maxItems = 7) List<String> values) {}
+
+  record NegativeListBoundRequest(
+      @AgentToolParam(description = "候选值", minItems = -2) List<String> values) {}
+
+  record ReversedListBoundRequest(
+      @AgentToolParam(description = "候选值", minItems = 3, maxItems = 2) List<String> values) {}
+
+  record NonListBoundRequest(@AgentToolParam(description = "候选值", minItems = 1) String values) {}
+
+  static final class BoundedListTools {
+    @AgentTool(
+        key = "test.bounded_list",
+        version = 1,
+        runtimeName = "bounded_list",
+        displayName = "有界列表",
+        description = "读取有界列表",
+        whenToUse = "需要列表时",
+        whenNotToUse = "不需要列表时",
+        applicationKey = "test",
+        group = "test",
+        outputDescription = "结果")
+    String read(@AgentToolParam(name = "request", description = "请求") BoundedListRequest request) {
+      return String.join(",", request.values());
+    }
+  }
+
+  static final class NegativeListBoundTools {
+    @AgentTool(
+        key = "test.negative_list",
+        version = 1,
+        runtimeName = "negative_list",
+        displayName = "负数边界",
+        description = "读取负数边界",
+        whenToUse = "验证边界时",
+        whenNotToUse = "正常运行时",
+        applicationKey = "test",
+        group = "test",
+        outputDescription = "结果")
+    String read(
+        @AgentToolParam(name = "request", description = "请求") NegativeListBoundRequest request) {
+      return "ok";
+    }
+  }
+
+  static final class ReversedListBoundTools {
+    @AgentTool(
+        key = "test.reversed_list",
+        version = 1,
+        runtimeName = "reversed_list",
+        displayName = "反向边界",
+        description = "读取反向边界",
+        whenToUse = "验证边界时",
+        whenNotToUse = "正常运行时",
+        applicationKey = "test",
+        group = "test",
+        outputDescription = "结果")
+    String read(
+        @AgentToolParam(name = "request", description = "请求") ReversedListBoundRequest request) {
+      return "ok";
+    }
+  }
+
+  static final class NonListBoundTools {
+    @AgentTool(
+        key = "test.non_list_bound",
+        version = 1,
+        runtimeName = "non_list_bound",
+        displayName = "非列表边界",
+        description = "读取非列表边界",
+        whenToUse = "验证边界时",
+        whenNotToUse = "正常运行时",
+        applicationKey = "test",
+        group = "test",
+        outputDescription = "结果")
+    String read(@AgentToolParam(name = "request", description = "请求") NonListBoundRequest request) {
+      return "ok";
+    }
+  }
 
   static final class HistoryTools {
     @AgentTool(
@@ -402,6 +520,38 @@ class SpringToolCatalogScannerTest {
         outputDescription = "稳定结果")
     String stable() {
       return "stable";
+    }
+  }
+
+  static final class CompleteCurrentVersions {
+    @AgentTool(
+        key = "fitness.current_versions",
+        version = 1,
+        runtimeName = "current_versions_v1",
+        displayName = "当前完整版本一",
+        description = "同一构建保留的第一版契约",
+        whenToUse = "验证完整版本序列时",
+        whenNotToUse = "生产调用时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "第一版结果")
+    String versionOne() {
+      return "one";
+    }
+
+    @AgentTool(
+        key = "fitness.current_versions",
+        version = 2,
+        runtimeName = "current_versions_v2",
+        displayName = "当前完整版本二",
+        description = "同一构建新增的第二版契约",
+        whenToUse = "验证完整版本序列时",
+        whenNotToUse = "生产调用时",
+        applicationKey = "fitness",
+        group = "test",
+        outputDescription = "第二版结果")
+    String versionTwo() {
+      return "two";
     }
   }
 

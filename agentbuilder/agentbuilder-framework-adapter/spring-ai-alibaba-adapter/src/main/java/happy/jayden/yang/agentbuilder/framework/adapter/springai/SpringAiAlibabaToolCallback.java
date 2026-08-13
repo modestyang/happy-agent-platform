@@ -6,7 +6,9 @@ import happy.jayden.yang.agentbuilder.core.component.hook.HookDefinition;
 import happy.jayden.yang.agentbuilder.core.runtime.RunEvent;
 import happy.jayden.yang.agentbuilder.core.runtime.RunRequest;
 import happy.jayden.yang.agentbuilder.core.tool.ResolvedTool;
+import happy.jayden.yang.agentbuilder.core.tool.ToolErrorResponse;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
+import happy.jayden.yang.agentbuilder.core.tool.ToolInputException;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSchemaCodec;
 import java.time.Duration;
 import java.util.Collections;
@@ -74,6 +76,8 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
         invocation = prepare(toolInput, context);
       } catch (ApprovalRequired confirmation) {
         throw confirmation;
+      } catch (ToolInputException error) {
+        throw error;
       } catch (SpringAiAlibabaAdapter.ToolFailure | SpringAiAlibabaAdapter.HookFailure error) {
         throw error;
       } catch (RuntimeException error) {
@@ -90,6 +94,7 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
                     .filter(
                         error ->
                             !(error instanceof ToolSchemaCodec.InvalidToolValueException)
+                                && !(error instanceof ToolInputException)
                                 && !(error instanceof SpringAiAlibabaAdapter.HookFailure)));
       }
       var output =
@@ -98,6 +103,7 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
                   error ->
                       error instanceof SpringAiAlibabaAdapter.ToolFailure
                               || error instanceof SpringAiAlibabaAdapter.HookFailure
+                              || error instanceof ToolInputException
                           ? error
                           : new SpringAiAlibabaAdapter.ToolFailure(
                               tool.descriptor().runtimeName(), error))
@@ -109,6 +115,15 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
       resultData.put("encodedResult", output.encoded());
       emitter.accept(RunEvent.Type.TOOL_RESULT, Collections.unmodifiableMap(resultData));
       return output.encoded();
+    } catch (ToolInputException error) {
+      emitter.accept(
+          RunEvent.Type.TOOL_FAILED,
+          Map.of(
+              "toolName",
+              tool.descriptor().runtimeName(),
+              "errorMessage",
+              ToolErrorResponse.invalidArgument(error).message()));
+      return ToolErrorResponse.invalidArgument(error).json();
     } catch (RuntimeException error) {
       failure.accept(error);
       throw error;
@@ -116,12 +131,16 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
   }
 
   private Invocation prepare(String toolInput, ToolContext context) {
-    var arguments = arguments(toolInput);
+    Map<String, Object> arguments;
+    try {
+      arguments = arguments(toolInput);
+    } catch (IllegalArgumentException error) {
+      throw new ToolInputException(error.getMessage(), error);
+    }
     if (!Collections.disjoint(arguments.keySet(), TRUSTED_ARGUMENT_NAMES)) {
-      throw new IllegalArgumentException(
+      throw new SecurityException(
           "trusted execution context fields are not accepted as model arguments");
     }
-    ToolSchemaCodec.validateInput(arguments, tool.descriptor().inputSchema().document());
     budget.reserve(tool.descriptor().runtimeName(), tool.maxCallsPerRun());
     var trusted = context.getContext().get(SpringAiAlibabaRuntimeBridge.TRUSTED_CONTEXT_KEY);
     if (!(trusted instanceof ToolExecutionContext toolExecutionContext)) {
@@ -130,6 +149,16 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
     emitter.accept(
         RunEvent.Type.TOOL_STARTED,
         Map.of("toolName", tool.descriptor().runtimeName(), "arguments", arguments));
+    try {
+      ToolSchemaCodec.validateInput(arguments, tool.descriptor().inputSchema().document());
+      tool.handler().validate(arguments);
+    } catch (ToolInputException error) {
+      throw error;
+    } catch (ToolSchemaCodec.InvalidToolValueException | IllegalArgumentException error) {
+      throw new ToolInputException(error.getMessage(), error);
+    } catch (Exception error) {
+      throw new SpringAiAlibabaAdapter.ToolFailure(tool.descriptor().runtimeName(), error);
+    }
     if (tool.approvalPolicy() != ApprovalPolicy.NEVER) {
       emitter.accept(
           RunEvent.Type.CONFIRMATION_REQUIRED,
@@ -151,7 +180,14 @@ final class SpringAiAlibabaToolCallback implements ToolCallback {
 
   private ToolOutput invokeAttempt(Map<String, Object> arguments, ToolExecutionContext context)
       throws Exception {
-    var value = tool.handler().invoke(arguments, context);
+    Object value;
+    try {
+      value = tool.handler().invoke(arguments, context);
+    } catch (ToolInputException error) {
+      throw error;
+    } catch (IllegalArgumentException error) {
+      throw new ToolInputException(error.getMessage(), error);
+    }
     return new ToolOutput(
         value, ToolSchemaCodec.encode(value, tool.descriptor().outputSchema().document()));
   }

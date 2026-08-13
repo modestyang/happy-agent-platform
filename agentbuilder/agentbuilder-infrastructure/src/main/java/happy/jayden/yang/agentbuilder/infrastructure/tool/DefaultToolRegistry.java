@@ -160,14 +160,24 @@ public final class DefaultToolRegistry implements ToolRegistry {
   }
 
   private static AgentToolHandler secured(ToolRegistration registration) {
-    return (arguments, context) -> {
-      Objects.requireNonNull(context, "context");
-      if (!context.grantedScopes().containsAll(registration.descriptor().requiredScopes())) {
-        var missing = new HashSet<>(registration.descriptor().requiredScopes());
-        missing.removeAll(context.grantedScopes());
-        throw new SecurityException("Tool execution context is missing required scopes " + missing);
+    return new AgentToolHandler() {
+      @Override
+      public void validate(Map<String, Object> arguments) throws Exception {
+        registration.handler().validate(arguments);
       }
-      return registration.handler().invoke(arguments, context);
+
+      @Override
+      public Object invoke(Map<String, Object> arguments, ToolExecutionContext context)
+          throws Exception {
+        Objects.requireNonNull(context, "context");
+        if (!context.grantedScopes().containsAll(registration.descriptor().requiredScopes())) {
+          var missing = new HashSet<>(registration.descriptor().requiredScopes());
+          missing.removeAll(context.grantedScopes());
+          throw new SecurityException(
+              "Tool execution context is missing required scopes " + missing);
+        }
+        return registration.handler().invoke(arguments, context);
+      }
     };
   }
 

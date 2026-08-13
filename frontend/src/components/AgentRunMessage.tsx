@@ -3,7 +3,7 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { ConfirmationCard } from './ContentSurface';
 
 export type TrainingPlanProposal = {
-  scope: 'DAY' | 'WEEK';
+  scope: 'DAY' | 'MULTI_DAY' | 'WEEK';
   days: { date: string; title: string; estimatedMinutes: number; exercises: { exerciseId: string; name: string }[] }[];
 };
 
@@ -87,7 +87,9 @@ function appendProgress(message: AgentRunUiMessage, next: string): AgentRunUiMes
 
 function normalizeProposal(value: unknown): TrainingPlanProposal | undefined {
   const proposal = asRecord(value);
-  if (!proposal || (proposal.scope !== 'DAY' && proposal.scope !== 'WEEK') || !Array.isArray(proposal.days)) return undefined;
+  if (!proposal
+    || (proposal.scope !== 'DAY' && proposal.scope !== 'MULTI_DAY' && proposal.scope !== 'WEEK')
+    || !Array.isArray(proposal.days)) return undefined;
   const days = proposal.days.flatMap((rawDay) => {
     const day = asRecord(rawDay);
     if (!day) return [];
@@ -128,7 +130,7 @@ export function applyAgentRunEvent(message: AgentRunUiMessage, event: AgentRunEv
   if (event.type === 'TEXT_DELTA') {
     const delta = text(event.data.delta);
     if (delta && delta === message.lastTextBlockDelta) return { ...message, lastTextBlockDelta: undefined };
-    return { ...message, content: message.content + delta, lastTextBlockDelta: undefined };
+    return { ...message, content: message.content + delta, lastTextBlockDelta: undefined, ...(delta ? { progress: undefined } : {}) };
   }
   if (event.type === 'RUN_STATE') {
     const summary = text(event.data.summary);
@@ -144,12 +146,13 @@ export function applyAgentRunEvent(message: AgentRunUiMessage, event: AgentRunEv
       ...message,
       deciding: false,
       decidingApprovalId: undefined,
+      progress: undefined,
       approval: { ...(message.approval ?? incoming), ...incoming, ...(proposal ? { proposal } : {}) },
     };
   }
   if (event.type === 'STRUCTURED_COMPONENT') {
     if (event.data.block === undefined) return message;
-    return { ...message, blocks: [...(message.blocks ?? []), event.data.block] };
+    return { ...message, progress: undefined, blocks: [...(message.blocks ?? []), event.data.block] };
   }
   if (event.type !== 'RUN_EVENT') return message;
   const eventType = text(event.data.eventType);
@@ -165,7 +168,7 @@ export function applyAgentRunEvent(message: AgentRunUiMessage, event: AgentRunEv
     const blockId = text(event.data.blockId);
     const delta = text(event.data.delta);
     const blockType = message.blockTypes?.[blockId];
-    if (blockType === 'TEXT') return { ...message, content: message.content + delta, lastTextBlockDelta: delta };
+    if (blockType === 'TEXT') return { ...message, content: message.content + delta, lastTextBlockDelta: delta, ...(delta ? { progress: undefined } : {}) };
     return message;
   }
   return appendProgress(message, runEventSummary(eventType));
@@ -197,10 +200,7 @@ export function AgentRunMessage({
   }));
   const replyStarted = Boolean(message.content.trim() || message.blocks?.length || approval);
   return <div className={className}>
-    {progress.length > 0 && <details className="run-progress" open={!replyStarted}>
-      <summary>处理进度</summary>
-      <ul>{progress.map((item) => <li key={item}>{item}</li>)}</ul>
-    </details>}
+    {!replyStarted && progress.length > 0 && <div className="run-progress" role="status" aria-live="polite"><i aria-hidden="true" /><span>{progress.at(-1)}</span></div>}
     <ChatMarkdown text={message.content} className={markdownClassName} />
     {message.blocks?.map((block, index) => <AiContentRenderer
       key={`structured-${index}`}
@@ -216,7 +216,11 @@ export function AgentRunMessage({
       model={{
         id: approval.approvalId,
         title: approval.title ?? '确认操作',
-        scopeLabel: approval.proposal ? approval.proposal.scope === 'WEEK' ? '未来 7 天' : '当天' : undefined,
+        scopeLabel: approval.proposal
+          ? approval.proposal.scope === 'WEEK'
+            ? '未来 7 天'
+            : approval.proposal.scope === 'MULTI_DAY' ? '多个训练日' : '当天'
+          : undefined,
         confirmLabel: '确认并保存',
         cancelLabel: '暂不保存',
         status: approval.status,

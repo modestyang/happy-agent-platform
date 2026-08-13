@@ -11,14 +11,17 @@ import happy.jayden.yang.agentbuilder.core.component.ResultMode;
 import happy.jayden.yang.agentbuilder.core.component.ToolBinding;
 import happy.jayden.yang.agentbuilder.core.defaults.RetryPolicy;
 import happy.jayden.yang.agentbuilder.core.tool.AgentTool;
+import happy.jayden.yang.agentbuilder.core.tool.AgentToolHandler;
 import happy.jayden.yang.agentbuilder.core.tool.AgentToolParam;
 import happy.jayden.yang.agentbuilder.core.tool.ToolExecutionContext;
+import happy.jayden.yang.agentbuilder.core.tool.ToolRegistration;
 import happy.jayden.yang.agentbuilder.core.tool.ToolRiskLevel;
 import happy.jayden.yang.agentbuilder.core.tool.ToolSideEffect;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class DefaultToolRegistryTest {
@@ -223,6 +226,39 @@ class DefaultToolRegistryTest {
                     Map.of("query", "legs", "userId", "attacker"),
                     new ToolExecutionContext(
                         "user-7", "run-1", Set.of("workout:read"), "operation-1")));
+  }
+
+  @Test
+  void resolvedHandlerForwardsSideEffectFreeValidationWithoutInvokingTheTool() throws Exception {
+    var scanned = scanner().scanRegistration(new QueryTools());
+    var validations = new AtomicInteger();
+    var invocations = new AtomicInteger();
+    var registration =
+        new ToolRegistration(
+            scanned.descriptor(),
+            new AgentToolHandler() {
+              @Override
+              public void validate(Map<String, Object> arguments) {
+                validations.incrementAndGet();
+              }
+
+              @Override
+              public Object invoke(Map<String, Object> arguments, ToolExecutionContext context) {
+                invocations.incrementAndGet();
+                return "invoked";
+              }
+            });
+    var handler =
+        new DefaultToolRegistry(List.of(registration))
+            .resolve(List.of(new ToolBinding(key("fitness.query"), version(1), true)))
+            .tools()
+            .get(0)
+            .handler();
+
+    handler.validate(Map.of("query", "legs"));
+
+    assertEquals(1, validations.get());
+    assertEquals(0, invocations.get());
   }
 
   private static SpringToolCatalogScanner scanner() {

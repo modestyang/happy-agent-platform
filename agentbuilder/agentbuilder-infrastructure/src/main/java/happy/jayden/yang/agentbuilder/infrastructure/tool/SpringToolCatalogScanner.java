@@ -112,7 +112,7 @@ public final class SpringToolCatalogScanner {
               descriptor, new ReflectiveAgentToolHandler(method, descriptor, objectMapper)));
     }
     validateDiscoverySet(registrations);
-    registrations.forEach(registration -> history.validate(registration.descriptor()));
+    history.validateAll(registrations.stream().map(ToolRegistration::descriptor).toList());
     return List.copyOf(registrations);
   }
 

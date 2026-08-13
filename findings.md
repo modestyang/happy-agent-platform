@@ -1,5 +1,42 @@
 # Findings
 
+## 2026-08-14 ACR/ECS 日常发布
+
+- 日常发布入口是 `deploy/production/deploy.sh release`；它强制测试、格式、类型和生产构建，构建三类 `linux/amd64` 镜像并推 ACR，然后上传闭合 release、远端 pull、备份、只切换 App/Nginx，普通发布不应替换 PostgreSQL。
+- ECS 固定目标为 `cn-wulanchabu` 的 `i-0jlfb8o4hqpjekoudg4x` / `39.101.65.254`；安全组只公开 22/80/443，无 5432/8080。
+- 本机 Docker Desktop 对外连接经过 `127.0.0.1:7897`，大层 ACR 上传只有约 1–3 MiB/分钟；同一网络到 ECS 的 SSH 上行约 1.5 MiB/秒，ECS 到同地域 ACR 的完整 PostgreSQL push 约 21 秒。
+- PostgreSQL 镜像总大小约 294 MB，慢点是 ACR 尚不可复用的独有压缩层；App 总镜像更大但 Java 基础层可复用，Web 变更层仅约 8.6 MB。
+- `build-release.sh` 最终 release 是完整闭合产物，`build-metadata.env` 明确 `source_dirty=true`、`target_platform=linux/amd64`；失败发生在上层 `build_release()` 用命令替换接收输出时，真实 Docker stdout 与最终路径共同进入变量，触发多行路径的 fail-closed 校验。修复后 Docker login/push 进度只进入 stderr，stdout 的单值路径契约有行为回归测试保护。
+- `deploy.sh` 已提供 `HAPPY_AGENT_RELEASE_PATH` 作为正式复用入口，并会重新执行目录归属、release id 和闭合 manifest 校验；用它继续发布不绕过上传、pull、备份、激活、健康与公网 smoke 门禁。
+- 新 release 的 App/Nginx 容器已更换，生产 PostgreSQL ID、镜像与 state generation 均保持不变，证明本次是 application-only 发布；最新远端备份与本地 recovery id 均为 `20260813T191545Z`。
+- 域名 DNS 已正确指向 ECS，Nginx 的 SPA fallback 也使 `agent.modest.vip/admin` 正确加载管理端资源；但当前证书只包含 IP SAN，浏览器直开域名仍会因证书不匹配失败，需在备案/证书阶段单独签发包含两个子域名的证书并切换 Nginx 模板。
+
+## 2026-08-14 移动端 AI 对话体验
+
+- 用户截图显示当前输入法上方存在独立收起条，底部业务 Tab 随键盘整体上浮，占用了大量有效对话高度。
+- 当前助手消息使用带头像/卡片的块状表达，处理进度又作为可折叠消息长期留存，和 ChatGPT 参考中的“用户紧凑右气泡 + 助手全宽正文 + 回答前瞬时状态”相比信息密度明显偏低。
+- 明确目标：发送后主动 blur；点击非 composer 区域 blur；移除自定义收起条；键盘打开时隐藏而非上移底部 Tab；移除助手回复开头灰线；首个可见回答出现后移除进度状态。
+- 当前对话主实现集中在 `frontend/src/App.tsx` 的 `AiPage`、`frontend/src/components/AgentRunMessage.tsx` 与 `frontend/src/app.css`，不需要新增页面或后端协议，仍属于 bounded 改造。
+- 发送逻辑只清空 value，没有保存 input ref 或调用 `blur()`；`.ai-scroll` 也没有空白区域点击收起行为。
+- `.bottom-nav` 使用 `.phone` 内 `position:absolute; bottom:12px`，浏览器在软键盘触发可视视口变化时会随容器底边上移；现有代码没有键盘可见状态。
+- 助手每条消息由固定 Bot 图标和 `.message-body` 包裹；`.run-progress` 的 `border-top` 就是截图中回复开头灰线，并且进度使用 `<details>` 永久留在消息树中。
+- 现有 `AgentRunMessage` 已能从 THINKING/TOOL_CALL 等 Run 事件映射公开进度文案，也已计算 `replyStarted`；可直接把它收紧为“仅 `!replyStarted` 时渲染一个当前阶段状态”，首段正文/结构化内容/审批出现后完全卸载。
+- `.ai-page` 已是 `header / scroll / composer` 三行 Grid，适合保留现有整体架构，只调整消息表现和聚焦状态；无需模仿 ChatGPT 的黑色主题或改掉项目暖色品牌。
+- 当前助手消息限制为 `max-width:87%`、黄色气泡并固定显示 Bot 图标；推荐改成全宽无底色正文，只有用户消息保留右侧深色紧凑气泡，结构化确认卡继续保留卡片边界。
+- 手机断点下 `.phone` 直接使用 `100dvh`；应由 composer focus 与 `visualViewport` 高度差共同判断软键盘，键盘可见时给根容器状态类并隐藏底部 Tab，避免仅依赖 focus 导致蓝牙键盘误隐藏。
+- 最近提交 `05b7532` 已集中整理 Agent 训练流程；当前产品工作树仍未修改，只有本轮计划/调查文档和已确认的后端设计/计划文件。
+
+## 2026-08-14 Tool/SAA 实施补充
+
+- `AgentToolHandler` 当前是单抽象 `invoke`；添加 default `validate` 可保持现有 lambda 兼容。`DefaultToolRegistry.secured` 当前返回 lambda，因此必须改为匿名 handler 才能转发 preflight，同时继续只在 invoke 做 scope guard。
+- `ReflectiveAgentToolHandler` 目前把参数映射、scope 检查和 Method.invoke 混在 `invoke`；安全 preflight 应复用纯参数构造但不能做 scope/业务调用，符合批准前无副作用边界。
+- `ToolSchemaGenerator.applyConstraints` 已有字符串/数字约束的类型和上下界校验模式，可按同一模式加入数组 `minItems/maxItems`，不用新建 schema 子系统。
+- 核心 `ToolSchemaValidator` 和 `ToolSchemaCodec` 本来已经支持 `minItems/maxItems` 的静态校验与运行时输入校验；Task 1 只需把注解元数据正确投影进去，没有重复实现列表验证。
+- 计划保存错误的生产根因在 `FitnessApplicationService.saveTrainingPlan`：scope 决定固定 1/7 天且循环强制相邻日期；Tool DTO 又把 scope 暴露给模型。真实业务存储本身按日期逐项保存，不要求连续。
+- `focusAreas` 的四部位失败来自 `FitnessAgentQueryService.focusAreas` 唯一一行 `size > 3`，其余已有空值、重复、未知值和“全身”互斥校验均合理；候选查询的第一页/第二页返回上限已经独立限制数据量。
+- `fitness.plan.save@1` 的模型示例本身是 `DAY + days:[]`，会被业务层必然拒绝；v2 示例必须提供至少一个真实结构的 day，同时省略仅由服务端注入的 approvalId 和已取消的 scope。
+- `JdbcFitnessStore.saveTrainingPlan` 已逐条按 `scheduledFor` 删除未完成计划并生成幂等 ID，不读取 scope，也没有连续日期假设；服务层移除 scope/连续性不会改变持久化机制。
+
 - 正式仓库工作区初始状态干净，HEAD 为 `eec807d fix: finalize local experience flow`。
 - 正式前端为 React 19 + React Router + Lucide + Vitest，主要页面集中在 `frontend/src/App.tsx` 与 `frontend/src/app.css`。
 - 正式版本已有真实登录、首页记录抽屉、训练完成、AI 请求、动作详情、目标报告等 API 连接。
@@ -326,67 +363,36 @@
 - 当前持久化本地数据库的 v16/草稿仍绑定旧键；仅改 V1 baseline 只能保证新库正确。页面验收前必须确认项目对既有开发库的预期迁移方式，避免源码删除后当前发布 Agent 无法解析 Tool。
 - 删除后的已知代价：旧 v1–v16 快照仍可查看，但若未来加入“直接按旧版本重新执行/回滚”的能力，引用已删除 Tool 的旧版本将不可运行。当前实现只运行最新发布版本，审批恢复又只调用冻结的 `fitness.plan.save`，因此现状不受影响。
 
-## 2026-08-12 阿里云 ECS 一键部署方案
+## 2026-08-14 训练计划 Tool 校验与 Agent 错误循环
 
-- 仓库已经存在 `deploy/ALIYUN_DEPLOY.md`、`deploy/aliyun-deploy.sh`、`deploy/docker-compose.yml`、自定义 PostgreSQL 镜像，以及数据库导出/恢复、密钥生成和持久化验证脚本；新方案应先审计和补强这些资产，避免平行重写。
-- 本地已有 `deploy/.local/data/postgres` 持久数据、应用环境文件和密钥文件，均属于本地私有状态；迁移必须走逻辑导出/恢复流程，不能直接复制正在运行的 PostgreSQL 数据目录。
-- 数据库采用一个 PostgreSQL 实例、`fitness` 与 `agent` 两个独立 schema/DataSource/Flyway；Agent 仍处于预生产单一 V1 baseline 阶段，已有数据迁移需特别处理 Flyway 校验和与当前发布 Agent/Skill 状态，不能只初始化空库。
-- 当前工作区在本轮开始时干净；已存在部署文件来自历史提交，而非本轮未提交实现。
-- 现有 `aliyun-deploy.sh` 采用“宿主机 PostgreSQL + systemd Java + nginx 静态前端”，而 `docker-compose.yml` 只管理本地 PostgreSQL；用户要求的 Docker 环境初始化和生产数据迁移目前没有贯通到同一部署入口。
-- Ubuntu 分支先安装 `postgresql-client`，随后用 `command -v psql` 判断是否安装 PostgreSQL 16 服务端；由于客户端已经提供 `psql`，服务端安装分支会被跳过，新机可能没有 PostgreSQL 服务。
-- 脚本构建前端却没有安装 Node.js/npm，也没有校验 Maven Wrapper、npm、Java、PostgreSQL、nginx 的最终版本和可用性。
-- `deploy/secrets/` 目录虽然在生成密码前 `chown` 给应用用户，但密码与 master key 由 root 以 `0600` 创建且未再次 `chown`；`User=happy` 的 systemd 服务很可能无法读取 master key，密钥权限链路需要统一。
-- 现有导出/恢复脚本固定通过 `docker compose ... postgres` 操作数据库，无法迁移到宿主机 PostgreSQL 方案；恢复使用 `--clean`，属于会删除目标对象的高风险动作，也缺少恢复前备份、空库/覆盖模式区分、版本/校验和预检和失败回滚。
-- 现有脚本直接覆盖 systemd 与 nginx 配置、在源码目录原地构建并启动新 jar，没有 release 目录、原子软链切换、旧版本保留或启动失败自动回滚；重复运行不等于应用发布幂等。
-- 现有 smoke test 对 curl 结果使用 `|| true`，最终不会因业务端点异常失败；文档宣称“报错立刻失败”和“烟雾测试确认可达”与实现不一致。
-- `starter/src/main/resources` 当前只有 `application-local.yml`，没有 `application.yml` 或 `application-prod.yml`；现有阿里云脚本却以 `--spring.profiles.active=prod` 启动，生产数据库密码、media adapter、Agent master key 等配置没有被仓库配置完整承接。
-- 项目历史生产设计已明确目标是阿里云 2C4G ECS、单 Spring Boot/单 PostgreSQL、CI 构建不可变制品、ECS 不安装 Maven/Node、预检后切流、健康失败自动回滚，并给出容器资源上限；当前 `deploy/` 只实现了早期的宿主机构建脚本和本地 PostgreSQL Compose，实际与设计存在明显落差。
-- 现有生产设计要求 OSS 优先使用 ECS RAM Role、生产不保存长期 AccessKey；当前本地 media adapter 将文件写入 `deploy/.local/media`，数据库迁移还必须同步处理已有上传媒体，不能只迁移 PostgreSQL dump。
-- 用户确认迁移源为当前开发机 `deploy/.local/`：PostgreSQL 全量数据、本地媒体、Agent master key 和加密 Provider 凭据都需要保留。
-- 当前本地 PostgreSQL 16 容器健康运行，原始数据目录约 84MB；本地媒体共 2 个文件、约 472KB，迁移体量很小，适合停写后生成一次加密迁移包，而无需引入在线复制。
-- 当前 master key 实际位于 `deploy/secrets/agent-master-key`，文件模式为 `0600`、大小 45 字节；目标机必须原字节保留。重新生成 master key 会导致数据库中已有 Provider 密文无法解密，不能把它当普通可轮换初始化项处理。
-- 两个 DataSource 分别使用 `fitness_schema_history` 与 `agent_schema_history`，Agent Flyway 依赖 Fitness Flyway，且两边均 `cleanDisabled=true`；恢复后启动预检必须先验证两张 history 表与当前 JAR migration checksum，再允许应用迁移/启动。
-- 当前代码的生产 media 分支默认选择 OSS，但构造参数仍是显式 endpoint/bucket/accessKey；历史文档所述 ECS RAM Role 尚未在代码中形成明确配置路径。若本轮目标是最小可靠上线，继续使用宿主机持久化本地媒体需要新增明确的生产本地媒体目录配置，不能沿用相对路径 `deploy/.local/media`。
-- 当前 PostgreSQL 为 16.14，数据库逻辑大小约 24MB；`agent` schema 约 19MB/33 表/估算 41,684 行，`fitness` schema 约 1.7MB/20 表/估算 276 行。该规模适合单次停写、`pg_dump --format=custom`、校验后上传和目标空库恢复。
-- 当前 Flyway 状态为 Fitness V1–V16 全部成功、Agent 单一 V1 成功；迁移包需记录源码 commit、两张 history 表及 checksum，并要求导出与目标首次启动使用同一 commit，避免 Agent V1 基线继续变化造成校验不一致。
-- 当前数据库未安装 `vector` 或 `pg_trgm` 扩展，说明现有业务数据恢复并不依赖扩展对象；目标初始化应根据当前 migration/查询的真实依赖决定是否安装，不能以旧部署文档为唯一依据。
-- 阿里云当前官方文档为 Alibaba Cloud Linux 3 提供 Docker CE、containerd、Buildx 和 Compose plugin 的安装路径，适合作为单一受支持的一键初始化基线；Docker 官方也明确支持 Ubuntu 24.04 LTS，但同时维护两个发行版分支会扩大脚本测试矩阵。
-- Docker 官方提醒容器端口映射可能绕过 ufw/firewalld 规则；生产 Compose 必须只把 Nginx 的 80/443 发布到公网，应用端口只进内部网络，PostgreSQL 最多绑定 `127.0.0.1` 或完全不发布，并继续用阿里云安全组做第一层入站控制。
+- 用户现场报告三项相关症状：多天计划触发 `DAY 必须包含 1 天，WEEK 必须包含连续 7 天`；单计划触发 `focusAreas 最多包含 3 个目标部位`；Tool 报错后 Run 直接中断而非把错误反馈给模型修正。
+- 两条错误均已定位到真实生产校验：`FitnessApplicationService` 执行 DAY/WEEK 日期形状约束，`FitnessAgentQueryService` 执行 `focusAreas` 最多 3 项约束；当前没有证据表明应该放宽这两个领域不变量。
+- 既有架构规格明确要求一个 Reply 可以包含多轮 ToolCall/ToolResult，且 ToolResult 有 `ERROR` 状态；因此“错误即终止”更可能是 Adapter/Tool bridge 的异常映射缺口，而不是产品有意限制。
+- 当前工作树在 `main`，只读检查时 `git status --short` 无输出；最近提交为 `05b7532 fix(fitness): streamline agent training flow`。尚未修改产品代码。
+- `fitness.plan.save` 的 Tool 描述只写“已冻结训练计划”，示例却是 `scope=DAY` 且 `days=[]`，没有告诉模型 DAY 必须 1 天、WEEK 必须连续 7 天；这与首个现场错误直接相关。
+- `focusAreas` 报错来自 `fitness.exercise.candidates.query` 的服务校验，不是保存计划本身；需要继续核对该 Tool 参数 Schema 是否表达最大 3 项，以及错误是否被 Runtime bridge 转成 ToolResult。
+- AgentScope bridge 已存在原生 `ToolResultBlock` 调用路径，说明无需另造完整 Agent 循环；关键是确认 handler 抛出的业务异常当前是否从 Reactor 链逃逸，导致 Harness 不能把错误 observation 交回模型。
+- 根因已确认到 AgentScope bridge：`StrictAgentTool.callAsync()` 对任意异常执行 `onErrorMap(ToolFailure)`，随后 `doOnError` 发 `TOOL_FAILED` 并调用 `signals.emitError(error)`；Adapter 收到 sink error 后统一生成 `RUN_FAILED`。因此框架的 ToolResult 回合根本拿不到失败 observation，现有 Harness 循环被桥接层主动截断。
+- SAA bridge 有同型问题：`SpringAiAlibabaToolCallback.call()` 捕获异常后调用 `failure.accept(error)` 并重新抛出，外层 wrapper 再次 `bridge.fail(error)`；当前合同测试也把 handler 异常固定为 `RUN_FAILED`，两个 Framework 的中立语义都需同步修正。
+- `ExerciseCandidateRequest.focusAreas` 的文字说明已经写“最多 3 个”，但 `AgentToolParam` 没有 `minItems/maxItems` 属性，所以生成的 JSON Schema 无法机器表达该上限；服务端直到调用时才拒绝第四项。
+- `SavePlanToolRequest.days` 同样没有列表长度约束；DAY/WEEK 是跨字段条件，当前 Schema 子集不支持 `oneOf/if-then`，至少需要准确描述和有效示例，业务层仍保留最终校验。
+- 当前失败测试明确把 Tool handler 异常预期为 `RUN_FAILED`，说明这不是单点漏 catch，而是既有 Adapter 合同需要有意识地改为“可纠正 Tool 错误→错误 ToolResult→继续；系统/权限/审批错误→终止”。
+- AgentScope 2.0.2 原生直接提供 `ToolResultBlock.error(String)` 和 `ToolResultState.ERROR`；当前 bridge 未使用它而选择终止 sink，修复可复用框架原生循环，不需要自行实现 while-loop。
+- 写 Tool 的参数在审批前只经过通用 JSON Schema 校验；真正的 `saveTrainingPlan` 业务校验发生在用户批准后的 handler 调用。若只修异常回传，DAY/WEEK 错误仍会在 Run 已暂停后才暴露，无法让模型自纠。因此保存参数的无副作用语义校验必须前移到创建确认卡之前。
+- `PublishedAgentPlaygroundRuntime.pendingApproval()` 当前只冻结参数和拼展示 proposal，不执行 DAY/WEEK/连续日期语义校验；确认后才把 `approvalId` 注入冻结参数并直接调用 registry handler。
+- Framework 已有 `maxToolCalls`/单 Tool 次数预算；有界循环基础存在。需要补的是“哪些失败转为错误结果”的分类，而不是增加一个独立无限循环。
+- 现有书面规格和服务语义都把多天计划定义为“连续 7 天 WEEK”（提案明确包含 1 或 7 个日计划），不是任意 2–6 个训练日；用户的“多天”表述是否要求放宽会改变领域契约，必须在实现前确认。
+- 用户已确认新语义：一批计划允许任意训练日期且不要求连续，例如周一、周三、周五；单次最多 31 个训练日。旧 `DAY/WEEK` 数量和连续性校验应移除，日期唯一性、合法范围和每日内容校验继续保留。
+- `focusAreas` 只是候选动作查询过滤条件，不是数据安全或训练安全边界；候选服务已经有最多 32/12 条的分页上限，允许七个已知部位不会形成无界结果。因此“最多 3 个”是可删除的产品限制。建议改为任意不重复的已知部位集合（最多自然为 7），`全身` 仍须单独使用并归一为无部位偏好；错误 ToolResult 继续兜住未知、重复或冲突值。
+- 本地持久库当前没有 SAA Run，无法从现场 Trace恢复原始异常；但当前 Provider endpoint 与工厂代码形成了可重复的确定性故障：Bailian 配置为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Spring AI `OpenAiApi.Builder` 默认 `completionsPath=/v1/chat/completions`。
+- 用本机同版本 Spring `DefaultUriBuilderFactory` 验证，实际 URI 为 `https://dashscope.aliyuncs.com/compatible-mode/v1/v1/chat/completions`；匿名 POST 状态进一步证明正确路径返回 401，而双 `/v1` 错误路径返回 404。SAA 直接挂掉的根因是 endpoint path 组合错误。
+- SAA failure mapper 只按最终 cause 类名是否含 `model/http/openai` 判断模型故障；Spring 的 `WebClientResponseException` 不匹配，因而把可诊断的 Provider HTTP 失败降为 `INTERNAL / Framework execution failed`。需要保留安全的状态/类别信息，不能继续抹掉根因。
+# 2026-08-14 ACR 日常发布到阿里云 ECS
 
-### 目标 ECS 实际配置
-
-- 通过阿里云 CLI 3.4.11 的 OAuth 临时凭据跨地域只读查询，只发现一台 ECS：`cn-wulanchabu-c`，实例 `i-0jlfb8o4hqpjekoudg4x`，状态 Running。
-- 实例规格 `ecs.e-c1m2.large`：2 vCPU、4GB RAM；系统为 Ubuntu 22.04 64 位，镜像 `ubuntu_22_04_x64_20G_alibase_20260723.vhd`。最终主机初始化只需支持 Ubuntu 22.04，不需要维护 Alibaba Cloud Linux 分支。
-- 实例为包年包月，2026-11-11 00:00（Asia/Shanghai）到期；公网按流量计费，公网出带宽上限 100Mbps、入带宽上限 200Mbps。
-- 公网 IP `39.101.65.254`，内网 IP `172.25.211.159`；默认 VPC `172.16.0.0/12`，默认交换机 `172.25.208.0/20`，位于乌兰察布 C 区。
-- 只有一块 60GB `cloud_essd_entry` 系统盘，未加密、随实例释放、无独立数据盘；当前数据库规模可容纳，但系统和数据库故障域未隔离。
-- 实例未绑定 SSH key pair，DeletionProtection=false；部署前应至少启用实例释放保护，并采用密钥登录或严格限制 SSH 来源。
-- 当前安全组入站仅有 TCP 22、TCP 3389、ICMP，三者都对 `0.0.0.0/0` 开放；80/443 未开放。部署前需删除无用的 3389 全网规则、把 SSH 限定到可信 IP，并增加 80/443（若使用公网 Web）。5432 与 8080 不应进入公网安全组。
-- SSH 到 `39.101.65.254:22` 网络可达，但本机是首次连接，严格主机校验拒绝未登记的密钥；服务器公开的 ED25519 指纹为 `SHA256:DEYhj+NrDYlZW+RhpftmB76wuRybwG2sekWGm57I+PA`，需用户确认信任后再加入本机 `known_hosts`。
-- 用户已确认并成功信任上述主机指纹；但服务器对 `root` 和 `ubuntu` 均返回 `Permission denied (publickey)`，本机唯一默认 `id_ed25519` 未在服务器授权。阿里云云助手在线（2.2.4.1097、无活动任务），可在用户额外授权后无重启地追加本机公钥。
-- `~/.ssh/id_ed25519` 权限为正确的 `0600`，显式 `ssh -i ... -o IdentitiesOnly=yes` 诊断显示客户端确实提供公钥指纹 `SHA256:GMJFIHt8NYe7SJD/PCeLmq76B05nL0iotsXf/wwFOms`，服务端明确拒绝；Downloads/Desktop/Documents/.ssh 中未发现其他 `.pem`/`.key`/ECS 命名候选，因此无需调整私钥权限或重复 `-i`。
-- 用户将当前公钥加入服务器后，显式 `root` SSH 登录成功；服务器是基本干净的 Ubuntu 22.04 x86_64，内核 5.15，运行约 2 天，实际可见内存约 3495MB。
-- 根文件系统为 ext4，59GB 中已用 3.7GB、可用 53GB；无 Swap。Docker/Compose 均未安装，`/opt/happy-agent` 不存在，未发现 Nginx/PostgreSQL/MySQL/现有应用服务，监听端口仅 22、53、36229，80/443/5432/8080 均空闲。
-- 系统时区为 Asia/Shanghai，NTP 已同步；UFW inactive，unattended-upgrades 已启用，阿里云助手运行中，APT/dpkg 锁空闲。主机初始化应创建小型 Swap 或严格控制容器内存，避免 3.5GB 可用内存下突发 OOM。
-- 用户当前没有域名并要求先按无域名方式部署。Let’s Encrypt 自 2026-01-15 起正式支持 IPv4/IPv6 地址证书；Certbot 5.4+ 支持通过 `--preferred-profile shortlived --webroot --ip-address` 申请。IP 证书有效约 160 小时，必须高频自动续期和续期失败可见化；临时入口可安全使用 `https://39.101.65.254`，以后再切域名。
-- 用户提供 Let’s Encrypt 联系邮箱 `modest_yang@126.com`。
-- 手机端 `FITNESS_SESSION` 与管理端 `AGENT_ADMIN_SESSION` 当前都在代码中写死 `.secure(false)`，生产 HTTPS 上线前必须改为可配置的 Secure Cookie 策略并覆盖登录/登出回归测试；本地 HTTP profile 继续使用非 Secure Cookie。
-- 当前未引入 Spring Boot Actuator，旧 Nginx `/healthz -> /actuator/health` 配置无效。部署健康门应基于真实应用启动/数据库迁移结果与现有受保护端点 200/401 探测，或实现一个最小内部健康端点后再引用，不能保留虚假健康检查。
-- 无域名实施建议保持三运行容器（Nginx/App/PostgreSQL），证书签发和续期使用定时的临时 Certbot 5.4+ 容器，不在 ECS 安装 Maven/Node/Java 构建链；80 仅 ACME/跳转，443 对公网，8080/5432 仅 Compose 内网。
-- Certbot 官方 5.4.0 release 明确新增 webroot IP address issuance；当前 5.7.0 文档继续支持 webroot。registry 实测正确标签为 `certbot/certbot:v5.7.0`，`certbot/certbot:5.7.0` 返回 not found；生产应固定 `v5.7.0@sha256:34ee91d2f43008eb78a007d22f23ed4b2eaa9a454cb27ca2c042b49527a695b4`。staging 和 production 必须使用不同 config 目录/lineage，避免 staging 证书污染正式 Nginx 路径。
-- 目标实例唯一安全组 ID 为 `sg-0jlb5v2njkb2jbzrvurr`，当前 `DeletionProtection=false`；实施脚本无需按名称猜测安全组。
-- 首次恢复的生产 PostgreSQL init 不能沿用现有会预建 `fitness`/`agent` schema 的本地 init；应只创建角色，空目标 `pg_restore` 创建 schema 后再执行隔离 SQL。
-- `pg_dump` 不存在 `--no-owner=false` 参数；要保留对象 owner 必须直接省略 `--no-owner`，并在目标预先创建同名角色。
-
-# 2026-08-13 Task 6 迁移演练发现
-
-- 实际 Flyway history 表由应用显式配置为 `fitness.fitness_schema_history` 与
-  `agent.agent_schema_history`；导出和恢复不能使用默认名 `flyway_schema_history`。
-- PostgreSQL 官方 entrypoint 初始化期间会短暂进入 healthy 后 shutdown/restart；首次恢复的
-  临时实例必须观察 `PostgreSQL init process complete; ready for start up.` 后再接受最终
-  healthy，避免在瞬态窗口执行空库断言。
-- `agent.agent_runs` 会被运行时后台活动更新，不适合作为重启持久性固定计数；Provider
-  credential 表是稳定哨兵，且能与原 master key 成功/错误 key 失败的认证边界共同验证。
-- 本地演练最终证明 restore generation、媒体、数据库隔离、credential 解密认证与重启持久；
-  不健康 release 最终保持旧 `current`、旧 PostgreSQL/App 健康。演练没有连接 ECS、阿里云、
-  SSH、公共证书或 DNS。
+- README 与 `deploy/ALIYUN_DEPLOY.md` 均规定后续代码更新走 `deploy/production/deploy.sh release`；脚本会完整测试、构建并推送 App/Web/PostgreSQL 三个 `linux/amd64` 镜像，上传闭合 manifest，远端拉取后先备份再激活 App/Web。
+- 目标由脚本固定为 `cn-wulanchabu`、实例 `i-0jlfb8o4hqpjekoudg4x`、安全组 `sg-0jlb5v2njkb2jbzrvurr`、公网 IP `39.101.65.254`、Aliyun profile `ecs-audit`。
+- 本地 ACR username/password、known_hosts 与 SSH identity 均存在且权限为 `0600`；Docker daemon、buildx 与 Compose 可用。
+- 当前 `main` 工作区包含用户要求部署的未提交 AI Tool/SAA、训练计划与聊天 UI 改动。构建脚本不会拒绝 dirty tree，而是将 commit、dirty flag、diff hash 和状态清单 hash 写入 release metadata。
+- 本机默认 PATH 未找到 `sha256sum`，但 `deploy/.local/production/bin/sha256sum` 是既有 gitignored、`0700` 的 macOS 兼容入口，支持构建脚本所需的普通 SHA-256 与 `--check --strict` 调用；已用已知 `test` 摘要验证，无需安装依赖。
+- 生产只读预检：ECS `i-0jlfb8o4hqpjekoudg4x` 状态 Running；安全组只公开 TCP 22/80/443，没有公开 5432/8080；当前 release `20260813T143649Z-1e3b3bb`，App/Nginx/PostgreSQL 均 healthy。
+- 当前 state generation 为 `restore-20260813T150954Z`；最近完整备份 `20260813T155239Z`（7 文件、约 2.1MB）；根盘余 47GB，Swap 0 使用。当前 TLS 仍是 IP SAN，这不阻塞本次按现有 IP 契约发布。

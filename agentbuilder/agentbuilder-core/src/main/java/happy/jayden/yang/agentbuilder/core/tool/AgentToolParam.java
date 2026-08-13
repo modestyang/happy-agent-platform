@@ -20,6 +20,10 @@ public @interface AgentToolParam {
 
   int maxLength() default -1;
 
+  int minItems() default -1;
+
+  int maxItems() default -1;
+
   long minimum() default Long.MIN_VALUE;
 
   long maximum() default Long.MAX_VALUE;

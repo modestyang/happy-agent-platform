@@ -11,25 +11,26 @@ describe('AgentRunMessage', () => {
     expect(second.events[0]?.data.delta).toBe('## 计划');
   });
 
-  it('expands progress before reply output and collapses it when the reply starts', () => {
+  it('shows only the latest progress stage before output and removes it when the reply starts', () => {
     const progressOnly: AgentRunUiMessage = {
       role: 'assistant',
       content: '',
       progress: ['正在理解你的需求', '正在查看相关记录'],
     };
     const { rerender } = render(<AgentRunMessage message={progressOnly} />);
-    const progress = screen.getByText('处理进度').closest('details') as HTMLDetailsElement;
 
-    expect(progress).toHaveAttribute('open');
+    expect(screen.getByRole('status')).toHaveTextContent('正在查看相关记录');
+    expect(screen.queryByText('正在理解你的需求')).not.toBeInTheDocument();
+    expect(screen.queryByText('处理进度')).not.toBeInTheDocument();
 
     rerender(<AgentRunMessage message={{ ...progressOnly, content: '训练建议开始输出' }} />);
 
-    const reply = screen.getByText('训练建议开始输出');
-    expect(progress).not.toHaveAttribute('open');
-    expect(progress.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('训练建议开始输出')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在查看相关记录')).not.toBeInTheDocument();
   });
 
-  it('keeps execution progress collapsed and asks before saving a proposal', () => {
+  it('removes execution progress when a proposal is ready for confirmation', () => {
     const decide = vi.fn();
     const message: AgentRunUiMessage = {
       role: 'assistant',
@@ -43,7 +44,8 @@ describe('AgentRunMessage', () => {
       },
     };
     render(<AgentRunMessage message={message} onDecision={decide} />);
-    expect(screen.getByText('处理进度').closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText('正在整理建议')).not.toBeInTheDocument();
+    expect(screen.queryByText('处理进度')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确认并保存' }));
     expect(decide).toHaveBeenCalledWith('approval-1', 'APPROVE');
   });
@@ -83,6 +85,29 @@ describe('AgentRunMessage', () => {
 
     expect(screen.getAllByText(/动作 1/)).toHaveLength(2);
     expect(screen.queryByText(new RegExp(exerciseId))).not.toBeInTheDocument();
+  });
+
+  it('renders arbitrary multi-day proposals while keeping legacy week labels', () => {
+    const multiDay = applyAgentRunEvent(
+      { role: 'assistant', content: '' },
+      {
+        type: 'APPROVAL',
+        data: {
+          approvalId: 'approval-multi',
+          status: 'REQUESTED',
+          title: '保存训练计划',
+          proposal: {
+            scope: 'MULTI_DAY',
+            days: [{ scheduledFor: '2026-08-15', title: '周三训练', estimatedMinutes: 25, exercises: [] }],
+          },
+        },
+      },
+    );
+
+    render(<AgentRunMessage message={multiDay} onDecision={vi.fn()} />);
+
+    expect(screen.getByText('多个训练日')).toBeInTheDocument();
+    expect(screen.getByText(/2026-08-15 · 周三训练/)).toBeInTheDocument();
   });
 
   it('hides provider thinking and reduces internal events to fixed business stages', () => {

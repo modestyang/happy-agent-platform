@@ -161,6 +161,7 @@ if [ "${1:-}" = login ]; then
     && [ "${5:-}" = crpi-3r93ak2ft29pxf1q.cn-wulanchabu.personal.cr.aliyuncs.com ] \
     || exit 64
   : >"$FAKE_STATE/local-registry-login"
+  printf 'Login Succeeded\n'
   exit
 fi
 if [ "${1:-}" = push ]; then
@@ -170,6 +171,7 @@ if [ "${1:-}" = push ]; then
     exit 66
   fi
   printf '%s\n' "${2:-}" >>"$FAKE_STATE/pushed-images"
+  printf 'pushed: %s\n' "${2:-}"
   exit
 fi
 if [ "${1:-}" = compose ] && [ "${2:-}" != version ] \
@@ -452,15 +454,18 @@ reset_aliyun_state() {
 }
 
 run_build_tests() {
-  local release failed_release failed_push_release first_build line
+  local release build_output failed_release failed_push_release first_build line
   : >"$BOUNDARY_LOG"
   /bin/rm -f -- "$FAKE_STATE/local-registry-login" "$FAKE_STATE/pushed-images"
+  build_output="$TMP/build-release.output"
   (
     cd "$FIXTURE_REPO"
     HAPPY_AGENT_BUILD_TIMESTAMP=20260813T120000Z \
       deploy/production/scripts/build-release.sh
-  )
+  ) >"$build_output"
   release="$FIXTURE_REPO/deploy/.local/production/releases/20260813T120000Z-abc1234"
+  [ "$(cat "$build_output")" = "$release" ] \
+    || fail 'release builder stdout contains Docker chatter'
   [ -d "$release" ] || fail 'release was not atomically published'
   assert_mode "$release" 700
   verify_closed_manifest "$release"

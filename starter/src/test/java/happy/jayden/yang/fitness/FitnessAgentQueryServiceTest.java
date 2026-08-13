@@ -280,12 +280,16 @@ class FitnessAgentQueryServiceTest {
 
   @Test
   void exerciseCandidatesValidateFocusAreasAndBoundedPages() {
+    when(store.findExerciseCandidates(any()))
+        .thenReturn(new ExerciseCandidatePage(List.of(), 0, 0, List.of()));
+    queries.exerciseCandidates(USER_ID, List.of("臀腿", "核心", "胸部", "背部"), null, 1);
+    var accepted = ArgumentCaptor.forClass(ExerciseCandidateFilter.class);
+    verify(store).findExerciseCandidates(accepted.capture());
+    assertEquals(List.of("臀腿", "核心", "胸部", "背部"), accepted.getValue().focusAreas());
+
     assertThrows(
         IllegalArgumentException.class,
         () -> queries.exerciseCandidates(USER_ID, List.of("未知部位"), null, 1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> queries.exerciseCandidates(USER_ID, List.of("臀腿", "核心", "胸部", "背部"), null, 1));
     assertThrows(
         IllegalArgumentException.class,
         () -> queries.exerciseCandidates(USER_ID, List.of("臀腿", "臀腿"), null, 1));

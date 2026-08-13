@@ -300,6 +300,7 @@ class PublishedAgentPlaygroundRuntimeTest {
             .findFirst()
             .orElseThrow();
     var proposal = assertInstanceOf(Map.class, approvalEvent.data().get("proposal"));
+    assertEquals("DAY", proposal.get("scope"));
     var days = assertInstanceOf(List.class, proposal.get("days"));
     var day = assertInstanceOf(Map.class, days.get(0));
     var exercises = assertInstanceOf(List.class, day.get("exercises"));
@@ -317,10 +318,61 @@ class PublishedAgentPlaygroundRuntimeTest {
             started.runId());
     var stored = traces.findApproval(started.runId(), approvalId).orElseThrow();
     var frozenRequest = assertInstanceOf(Map.class, stored.arguments().get("request"));
+    assertFalse(frozenRequest.containsKey("scope"));
     var frozenDays = assertInstanceOf(List.class, frozenRequest.get("days"));
     var frozenDay = assertInstanceOf(Map.class, frozenDays.get(0));
     assertFalse(frozenDay.containsKey("exercises"));
     assertEquals(List.of(knownId.toString(), unknownId.toString()), frozenDay.get("exerciseIds"));
+  }
+
+  @Test
+  void derivesAndFreezesSortedArbitraryTrainingDatesBeforeApproval() throws Exception {
+    configureMiniMaxCredential();
+    UUID knownId = UUID.fromString("60000000-0000-0000-0000-000000000001");
+    UUID unknownId = UUID.fromString("60000000-0000-0000-0000-000000000002");
+    var approved = new AtomicReference<ConfirmedPlanRequest>();
+    var tool = new ConfirmedPlanTool(approved);
+    var runtime =
+        workoutPlanRuntime(
+            "plan.multi-day",
+            List.of("fitness.plan.save"),
+            knownId,
+            unknownId,
+            List.of(4, 0, 2),
+            List.of(tool));
+    UUID owner = UUID.randomUUID();
+
+    var started = runtime.startStreaming("plan.multi-day", owner, "保存周一三五训练计划", Runnable::run);
+
+    var approvalEvent =
+        traces.streamEventsAfter(started.runId(), 0).stream()
+            .filter(event -> event.type().equals("APPROVAL"))
+            .findFirst()
+            .orElseThrow();
+    var proposal = assertInstanceOf(Map.class, approvalEvent.data().get("proposal"));
+    assertEquals("MULTI_DAY", proposal.get("scope"));
+    var proposalDays = assertInstanceOf(List.class, proposal.get("days"));
+    assertEquals(
+        List.of("2026-08-13", "2026-08-15", "2026-08-17"),
+        proposalDays.stream()
+            .map(day -> assertInstanceOf(Map.class, day).get("scheduledFor"))
+            .toList());
+    UUID approvalId =
+        jdbc.queryForObject(
+            "SELECT approval_id FROM agent_run_approvals WHERE run_id=?",
+            UUID.class,
+            started.runId());
+    var stored = traces.findApproval(started.runId(), approvalId).orElseThrow();
+    var frozenRequest = assertInstanceOf(Map.class, stored.arguments().get("request"));
+    assertFalse(frozenRequest.containsKey("scope"));
+    assertFalse(frozenRequest.containsKey("approvalId"));
+
+    runtime.decide(started.runId(), owner, approvalId, "APPROVE", "multi-day-approval");
+
+    assertEquals(approvalId, approved.get().approvalId());
+    assertEquals(
+        List.of("2026-08-13", "2026-08-15", "2026-08-17"),
+        approved.get().days().stream().map(ConfirmedPlanDay::scheduledFor).toList());
   }
 
   @Test
@@ -358,6 +410,16 @@ class PublishedAgentPlaygroundRuntimeTest {
       UUID knownId,
       UUID unknownId,
       List<Object> toolBeans) {
+    return workoutPlanRuntime(agentKey, toolKeys, knownId, unknownId, List.of(0), toolBeans);
+  }
+
+  private PublishedAgentPlaygroundRuntime workoutPlanRuntime(
+      String agentKey,
+      List<String> toolKeys,
+      UUID knownId,
+      UUID unknownId,
+      List<Integer> dayOffsets,
+      List<Object> toolBeans) {
     var draft = workbench.createDraft(new CreateAgentRequest(agentKey, "计划确认展示", "使用可信动作名称展示保存确认"));
     workbench.publish(
         workbench.updateDraft(
@@ -382,7 +444,8 @@ class PublishedAgentPlaygroundRuntimeTest {
         new ObjectMapper().findAndRegisterModules(),
         masterKey,
         traces,
-        new AgentFrameworkRegistry(List.of(new WorkoutPlanConfirmationAdapter(knownId, unknownId))),
+        new AgentFrameworkRegistry(
+            List.of(new WorkoutPlanConfirmationAdapter(knownId, unknownId, dayOffsets))),
         new DefaultToolRegistry(toolBeans.stream().map(scanner::scanRegistration).toList()),
         (hookKey, context) -> {});
   }
@@ -664,10 +727,12 @@ class PublishedAgentPlaygroundRuntimeTest {
   private static final class WorkoutPlanConfirmationAdapter implements AgentFrameworkAdapter {
     private final UUID knownId;
     private final UUID unknownId;
+    private final List<Integer> dayOffsets;
 
-    private WorkoutPlanConfirmationAdapter(UUID knownId, UUID unknownId) {
+    private WorkoutPlanConfirmationAdapter(UUID knownId, UUID unknownId, List<Integer> dayOffsets) {
       this.knownId = knownId;
       this.unknownId = unknownId;
+      this.dayOffsets = List.copyOf(dayOffsets);
     }
 
     @Override
@@ -711,18 +776,23 @@ class PublishedAgentPlaygroundRuntimeTest {
                       "request",
                       Map.of(
                           "scope",
-                          "DAY",
+                          dayOffsets.size() == 1 ? "DAY" : "WEEK",
                           "days",
-                          List.of(
-                              Map.of(
-                                  "scheduledFor",
-                                  "2026-08-13",
-                                  "title",
-                                  "全身循环训练",
-                                  "estimatedMinutes",
-                                  20,
-                                  "exerciseIds",
-                                  List.of(knownId.toString(), unknownId.toString()))))))),
+                          dayOffsets.stream()
+                              .map(
+                                  offset ->
+                                      Map.of(
+                                          "scheduledFor",
+                                          java.time.LocalDate.of(2026, 8, 13)
+                                              .plusDays(offset)
+                                              .toString(),
+                                          "title",
+                                          "全身循环训练",
+                                          "estimatedMinutes",
+                                          20,
+                                          "exerciseIds",
+                                          List.of(knownId.toString(), unknownId.toString())))
+                              .toList())))),
           new RunEvent(
               4, RunEvent.Type.RUN_WAITING_APPROVAL, now, Map.of("toolName", "fitness_plan_save")),
           RunEvent.replySuspended(5, now, "reply-plan", "USER_CONFIRMATION"));
@@ -796,6 +866,16 @@ class PublishedAgentPlaygroundRuntimeTest {
   }
 
   static final class ConfirmedPlanTool {
+    private final AtomicReference<ConfirmedPlanRequest> approved;
+
+    ConfirmedPlanTool() {
+      this(new AtomicReference<>());
+    }
+
+    ConfirmedPlanTool(AtomicReference<ConfirmedPlanRequest> approved) {
+      this.approved = approved;
+    }
+
     @AgentTool(
         key = "fitness.plan.save",
         version = 1,
@@ -813,6 +893,7 @@ class PublishedAgentPlaygroundRuntimeTest {
     String save(
         @AgentToolParam(name = "request", description = "冻结的训练计划") ConfirmedPlanRequest request,
         ToolExecutionContext context) {
+      approved.set(request);
       return "saved";
     }
   }
@@ -836,7 +917,7 @@ class PublishedAgentPlaygroundRuntimeTest {
   }
 
   record ConfirmedPlanRequest(
-      @AgentToolParam(description = "计划范围") String scope,
+      @AgentToolParam(description = "确认记录", required = false) UUID approvalId,
       @AgentToolParam(description = "逐日训练计划") List<ConfirmedPlanDay> days) {}
 
   record ConfirmedPlanDay(

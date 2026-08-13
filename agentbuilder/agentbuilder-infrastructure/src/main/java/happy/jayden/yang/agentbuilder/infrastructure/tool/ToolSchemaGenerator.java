@@ -349,6 +349,26 @@ final class ToolSchemaGenerator {
     if (metadata.minLength() < -1 || metadata.maxLength() < -1) {
       throw new IllegalArgumentException("length constraints cannot be below -1 at " + location);
     }
+    if (metadata.minItems() < -1 || metadata.maxItems() < -1) {
+      throw new IllegalArgumentException("array constraints cannot be below -1 at " + location);
+    }
+    if (metadata.minItems() >= 0 || metadata.maxItems() >= 0) {
+      if (!"array".equals(type)) {
+        throw new IllegalArgumentException(
+            "array constraints require an array field at " + location);
+      }
+      if (metadata.minItems() >= 0) {
+        schema.put("minItems", metadata.minItems());
+      }
+      if (metadata.maxItems() >= 0) {
+        schema.put("maxItems", metadata.maxItems());
+      }
+      if (metadata.minItems() >= 0
+          && metadata.maxItems() >= 0
+          && metadata.minItems() > metadata.maxItems()) {
+        throw new IllegalArgumentException("minItems cannot exceed maxItems at " + location);
+      }
+    }
     if (metadata.minLength() >= 0 || metadata.maxLength() >= 0 || !metadata.pattern().isBlank()) {
       if (!"string".equals(type)) {
         throw new IllegalArgumentException(

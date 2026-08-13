@@ -629,7 +629,9 @@ public final class FitnessAgentQueryService {
 
   private static List<String> focusAreas(List<String> values) {
     if (values == null) return List.of();
-    if (values.size() > 3) throw new IllegalArgumentException("focusAreas 最多包含 3 个目标部位");
+    if (values.size() > TARGET_AREAS.size()) {
+      throw new IllegalArgumentException("focusAreas 最多包含 7 个目标部位");
+    }
     var normalized = new ArrayList<String>();
     for (String value : values) {
       if (value == null || value.isBlank()) {

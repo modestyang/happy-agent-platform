@@ -2,6 +2,7 @@ package happy.jayden.yang.fitness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +27,7 @@ import happy.jayden.yang.fitness.service.FitnessAgentDtos.UserTextFact;
 import happy.jayden.yang.fitness.service.FitnessAgentQueryService;
 import happy.jayden.yang.fitness.service.FitnessApplicationService;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -94,6 +96,42 @@ class FitnessToolsTest {
     assertFalse(candidateDescriptor.outputSchema().document().toString().contains("steps"));
     assertFalse(candidateDescriptor.outputSchema().document().toString().contains("commonErrors"));
     assertFalse(candidateDescriptor.outputSchema().document().toString().contains("imageUrls"));
+
+    var candidateRequest = property(candidateDescriptor.inputSchema().document(), "request");
+    assertEquals(7, property(candidateRequest, "focusAreas").get("maxItems"));
+    var saveDescriptor = byKey.get("fitness.plan.save").descriptor();
+    assertEquals(2, saveDescriptor.contractVersion());
+    var saveRequest = property(saveDescriptor.inputSchema().document(), "request");
+    assertFalse(propertyNames(saveRequest).contains("scope"));
+    assertEquals(1, property(saveRequest, "days").get("minItems"));
+    assertEquals(31, property(saveRequest, "days").get("maxItems"));
+  }
+
+  @Test
+  void planRequestSortsArbitraryDatesAndRejectsInvalidCollectionsBeforeApproval() {
+    var exerciseId = UUID.randomUUID();
+    var first =
+        new FitnessTools.ToolPlanDay(
+            java.time.LocalDate.of(2026, 8, 15), "核心训练", 20, List.of(exerciseId));
+    var third =
+        new FitnessTools.ToolPlanDay(
+            java.time.LocalDate.of(2026, 8, 17), "下肢训练", 30, List.of(exerciseId));
+
+    var request = new FitnessTools.SavePlanToolRequest(null, List.of(third, first));
+
+    assertEquals(List.of(first, third), request.days());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FitnessTools.SavePlanToolRequest(null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FitnessTools.SavePlanToolRequest(null, java.util.Collections.nCopies(32, first)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FitnessTools.SavePlanToolRequest(null, List.of(first, first)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FitnessTools.ToolPlanDay(first.scheduledFor(), " ", 20, List.of(exerciseId)));
   }
 
   @Test
@@ -199,5 +237,15 @@ class FitnessToolsTest {
 
     assertEquals("USER_FEEDBACK", result.noteReferences().get(0).origin());
     assertFalse(result.noteReferences().get(0).executable());
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> property(Map<String, Object> schema, String name) {
+    return ((Map<String, Map<String, Object>>) schema.get("properties")).get(name);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Set<String> propertyNames(Map<String, Object> schema) {
+    return ((Map<String, Map<String, Object>>) schema.get("properties")).keySet();
   }
 }

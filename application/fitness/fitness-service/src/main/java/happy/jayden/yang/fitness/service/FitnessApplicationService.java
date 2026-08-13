@@ -1001,21 +1001,26 @@ public final class FitnessApplicationService {
     if (userId == null
         || request == null
         || request.approvalId() == null
-        || request.days() == null
-        || !("DAY".equals(request.scope()) || "WEEK".equals(request.scope()))) {
+        || request.days() == null) {
       throw new InvalidRequestException("训练计划保存参数不完整");
     }
-    int expectedDays = "DAY".equals(request.scope()) ? 1 : 7;
-    if (request.days().size() != expectedDays) {
-      throw new InvalidRequestException("DAY 必须包含 1 天，WEEK 必须包含连续 7 天");
+    if (request.days().isEmpty() || request.days().size() > 31) {
+      throw new InvalidRequestException("训练计划必须包含 1 到 31 个训练日");
     }
+    var days =
+        request.days().stream()
+            .sorted(
+                Comparator.comparing(
+                    FitnessDtos.TrainingPlanDayInput::scheduledFor,
+                    Comparator.nullsLast(Comparator.naturalOrder())))
+            .toList();
     LocalDate today = LocalDate.now(USER_ZONE);
     var availableExercises =
         store.loadForAi(userId).exercises().stream()
             .map(FitnessDtos.ExerciseDto::id)
             .collect(java.util.stream.Collectors.toSet());
-    LocalDate previous = null;
-    for (var day : request.days()) {
+    var scheduledDates = new java.util.HashSet<LocalDate>();
+    for (var day : days) {
       if (day == null
           || day.scheduledFor() == null
           || day.scheduledFor().isBefore(today)
@@ -1028,16 +1033,16 @@ public final class FitnessApplicationService {
           || day.exerciseIds().isEmpty()
           || day.exerciseIds().size() > 12
           || day.exerciseIds().stream().distinct().count() != day.exerciseIds().size()
-          || !availableExercises.containsAll(day.exerciseIds())) {
+          || !availableExercises.containsAll(day.exerciseIds())
+          || !scheduledDates.add(day.scheduledFor())) {
         throw new InvalidRequestException("训练计划日期、时长或动作不合法");
       }
-      if (previous != null && !day.scheduledFor().equals(previous.plusDays(1))) {
-        throw new InvalidRequestException("周计划日期必须连续且按升序排列");
-      }
-      previous = day.scheduledFor();
     }
+    var normalizedRequest = new FitnessDtos.SaveTrainingPlanRequest(request.approvalId(), days);
     return transactionRunner.inTransaction(
-        () -> new FitnessDtos.SavedTrainingPlanResult(store.saveTrainingPlan(userId, request)));
+        () ->
+            new FitnessDtos.SavedTrainingPlanResult(
+                store.saveTrainingPlan(userId, normalizedRequest)));
   }
 
   public GoalDto createGoal(String sessionToken, CreateGoalRequest request) {

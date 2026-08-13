@@ -135,7 +135,7 @@ class FitnessExperienceIntegrationTest {
   @Autowired private CurrentGoalReportGenerationWorker currentGoalReportWorker;
 
   @Test
-  void confirmedPlanToolSavesDayAndWeekIdempotentlyWithoutOverwritingCompletedHistory()
+  void confirmedPlanToolSavesArbitraryTrainingDatesIdempotentlyWithoutOverwritingCompletedHistory()
       throws Exception {
     Cookie owner = login();
     UUID userId = UUID.fromString(bootstrap(owner).path("user").path("id").asText());
@@ -150,7 +150,7 @@ class FitnessExperienceIntegrationTest {
         "DELETE FROM workout_plans WHERE user_id=? AND scheduled_for BETWEEN ? AND ?",
         userId,
         start,
-        start.plusDays(6));
+        start.plusDays(4));
     UUID completedPlanId = UUID.randomUUID();
     jdbc.update(
         "INSERT INTO workout_plans(workout_plan_id,user_id,title,estimated_minutes,status,scheduled_for,completion_ratio,completed_at)"
@@ -158,16 +158,16 @@ class FitnessExperienceIntegrationTest {
         completedPlanId,
         userId,
         "已完成历史",
-        start.plusDays(2));
+        start.plusDays(1));
     var days =
-        java.util.stream.IntStream.range(0, 7)
+        java.util.stream.IntStream.of(0, 2, 4)
             .mapToObj(
                 offset ->
                     new ToolPlanDay(
                         start.plusDays(offset), "第" + (offset + 1) + "天训练", 28, exercises))
             .toList();
     UUID approvalId = UUID.randomUUID();
-    var request = new SavePlanToolRequest(approvalId, "WEEK", days);
+    var request = new SavePlanToolRequest(approvalId, days);
     var context =
         new ToolExecutionContext(
             userId.toString(),
@@ -178,7 +178,7 @@ class FitnessExperienceIntegrationTest {
     var saved = fitnessTools.savePlan(request, context);
     var replayed = fitnessTools.savePlan(request, context);
 
-    assertThat(saved.planIds()).hasSize(7);
+    assertThat(saved.planIds()).hasSize(3);
     assertThat(replayed.planIds()).containsExactlyElementsOf(saved.planIds());
     assertThat(
             jdbc.queryForObject(
@@ -186,8 +186,8 @@ class FitnessExperienceIntegrationTest {
                 Integer.class,
                 userId,
                 start,
-                start.plusDays(6)))
-        .isEqualTo(7);
+                start.plusDays(4)))
+        .isEqualTo(3);
     assertThat(
             jdbc.queryForObject(
                 "SELECT count(*) FROM workout_plans WHERE workout_plan_id=? AND status='COMPLETED'",

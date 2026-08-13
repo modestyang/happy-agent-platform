@@ -42,7 +42,7 @@ describe('App', () => {
   });
 
   function mockFetch(overrides: Record<string, unknown> = {}) {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
       if (overrides[path] !== undefined) return new Response(JSON.stringify(overrides[path]), { status: 200 });
       if (path === '/api/app/bootstrap') return new Response(JSON.stringify(dashboard), { status: 200 });
@@ -171,6 +171,60 @@ describe('App', () => {
     expect(window.location.pathname).toBe('/report/current');
     expect(screen.getByRole('region', { name: '当前目标累计报告' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '问花爷' })).not.toBeInTheDocument();
+  });
+
+  it('reuses the persisted report without queuing another generation when the page is revisited', async () => {
+    const fetchMock = mockFetch({ '/api/v1/app/reports/current-goal': queuedGoalReport });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('button', { name: '报告' }));
+    await screen.findByRole('region', { name: '当前目标累计报告' });
+
+    const reportCalls = fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/app/reports/current-goal');
+    expect(reportCalls).toHaveLength(1);
+    expect(reportCalls[0]?.[1]?.method).toBeUndefined();
+  });
+
+  it('queues the first report only after the read endpoint confirms it does not exist', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/app/bootstrap') return new Response(JSON.stringify(dashboard), { status: 200 });
+      if (path === '/api/v1/app/reports/current-goal' && init?.method === 'POST') {
+        return new Response(JSON.stringify(queuedGoalReport), { status: 202 });
+      }
+      if (path === '/api/v1/app/reports/current-goal') {
+        return new Response(JSON.stringify({ detail: '报告尚未入队', code: 'CURRENT_GOAL_NOT_FOUND' }), { status: 404 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('button', { name: '报告' }));
+    await screen.findByRole('region', { name: '当前目标累计报告' });
+
+    const reportCalls = fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/app/reports/current-goal');
+    expect(reportCalls.map(([, init]) => init?.method ?? 'GET')).toEqual(['GET', 'POST']);
+  });
+
+  it('returns from the report without adding another home entry to browser history', async () => {
+    mockFetch({ '/api/v1/app/reports/current-goal': queuedGoalReport });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('124.8');
+    await user.click(screen.getByRole('button', { name: '报告' }));
+    await screen.findByRole('heading', { name: '当前目标报告' });
+    const reportHistoryIndex = window.history.state.idx;
+
+    await user.click(screen.getByRole('button', { name: '返回首页' }));
+
+    expect(window.location.pathname).toBe('/');
+    expect(window.history.state.idx).toBe(reportHistoryIndex);
   });
 
   it('uses the modern sans-serif display stack for the mobile app', async () => {

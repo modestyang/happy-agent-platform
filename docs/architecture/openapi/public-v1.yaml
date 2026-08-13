@@ -5036,6 +5036,10 @@
               "GOAL_PROGRESS",
               "WORKOUT_COUNT",
               "WORKOUT_MINUTES",
+              "CURRENT_MONTH_WORKOUT_COUNT",
+              "CURRENT_MONTH_WORKOUT_MINUTES",
+              "BODY_RECORD_COUNT",
+              "MEAL_RECORD_COUNT",
               "CALORIES",
               "WEIGHT"
             ]

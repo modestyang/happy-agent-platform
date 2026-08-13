@@ -320,11 +320,19 @@ function CurrentGoalReportPage({ onOpenRecord }: { onOpenRecord: (tab: RecordTab
   useEffect(() => {
     if (requested.current) return;
     requested.current = true;
-    void refresh('USER_REFRESH');
-  }, [refresh]);
+    void readCurrentGoalReport()
+      .then(acceptPolledReport)
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 404) {
+          void refresh('USER_REFRESH');
+          return;
+        }
+        reportPollingError(err);
+      });
+  }, [acceptPolledReport, readCurrentGoalReport, refresh, reportPollingError]);
 
   return <section className="page report-page">
-    <header className="report-page-head"><button className="back-button" aria-label="返回首页" onClick={() => navigate('/')}><ChevronLeft /></button><div><small>AI 累计分析</small><h1>当前目标报告</h1></div><Mascot small /></header>
+    <header className="report-page-head"><button className="back-button" aria-label="返回首页" onClick={() => navigate('/', { replace: true })}><ChevronLeft /></button><div><small>AI 累计分析</small><h1>当前目标报告</h1></div><Mascot small /></header>
     {report ? <CurrentGoalReportCard report={report} onRetry={() => void refresh(report.state === 'FAILED' ? 'RETRY_FAILED' : 'USER_REFRESH')} onGeneratePlan={() => navigate(`/ai?prompt=${encodeURIComponent('根据当前目标报告，帮我生成下周训练计划')}`)} onOpenRecord={() => onOpenRecord('body')} /> : <section className="report-page-loading"><div className="spinner" /><p>正在读取目标报告…</p></section>}
     {error && <p className="error">{error}</p>}
   </section>;

@@ -909,6 +909,17 @@ public final class FitnessApplicationService {
         weights.size() < 2 ? null : weights.get(weights.size() - 2).weightJin();
     BigDecimal progress = goalProgress(goal, currentWeight);
     int workoutCount = source.workouts().size();
+    LocalDate monthStart = end.withDayOfMonth(1);
+    List<FitnessDtos.CurrentGoalWorkoutRecord> currentMonthWorkouts =
+        source.workouts().stream()
+            .filter(
+                workout -> {
+                  LocalDate date = workout.completedAt().atZone(USER_ZONE).toLocalDate();
+                  return !date.isBefore(monthStart) && !date.isAfter(end);
+                })
+            .toList();
+    int currentMonthWorkoutMinutes =
+        currentMonthWorkouts.stream().mapToInt(FitnessDtos.CurrentGoalWorkoutRecord::minutes).sum();
     BigDecimal calories =
         source.meals().stream()
             .flatMap(meal -> meal.items().stream())
@@ -939,6 +950,34 @@ public final class FitnessApplicationService {
                 "分钟",
                 null,
                 totalMinutes == 0 ? "NOT_AVAILABLE" : "UP"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "CURRENT_MONTH_WORKOUT_COUNT",
+                "本月训练",
+                BigDecimal.valueOf(currentMonthWorkouts.size()),
+                "次",
+                null,
+                currentMonthWorkouts.isEmpty() ? "NOT_AVAILABLE" : "UP"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "CURRENT_MONTH_WORKOUT_MINUTES",
+                "本月时长",
+                BigDecimal.valueOf(currentMonthWorkoutMinutes),
+                "分钟",
+                null,
+                currentMonthWorkoutMinutes == 0 ? "NOT_AVAILABLE" : "UP"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "BODY_RECORD_COUNT",
+                "身体记录",
+                BigDecimal.valueOf(source.bodyRecords().size()),
+                "次",
+                null,
+                source.bodyRecords().isEmpty() ? "NOT_AVAILABLE" : "STABLE"),
+            new FitnessDtos.CurrentGoalReportMetric(
+                "MEAL_RECORD_COUNT",
+                "饮食记录",
+                BigDecimal.valueOf(source.meals().size()),
+                "餐",
+                null,
+                source.meals().isEmpty() ? "NOT_AVAILABLE" : "STABLE"),
             new FitnessDtos.CurrentGoalReportMetric(
                 "CALORIES",
                 "饮食记录热量",

@@ -1331,7 +1331,15 @@ class FitnessExperienceIntegrationTest {
         objectMapper.valueToTree(runtime.requestBody(publishedConfig, currentGoalReportFacts()));
     assertThat(request.path("max_tokens").asInt()).isEqualTo(2000);
     assertThat(request.path("messages").get(0).path("content").asText())
-        .contains("conclusion", "highlights", "weaknesses", "nextActions", "OPEN_RECORD");
+        .contains(
+            "conclusion",
+            "highlights",
+            "weaknesses",
+            "nextActions",
+            "OPEN_RECORD",
+            "150-300",
+            "intensity",
+            "insufficient");
     assertThat(request.path("response_format").path("type").asText()).isEqualTo("json_schema");
     assertThat(request.path("response_format").path("json_schema").path("strict").asBoolean())
         .isTrue();
@@ -2262,6 +2270,34 @@ class FitnessExperienceIntegrationTest {
         .singleElement()
         .extracting(metric -> metric.comparison())
         .isEqualTo(new java.math.BigDecimal("-2"));
+    assertThat(facts.metrics())
+        .filteredOn(metric -> metric.key().equals("CURRENT_MONTH_WORKOUT_COUNT"))
+        .singleElement()
+        .satisfies(
+            metric -> {
+              assertThat(metric.label()).isEqualTo("本月训练");
+              assertThat(metric.value()).isEqualByComparingTo("2");
+              assertThat(metric.unit()).isEqualTo("次");
+            });
+    assertThat(facts.metrics())
+        .filteredOn(metric -> metric.key().equals("CURRENT_MONTH_WORKOUT_MINUTES"))
+        .singleElement()
+        .satisfies(
+            metric -> {
+              assertThat(metric.label()).isEqualTo("本月时长");
+              assertThat(metric.value()).isEqualByComparingTo("90");
+              assertThat(metric.unit()).isEqualTo("分钟");
+            });
+    assertThat(facts.metrics())
+        .filteredOn(metric -> metric.key().equals("BODY_RECORD_COUNT"))
+        .singleElement()
+        .extracting(metric -> metric.value())
+        .isEqualTo(new java.math.BigDecimal("2"));
+    assertThat(facts.metrics())
+        .filteredOn(metric -> metric.key().equals("MEAL_RECORD_COUNT"))
+        .singleElement()
+        .extracting(metric -> metric.value())
+        .isEqualTo(new java.math.BigDecimal("0"));
     assertThat(facts.trainingStructure())
         .extracting(item -> item.area() + ":" + item.percent())
         .containsExactlyInAnyOrder("下肢:33", "核心:33", "心肺:33");

@@ -231,7 +231,7 @@ _recover_previous_release() {
 
 public_smoke() (
   set -euo pipefail
-  local temporary headers body code curl_status session_file run_id_file session run_id auth_config
+  local temporary headers body code curl_status secret_directory session_file run_id_file session run_id auth_config
   umask 077
   install -d -m 0750 "$HAPPY_AGENT_ROOT/logs"
   temporary=$(mktemp -d "$HAPPY_AGENT_ROOT/logs/.public-smoke.XXXXXX")
@@ -290,11 +290,16 @@ public_smoke() (
     | grep -Eiq '^cache-control:[[:space:]]*([^,]+,[[:space:]]*)*no-cache([[:space:]]*,|[[:space:]]*$)' \
     || return 1
 
-  session_file=$(validate_descendant "$HAPPY_AGENT_ROOT/secrets/public-smoke-session")
-  run_id_file=$(validate_descendant "$HAPPY_AGENT_ROOT/secrets/public-smoke-run-id")
-  require_file "$session_file"
-  require_file "$run_id_file"
-  [ ! -L "$session_file" ] && [ ! -L "$run_id_file" ] || return 1
+  session_file="$HAPPY_AGENT_ROOT/secrets/public-smoke-session"
+  run_id_file="$HAPPY_AGENT_ROOT/secrets/public-smoke-run-id"
+  [ ! -L "$session_file" ] && [ -f "$session_file" ] && [ -r "$session_file" ] || return 1
+  [ ! -L "$run_id_file" ] && [ -f "$run_id_file" ] && [ -r "$run_id_file" ] || return 1
+  secret_directory=$(validate_descendant "$HAPPY_AGENT_ROOT/secrets") || return 1
+  session_file=$(validate_descendant "$session_file") || return 1
+  run_id_file=$(validate_descendant "$run_id_file") || return 1
+  [ "$session_file" = "$secret_directory/public-smoke-session" ] \
+    && [ "$run_id_file" = "$secret_directory/public-smoke-run-id" ] \
+    || return 1
   session=$(<"$session_file")
   run_id=$(<"$run_id_file")
   [[ "$session" =~ ^[a-f0-9]{64}$ ]] || return 1

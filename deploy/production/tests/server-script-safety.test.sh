@@ -29,6 +29,11 @@ cat >"$FAKE/realpath" <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" = -m ] && shift
 [ "${1:-}" = -- ] && shift
+case "$1" in
+  */secrets/public-smoke-session|*/secrets/public-smoke-run-id)
+    [ ! -L "$1" ] || printf 'raw-secret-realpath %s\n' "$1" >>"$FAKE_LOG"
+    ;;
+esac
 if [ -L "$1" ]; then
   link=$(/usr/bin/readlink "$1")
   case "$link" in /*) printf '%s\n' "$link";; *) printf '%s/%s\n' "$(dirname "$1")" "$link";; esac
@@ -142,6 +147,11 @@ for ((i=0; i<${#args[@]}; i++)); do
     http://*|https://*) url=${args[$i]};;
   esac
 done
+if [ -n "$config_file" ] && grep -Fq \
+    'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210' \
+    "$config_file"; then
+  : >"$FAKE_STATE/forbidden-auth-config-observed"
+fi
 if [ -n "$config_file" ] && grep -Fxq \
     'header = "Cookie: FITNESS_SESSION=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' \
     "$config_file"; then
@@ -475,6 +485,56 @@ assert_postgres_unchanged() {
   [ "$(cat "$FAKE_STATE/postgres.health")" = healthy ] \
     || fail 'release transaction changed PostgreSQL health'
   [ ! -e "$FAKE_STATE/postgres.touched" ] || fail 'release transaction operated on PostgreSQL'
+}
+
+run_r14_symlink_case() {
+  local operation=$1 contract=$2 label="r14-$1-$2" output script contract_path sibling
+  local sibling_session='fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210'
+  local sibling_run_id='22222222-2222-4222-8222-222222222222'
+  setup_operation "$label" 010122
+  output="$TMP/$label/output"
+  script="$SCRIPTS/$operation"
+  case "$contract" in
+    session)
+      contract_path="$HAPPY_AGENT_ROOT/secrets/public-smoke-session"
+      sibling="$HAPPY_AGENT_ROOT/secrets/public-smoke-session-sibling"
+      printf '%s\n' "$sibling_session" >"$sibling"
+      ;;
+    run-id)
+      contract_path="$HAPPY_AGENT_ROOT/secrets/public-smoke-run-id"
+      sibling="$HAPPY_AGENT_ROOT/secrets/public-smoke-run-id-sibling"
+      printf '%s\n' "$sibling_run_id" >"$sibling"
+      ;;
+    *) fail "unknown R14 contract: $contract";;
+  esac
+  chmod 0600 "$sibling"
+  /bin/mv "$contract_path" "$contract_path.original"
+  ln -s "${sibling##*/}" "$contract_path"
+
+  if "$script" new >"$output" 2>&1; then
+    fail "$operation accepted a symlink at the $contract contract path"
+  fi
+  assert_old_runtime_restored
+  assert_postgres_unchanged
+  assert_only_app_nginx_up
+  assert_not_contains "$FAKE_LOG" 'raw-secret-realpath'
+  assert_not_contains "$FAKE_LOG" '--config'
+  [ ! -e "$FAKE_STATE/forbidden-auth-config-observed" ] \
+    || fail "$operation exposed the sibling session through authenticated curl config"
+  assert_not_contains "$FAKE_LOG" "$sibling_session"
+  assert_not_contains "$FAKE_LOG" "$sibling_run_id"
+  assert_not_contains "$output" "$sibling_session"
+  assert_not_contains "$output" "$sibling_run_id"
+}
+
+run_r14_tests() {
+  local operation contract
+  for operation in activate-release.sh rollback.sh; do
+    for contract in session run-id; do
+      run_r14_symlink_case "$operation" "$contract"
+    done
+  done
+  echo 'PASS: R14 raw public-smoke Secret path safety'
 }
 
 inject_attempt_failure() {
@@ -895,11 +955,12 @@ run_certificate_backup_status_tests() {
 }
 
 case "$CASE" in
+  r14) run_r14_tests;;
   release) run_release_tests; run_rollback_recovery_tests; [ "${SKIP_MUTATION_CHECK:-0}" = 1 ] || run_release_mutation_check;;
   rollback-recovery) run_rollback_recovery_tests;;
   mutation) run_release_mutation_check;;
   certificate) run_certificate_backup_status_tests;;
-  all) run_release_tests; run_rollback_recovery_tests; [ "${SKIP_MUTATION_CHECK:-0}" = 1 ] || run_release_mutation_check; run_certificate_backup_status_tests;;
+  all) run_r14_tests; run_release_tests; run_rollback_recovery_tests; [ "${SKIP_MUTATION_CHECK:-0}" = 1 ] || run_release_mutation_check; run_certificate_backup_status_tests;;
   *) fail "unknown test case: $CASE";;
 esac
 

@@ -54,7 +54,7 @@ trap cleanup_build EXIT
   npm --prefix frontend run typecheck
   npm --prefix frontend run build
   ./mvnw -DskipTests -pl starter -am package
-)
+) >&2
 
 maven_version=$(cd "$REPOSITORY_ROOT" && ./mvnw --version | head -n1)
 npm_version=$(npm --version | head -n1)

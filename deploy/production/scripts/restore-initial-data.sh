@@ -96,7 +96,13 @@ validate_media_archive() {
 }
 
 temporary_postgres_healthy() {
-  local project=$1 runtime_root=$2 release=$3
+  local project=$1 runtime_root=$2 release=$3 container_id
+  container_id=$(compose_temporary "$project" "$runtime_root" "$release" ps -q postgres) \
+    || return 1
+  [ -n "$container_id" ] || return 1
+  docker logs "$container_id" 2>&1 \
+    | grep -Fq 'PostgreSQL init process complete; ready for start up.' \
+    || return 1
   compose_temporary "$project" "$runtime_root" "$release" \
     ps --format '{{.Service}} {{.State}} {{.Health}}' postgres \
     | grep -Fx 'postgres running healthy' >/dev/null
@@ -264,7 +270,7 @@ restore_core() (
       -f /usr/local/share/happy-agent-enforce-isolation.sql
   actual=$(compose_temporary "$project" "$runtime_root" "$release" exec -T postgres \
     psql -XAtq -v ON_ERROR_STOP=1 -U postgres -d happy_agent -c \
-      "SELECT (SELECT count(*) FROM fitness.flyway_schema_history), (SELECT count(*) FROM agent.flyway_schema_history), (SELECT count(*) FROM pg_tables WHERE schemaname IN ('fitness','agent')), (SELECT count(*) FROM pg_proc function_entry JOIN pg_namespace namespace_entry ON namespace_entry.oid = function_entry.pronamespace WHERE namespace_entry.nspname IN ('fitness','agent'));" )
+      "SELECT (SELECT count(*) FROM fitness.fitness_schema_history), (SELECT count(*) FROM agent.agent_schema_history), (SELECT count(*) FROM pg_tables WHERE schemaname IN ('fitness','agent')), (SELECT count(*) FROM pg_proc function_entry JOIN pg_namespace namespace_entry ON namespace_entry.oid = function_entry.pronamespace WHERE namespace_entry.nspname IN ('fitness','agent'));" )
   [ "$actual" = "$expected_fitness|$expected_agent|$expected_tables|$expected_objects" ] \
     || die 'restored database verification failed'
 

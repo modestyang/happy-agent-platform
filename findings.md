@@ -377,3 +377,16 @@
 - 目标实例唯一安全组 ID 为 `sg-0jlb5v2njkb2jbzrvurr`，当前 `DeletionProtection=false`；实施脚本无需按名称猜测安全组。
 - 首次恢复的生产 PostgreSQL init 不能沿用现有会预建 `fitness`/`agent` schema 的本地 init；应只创建角色，空目标 `pg_restore` 创建 schema 后再执行隔离 SQL。
 - `pg_dump` 不存在 `--no-owner=false` 参数；要保留对象 owner 必须直接省略 `--no-owner`，并在目标预先创建同名角色。
+
+# 2026-08-13 Task 6 迁移演练发现
+
+- 实际 Flyway history 表由应用显式配置为 `fitness.fitness_schema_history` 与
+  `agent.agent_schema_history`；导出和恢复不能使用默认名 `flyway_schema_history`。
+- PostgreSQL 官方 entrypoint 初始化期间会短暂进入 healthy 后 shutdown/restart；首次恢复的
+  临时实例必须观察 `PostgreSQL init process complete; ready for start up.` 后再接受最终
+  healthy，避免在瞬态窗口执行空库断言。
+- `agent.agent_runs` 会被运行时后台活动更新，不适合作为重启持久性固定计数；Provider
+  credential 表是稳定哨兵，且能与原 master key 成功/错误 key 失败的认证边界共同验证。
+- 本地演练最终证明 restore generation、媒体、数据库隔离、credential 解密认证与重启持久；
+  不健康 release 最终保持旧 `current`、旧 PostgreSQL/App 健康。演练没有连接 ECS、阿里云、
+  SSH、公共证书或 DNS。

@@ -295,3 +295,14 @@
 - 官方发布信息复核确认 Certbot 5.7.0 是当前版本，5.4.0 起 webroot 支持 IP 证书；registry 实测发现正确镜像标签是 `certbot/certbot:v5.7.0`，不带 `v` 的标签不存在。计划锁定其 digest，staging 与 production 使用隔离证书目录，不使用 `latest`。
 - 计划自检已修正 `pg_dump --no-owner=false` 这一无效写法，明确为省略 `--no-owner` 以保留 owner；远端云命令已固定安全组 `sg-0jlb5v2njkb2jbzrvurr` 和严格 known_hosts，不留省略号占位。
 - 用户选择 Subagent-Driven 并授权隔离分支与本地 commit；已创建 `codex/aliyun-ecs-ip-https-deployment` worktree，`main` 保持干净。下一步建立 SDD ledger 和基线测试，尚未修改生产代码、部署脚本或 ECS。
+
+# 2026-08-13 Task 6 本地迁移演练
+
+- 新增可丢弃生产迁移演练：显式只读源状态、独立 roles-only PostgreSQL、生产 restore、
+  App/Web 镜像、Flyway/业务计数/media/跨 schema 隔离、Provider credential key 认证、
+  重启持久性和不健康 release 恢复。
+- 演练 RED 暴露并修正生产 Flyway history 表名以及 PostgreSQL 初始化重启窗口竞态。
+- `bash deploy/production/tests/migration-rehearsal.sh` 最终退出 0；所有唯一命名容器、网络、
+  镜像、dump、Secret 副本和临时目录由受限 cleanup 移除。
+- 当前仍为 `https://39.101.65.254`；`fitness.modest.vip` 与 `agent.modest.vip` 仅记录为域名
+  审批后的替换点，本轮未操作 DNS 或域名证书。

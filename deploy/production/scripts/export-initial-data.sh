@@ -157,16 +157,16 @@ docker compose -f "$compose_file" exec -T postgres \
 validation_sql=$(printf '%s\n' \
   '/* happy-agent-source-validation */' \
   "SELECT 'postgres_server_version=' || current_setting('server_version')" \
-  "UNION ALL SELECT 'fitness_history_count=' || count(*) FROM fitness.flyway_schema_history" \
-  "UNION ALL SELECT 'agent_history_count=' || count(*) FROM agent.flyway_schema_history" \
+  "UNION ALL SELECT 'fitness_history_count=' || count(*) FROM fitness.fitness_schema_history" \
+  "UNION ALL SELECT 'agent_history_count=' || count(*) FROM agent.agent_schema_history" \
   "UNION ALL SELECT 'application_table_count=' || count(*) FROM pg_tables WHERE schemaname IN ('fitness','agent')" \
   "UNION ALL SELECT 'key_object_count=' || count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('fitness','agent')" \
   "UNION ALL SELECT 'fitness_schema_count=' || count(*) FROM pg_namespace WHERE nspname='fitness'" \
   "UNION ALL SELECT 'agent_schema_count=' || count(*) FROM pg_namespace WHERE nspname='agent'" \
   "UNION ALL SELECT 'fitness_table_count=' || count(*) FROM pg_tables WHERE schemaname='fitness'" \
   "UNION ALL SELECT 'agent_table_count=' || count(*) FROM pg_tables WHERE schemaname='agent'" \
-  "UNION ALL SELECT 'fitness_history_checksums=' || coalesce(string_agg(checksum::text, ',' ORDER BY installed_rank), '') FROM fitness.flyway_schema_history" \
-  "UNION ALL SELECT 'agent_history_checksums=' || coalesce(string_agg(checksum::text, ',' ORDER BY installed_rank), '') FROM agent.flyway_schema_history" \
+  "UNION ALL SELECT 'fitness_history_checksums=' || coalesce(string_agg(checksum::text, ',' ORDER BY installed_rank), '') FROM fitness.fitness_schema_history" \
+  "UNION ALL SELECT 'agent_history_checksums=' || coalesce(string_agg(checksum::text, ',' ORDER BY installed_rank), '') FROM agent.agent_schema_history" \
   "UNION ALL SELECT 'fitness_user_count=' || count(*) FROM fitness.users" \
   "UNION ALL SELECT 'agent_run_count=' || count(*) FROM agent.agent_runs;")
 validation_lines=$(printf '%s\n' "$validation_sql" \

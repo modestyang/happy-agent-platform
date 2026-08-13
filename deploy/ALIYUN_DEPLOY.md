@@ -1,72 +1,81 @@
-# 阿里云一键部署
+# 阿里云 ECS 生产部署手册
 
-`deploy/aliyun-deploy.sh` 在干净的 Anolis OS / CentOS / Ubuntu 服务器上以 root 身份一次性完成：
+当前生产契约是 IP HTTPS：公网入口 `https://39.101.65.254`，ECS 位于
+`cn-wulanchabu`，实例 `i-0jlfb8o4hqpjekoudg4x`，安全组
+`sg-0jlb5v2njkb2jbzrvurr`。Nginx 独占公网 80/443；App 8080 与 PostgreSQL
+5432 只存在于 Compose 网络。ECS 只加载可信构建机生成的 Linux amd64 镜像，不安装
+Maven、Node 或 JDK。
 
-1. 安装 Bash / curl / wget / Java 17 / nginx / PostgreSQL 16 客户端（包含 libpq-dev 用于 Backend）
-2. 创建 `pgvector` 扩展（优先用 `postgresql16-pgvector` 包，没有则源码编译）
-3. 初始化 PostgreSQL 数据目录、`happy_agent` 库、`fitness` / `agent` schema、`fitness_app` / `agent_app` 角色
-4. 生成 `deploy/secrets/` 下的所有密码与 master key（`openssl rand -hex 24`）
-5. `./mvnw -DskipTests -pl starter -am package` 构建后端
-6. 写 `happy-agent.service`（systemd）并启动 backend，journalctl 报错时立刻失败
-7. `npm ci && npm run build` 构建前端静态资源
-8. 写 nginx 配置（`/etc/nginx/conf.d/happy-agent.conf`），SPA fallback + `/api` 反向代理
-9. 烟雾测试，确认 admin 与 app 端点可达
+生产根目录为 `/opt/happy-agent`：release 位于 `releases/`，`current` 指向当前
+release；数据库、媒体和 Agent master key 组成 `state/generations/<id>`，由
+`state/current` 原子选择；证书、备份和日志分别位于 `certificates/`、`backups/` 和
+`logs/`。
 
-## 使用
+## 可信构建机命令
 
-```bash
-# 以 root 登录阿里云 ECS
-sudo -i
-
-# 克隆代码到 /opt/happy-agent
-git clone <repo> /opt/happy-agent
-cd /opt/happy-agent
-
-# 第一次部署
-bash deploy/aliyun-deploy.sh
-
-# 后续 deploy 升级（idempotent）
-bash deploy/aliyun-deploy.sh
-```
-
-## 环境变量（可覆盖）
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `PROJECT_DIR` | `/opt/happy-agent` | 项目根目录 |
-| `APP_USER` | `happy` | 运行 Spring Boot 的系统用户 |
-| `APP_PORT` | `8080` | 后端端口 |
-| `PUBLIC_HOST` | `0.0.0.0` | 暴露的公网/内网地址 |
-| `POSTGRES_VERSION` | `16` | PostgreSQL 大版本 |
-| `JAVA_VERSION` | `17` | OpenJDK 大版本 |
-| `NGINX_PORT` | `80` | nginx 监听端口 |
-| `PG_SHARED_BUFFERS` | `256MB` | shared_buffers 调优值 |
-| `PG_WORK_MEM` | `16MB` | work_mem 调优值 |
-
-## 部署后
-
-- 前端：`http://<your-host>/`（admin 在 `/admin`）
-- 后端：`http://127.0.0.1:8080/api/...`
-- 数据库：`127.0.0.1:5432/happy_agent`（已启用 `vector` + `pg_trgm`）
+所有命令从仓库根目录执行。首次准备主机与云门禁：
 
 ```bash
-# 查看服务
-systemctl status happy-agent
-journalctl -u happy-agent -f
-
-# 重启
-systemctl restart happy-agent
-
-# 滚动 master key
-mv /opt/happy-agent/deploy/secrets/agent-master-key{,.old}
-openssl rand -hex 32 > /opt/happy-agent/deploy/secrets/agent-master-key
-systemctl restart happy-agent
+SOURCE_STATE_ROOT=/Users/modest/IdeaProjects/happy-agent-platform \
+  deploy/production/deploy.sh bootstrap
 ```
 
-## 关于阿里云 ECS
+首次停写迁移（唯一允许携带数据库、媒体和原 master key 的入口）：
 
-- 该脚本**只适用 Linux**，**不**在 macOS 上运行。
-- 阿里云 ECS 默认禁用外网 8080 / 5432 入站（安全组），只在 Nginx 80 端口对外。
-- 想加 HTTPS：在 nginx 站点里加 `listen 443 ssl;` + `certbot --nginx` 即可。
-- RAG 知识库默认使用配置的 LLM Provider 的 Embedding 接口（`text-embedding-v3`），运行时自动调 `POST /v1/embeddings`，**不**依赖额外组件。
-- 流式 LLM 走 SSE，前端 `EventSource` 接收，所以 nginx 配置里 `proxy_buffering off;`。
+```bash
+SOURCE_STATE_ROOT=/Users/modest/IdeaProjects/happy-agent-platform \
+  deploy/production/deploy.sh migrate
+```
+
+后续普通发布、状态、备份与显式应用回滚：
+
+```bash
+deploy/production/deploy.sh release
+deploy/production/deploy.sh status
+deploy/production/deploy.sh backup
+deploy/production/deploy.sh rollback 20260813T120000Z-abcdef0
+```
+
+`rollback` 只切换应用 release，不恢复数据库或媒体。首次 restore 必须面对 roles-only
+空目标；目标包含任何额外角色、schema、对象或 ACL 时立即停止。普通 `release` 禁止包含
+数据库 dump、媒体、master key 或其他 Secret。
+
+## 证书续期
+
+当前 IP 证书由固定 Certbot 5.7.0 digest、HTTP-01 webroot 和 short-lived profile
+维护。主机上检查定时器和手动触发一次续期：
+
+```bash
+ssh root@39.101.65.254 \
+  'systemctl status happy-agent-cert-renew.timer --no-pager'
+ssh root@39.101.65.254 \
+  'systemctl start happy-agent-cert-renew.service'
+ssh root@39.101.65.254 \
+  'journalctl -u happy-agent-cert-renew.service --no-pager -n 100'
+```
+
+实际运维 SSH 必须使用已固定的 identity、`BatchMode=yes`、
+`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和项目专用 known_hosts；以上命令只展示
+远端动作，日常优先使用 `deploy.sh` 封装入口。
+
+## 域名到位后的替换点
+
+`modest.vip` 尚在审批，本轮仍保持 IP HTTPS，不创建 DNS 记录、不申请域名证书。审批完成后
+计划使用：
+
+- `fitness.modest.vip`：健身端；
+- `agent.modest.vip`：管理端。
+
+届时需在单独变更中更新 DNS、安全固定来源、Nginx `server_name`/路由、公开 origin、证书
+申请与 SAN 校验、Cookie/跨域策略及公网验收；不得在当前 IP 证书脚本中直接猜测替换。
+
+## 恢复目标与运行限制
+
+- RPO 取决于最近一次成功完整备份；每次 release 前自动备份，重要变更前应额外执行
+  `deploy.sh backup` 并拉回 recovery package。
+- RTO 取决于镜像加载、数据库 generation 切换及数据量；本方案不是热备或自动灾备，恢复需
+  人工确认备份与 manifest。
+- 当前 ECS 为单盘、单 PostgreSQL、单 App/Nginx 实例，存在单盘和单机故障风险。
+- 首次迁移需要停写，release/rollback 也有短暂停机；当前没有蓝绿流量切换或零停机保证。
+- 不得恢复到非空目标，不得用普通 release 搬运状态或 Secret，不得在日志或命令行输出
+  credential/master key 明文。

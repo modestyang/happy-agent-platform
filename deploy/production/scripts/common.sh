@@ -287,8 +287,8 @@ public_smoke() (
 
   smoke_request / 200 'text/html' || return 1
   [ -s "$temporary/body" ] || return 1
-  smoke_request /api/v1/app/home 401 'application/problem\+json' || return 1
-  smoke_request /api/v1/admin/frameworks 401 'application/problem\+json' || return 1
+  smoke_request /api/app/bootstrap 401 'application/problem\+json' || return 1
+  smoke_request /api/admin/frameworks 401 'application/problem\+json' || return 1
   smoke_request /api/v1/app/ai/runs/00000000-0000-0000-0000-000000000000/events \
     401 'application/problem\+json' 'text/event-stream' || return 1
   tr -d '\r' <"$headers" \

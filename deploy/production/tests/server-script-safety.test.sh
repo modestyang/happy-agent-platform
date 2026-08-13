@@ -164,7 +164,7 @@ if [[ "$url" == http://39.101.65.254/.well-known/acme-challenge/* ]]; then
 fi
 status=200; content_type='text/html; charset=utf-8'; body='<html>Happy Agent</html>'
 case "$url" in
-  */api/v1/app/home|*/api/v1/admin/frameworks)
+  */api/app/bootstrap|*/api/admin/frameworks)
     status=401; content_type='application/problem+json'; body='{"status":401}'
     ;;
   */api/v1/app/ai/runs/00000000-0000-0000-0000-000000000000/events)

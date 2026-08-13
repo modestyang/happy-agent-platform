@@ -147,6 +147,18 @@ cat >"$FAKE/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'docker %s\n' "$*" >>"$BOUNDARY_LOG"
+if [ "${1:-}" = compose ] && [ "${2:-}" != version ] \
+    && [ -n "${FAKE_DOCKER_REQUIRED_ENV_FILE:-}" ]; then
+  args=("$@")
+  compose_env=''
+  for ((i=0; i<${#args[@]}; i++)); do
+    [ "${args[$i]}" != --env-file ] || { ((i+=1)); compose_env=${args[$i]}; }
+  done
+  if [ "$compose_env" != "$FAKE_DOCKER_REQUIRED_ENV_FILE" ]; then
+    printf 'missing exact source Compose environment file\n' >&2
+    exit 76
+  fi
+fi
 case " $* " in
   ' --version ') printf 'Docker version 27.1.1, build fixture\n'; exit;;
   ' compose version ') printf 'Docker Compose version v2.29.1\n'; exit;;
@@ -364,9 +376,18 @@ kill() { "$FAKE/kill" "$@"; }
 export -f kill
 
 setup_source_state() {
+  local source_canonical
   /bin/rm -rf -- "$SOURCE_ROOT"
   mkdir -p "$SOURCE_ROOT/deploy/.local/media/nested" "$SOURCE_ROOT/deploy/secrets" "$SOURCE_ROOT/.git"
   cp "$WORKTREE_ROOT/deploy/docker-compose.yml" "$SOURCE_ROOT/deploy/docker-compose.yml"
+  printf '%s\n' \
+    "POSTGRES_PASSWORD_FILE=$SOURCE_ROOT/deploy/.local/secrets/postgres_password" \
+    "FITNESS_DB_PASSWORD_FILE=$SOURCE_ROOT/deploy/.local/secrets/fitness_db_password" \
+    "AGENT_DB_PASSWORD_FILE=$SOURCE_ROOT/deploy/.local/secrets/agent_db_password" \
+    >"$SOURCE_ROOT/deploy/.local/compose.env"
+  chmod 0600 "$SOURCE_ROOT/deploy/.local/compose.env"
+  source_canonical=$(realpath "$SOURCE_ROOT")
+  export FAKE_DOCKER_REQUIRED_ENV_FILE="$source_canonical/deploy/.local/compose.env"
   printf 'media-a\n' >"$SOURCE_ROOT/deploy/.local/media/a.txt"
   printf 'media-b\n' >"$SOURCE_ROOT/deploy/.local/media/nested/b.txt"
   printf 'master-key-fixture\000bytes' >"$SOURCE_ROOT/deploy/secrets/agent-master-key"
@@ -573,7 +594,7 @@ assert_transport_options() {
 }
 
 run_deploy_tests() {
-  local identity known_hosts marker release_line upload_line backup_line activate_line
+  local identity known_hosts marker reusable_release release_line upload_line backup_line activate_line
   local backup_timestamp activation_timestamp
   local smoke_override session_override run_id_override
   setup_source_state
@@ -623,6 +644,14 @@ run_deploy_tests() {
     || fail 'release backup and activation did not use distinct safe timestamps'
   assert_contains "$BOUNDARY_LOG" 'latest-backup'
   assert_transport_options
+
+  reusable_release="$FIXTURE_REPO/deploy/.local/production/releases/20260813T122000Z-abc1234"
+  : >"$BOUNDARY_LOG"
+  HAPPY_AGENT_RELEASE_PATH="$reusable_release" \
+    "$FIXTURE_REPO/deploy/production/deploy.sh" release
+  assert_not_contains "$BOUNDARY_LOG" 'mvnw '
+  assert_contains "$BOUNDARY_LOG" \
+    '/scripts/activate-release.sh 20260813T122000Z-abc1234'
 
   : >"$BOUNDARY_LOG"
   HAPPY_AGENT_BUILD_TIMESTAMP=20260813T123000Z HAPPY_AGENT_EXPORT_TIMESTAMP=20260813T123100Z \

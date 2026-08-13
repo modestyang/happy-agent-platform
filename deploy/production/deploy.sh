@@ -334,12 +334,22 @@ verify_local_manifest() {
 }
 
 build_release() {
-  local release release_id
-  if ! release=$($BUILD_SCRIPT); then
+  local release release_id release_root_canonical requested_release
+  requested_release=${HAPPY_AGENT_RELEASE_PATH:-}
+  if [ -n "$requested_release" ]; then
+    case "$requested_release" in
+      /|~*|*'?'*|*'['*|*'*'*|!/*) die 'reusable release path must be a safe absolute path';;
+    esac
+    [ -d "$requested_release" ] && [ ! -L "$requested_release" ] \
+      || die 'reusable release path is missing or indirect'
+    release=$requested_release
+  elif ! release=$($BUILD_SCRIPT); then
     die 'release builder failed'
   fi
   [ -d "$release" ] && [ ! -L "$release" ] || die 'release builder returned an unsafe artifact path'
-  case "$release" in "$RELEASE_ROOT"/*) ;; *) die 'release builder returned a path outside the release root';; esac
+  release=$(realpath "$release")
+  release_root_canonical=$(realpath "$RELEASE_ROOT")
+  case "$release" in "$release_root_canonical"/*) ;; *) die 'release builder returned a path outside the release root';; esac
   release_id=${release##*/}
   [[ "$release_id" =~ ^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{7,40}$ ]] || die 'release builder returned an unsafe id'
   verify_local_manifest "$release" .env compose.yml nginx.conf

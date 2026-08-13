@@ -29,6 +29,11 @@ source_root=$(realpath "$source_root_raw")
   || die 'source Compose file is missing or indirect'
 [ -d "$source_root/deploy/.local" ] && [ ! -L "$source_root/deploy/.local" ] \
   || die 'source local state directory is missing or indirect'
+compose_env="$source_root/deploy/.local/compose.env"
+[ -f "$compose_env" ] && [ ! -L "$compose_env" ] && [ -r "$compose_env" ] \
+  || die 'source Compose environment file is missing, unreadable, or indirect'
+[ "$(file_mode "$compose_env")" = 600 ] \
+  || die 'source Compose environment file must have mode 0600'
 master_key="$source_root/deploy/secrets/agent-master-key"
 [ ! -L "$master_key" ] && [ -f "$master_key" ] && [ -r "$master_key" ] && [ -s "$master_key" ] \
   || die 'source Agent master key is missing, empty, or indirect'
@@ -61,6 +66,7 @@ unset session
 [[ "$session_sha256" =~ ^[a-f0-9]{64}$ ]] || die 'unable to hash public smoke session'
 
 compose_file="$source_root/deploy/docker-compose.yml"
+compose=(docker compose --env-file "$compose_env" -f "$compose_file")
 smoke_sql=$(printf "%s\n" \
   '/* happy-agent-smoke-validation */' \
   'SELECT count(*)' \
@@ -70,7 +76,7 @@ smoke_sql=$(printf "%s\n" \
   '  AND session_entry.expires_at > CURRENT_TIMESTAMP' \
   "  AND run_entry.run_id = '$run_id'::uuid;")
 smoke_match=$(printf '%s\n' "$smoke_sql" \
-  | docker compose -f "$compose_file" exec -T postgres \
+  | "${compose[@]}" exec -T postgres \
       psql -XAtq -v ON_ERROR_STOP=1 --set=happy_agent_operation=happy-agent-smoke-validation \
         -U postgres -d happy_agent -f -)
 unset smoke_sql session_sha256 run_id
@@ -118,16 +124,16 @@ if [ -n "$listeners" ]; then
 fi
 unset listeners
 
-postgres_container=$(docker compose -f "$compose_file" ps -q postgres)
+postgres_container=$("${compose[@]}" ps -q postgres)
 postgres_container_count=$(printf '%s\n' "$postgres_container" | sed '/^$/d' | wc -l | tr -d ' ')
 [ "$postgres_container_count" = 1 ] || die 'expected exactly one running source PostgreSQL container'
 [[ "$postgres_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
   || die 'source PostgreSQL container id is unsafe'
-postgres_server_version=$(docker compose -f "$compose_file" exec -T postgres \
+postgres_server_version=$("${compose[@]}" exec -T postgres \
   psql -XAtq -v ON_ERROR_STOP=1 -U postgres -d happy_agent -c 'SHOW server_version;')
 [[ "$postgres_server_version" =~ ^16([.][0-9]+)+([[:space:]].*)?$ ]] \
   || die 'source PostgreSQL server major must be 16'
-dump_version_output=$(docker compose -f "$compose_file" exec -T postgres pg_dump --version)
+dump_version_output=$("${compose[@]}" exec -T postgres pg_dump --version)
 [[ "$dump_version_output" =~ ^pg_dump[[:space:]]\(PostgreSQL\)[[:space:]]16([.][0-9]+)+ ]] \
   || die 'source pg_dump major must be 16'
 postgres_dump_version=$(printf '%s\n' "$dump_version_output" | sed -E 's/^pg_dump \(PostgreSQL\) ([^ ]+).*$/\1/')
@@ -152,7 +158,7 @@ cleanup_export() {
 }
 trap cleanup_export EXIT
 
-docker compose -f "$compose_file" exec -T postgres \
+"${compose[@]}" exec -T postgres \
   psql -Xq -v ON_ERROR_STOP=1 -U postgres -d happy_agent -c 'CHECKPOINT;' >/dev/null
 validation_sql=$(printf '%s\n' \
   '/* happy-agent-source-validation */' \
@@ -170,7 +176,7 @@ validation_sql=$(printf '%s\n' \
   "UNION ALL SELECT 'fitness_user_count=' || count(*) FROM fitness.users" \
   "UNION ALL SELECT 'agent_run_count=' || count(*) FROM agent.agent_runs;")
 validation_lines=$(printf '%s\n' "$validation_sql" \
-  | docker compose -f "$compose_file" exec -T postgres \
+  | "${compose[@]}" exec -T postgres \
       psql -XAtq -v ON_ERROR_STOP=1 --set=happy_agent_operation=happy-agent-source-validation \
         -U postgres -d happy_agent -f -)
 unset validation_sql
@@ -196,7 +202,7 @@ agent_history_checksums=$(validation_value agent_history_checksums)
 [[ "$agent_history_checksums" =~ ^$|^-?[0-9]+(,-?[0-9]+)*$ ]] \
   || die 'invalid Agent Flyway checksum inventory'
 
-docker compose -f "$compose_file" exec -T postgres \
+"${compose[@]}" exec -T postgres \
   pg_dump --format=custom --dbname=happy_agent --username=postgres >"$pending/initial.dump"
 [ -s "$pending/initial.dump" ] || die 'source database dump is empty'
 

@@ -574,6 +574,7 @@ run_migrate() {
   remote_control start-http-release "$release_id"
   remote_exec "$REMOTE_ROOT/current/scripts/restore-initial-data.sh" \
     "$REMOTE_ROOT/migrations/$migration_id" --initial-empty-target
+  remote_control start-http-release "$release_id"
   remote_exec "$REMOTE_ROOT/current/scripts/issue-certificate.sh"
   remote_exec "$REMOTE_ROOT/releases/$release_id/scripts/activate-release.sh" "$release_id"
   pull_latest_backup

@@ -668,6 +668,8 @@ run_deploy_tests() {
   assert_contains "$BOUNDARY_LOG" 'public-smoke-session'
   assert_contains "$BOUNDARY_LOG" 'restore-initial-data.sh'
   assert_contains "$BOUNDARY_LOG" 'issue-certificate.sh'
+  [ "$(grep -Fc 'start-http-release 20260813T123000Z-abc1234' "$BOUNDARY_LOG")" = 2 ] \
+    || fail 'migration did not restore HTTP Nginx after the database transaction'
   assert_contains "$BOUNDARY_LOG" 'activate-release.sh 20260813T123000Z-abc1234'
   assert_contains "$BOUNDARY_LOG" 'write-migration-marker'
   assert_contains "$BOUNDARY_LOG" "$session_override root@39.101.65.254:/opt/happy-agent/staging/.pending-smoke-20260813T123000Z-abc1234/public-smoke-session"

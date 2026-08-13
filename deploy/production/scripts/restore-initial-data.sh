@@ -61,7 +61,7 @@ verify_bundle_manifest() {
     member=${actual#"$bundle"/}
     [ "$member" = SHA256SUMS ] || case "$listed" in *"|$member|"*) ;; *) die 'unmanifested bundle file';; esac
   done < <(find "$bundle" -type f -print0)
-  for member in initial.dump media.tar agent-master-key metadata.env; do
+  for member in initial.dump media.tar agent-master-key metadata.env source-validation.json; do
     case "$listed" in *"|$member|"*) ;; *) die "required bundle member is unmanifested: $member";; esac
   done
   (cd "$bundle" && sha256sum --check --strict SHA256SUMS >/dev/null) \
@@ -201,7 +201,8 @@ restore_core() (
   install -d -m 0700 "$pending" "$pending/postgres"
   staged_bundle="$pending/.bundle"
   install -d -m 0700 "$staged_bundle"
-  for member in SHA256SUMS initial.dump media.tar agent-master-key metadata.env; do
+  for member in SHA256SUMS initial.dump media.tar agent-master-key metadata.env \
+    source-validation.json; do
     cp -P -- "$source_bundle/$member" "$staged_bundle/$member"
   done
   verify_bundle_manifest "$staged_bundle"

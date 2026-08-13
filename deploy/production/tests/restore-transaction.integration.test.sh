@@ -200,9 +200,18 @@ EOF
   cat >"$fake/cp" <<'EOF'
 #!/usr/bin/env bash
 /bin/cp "$@"
+args=("$@")
+source_path=${args[${#args[@]}-2]}
 destination=${!#}
+if [[ "$source_path" == */source-validation.json ]]; then
+  printf 'cp %s -> %s\n' "$source_path" "$destination" >>"$FAKE_DOCKER_LOG"
+fi
 if [ "${FAKE_BUNDLE_COPY_TAMPER:-0}" = 1 ] \
     && [[ "$destination" == */.bundle/initial.dump ]]; then
+  printf 'changed-after-source-validation\n' >>"$destination"
+fi
+if [ "${FAKE_SOURCE_VALIDATION_COPY_TAMPER:-0}" = 1 ] \
+    && [[ "$destination" == */.bundle/source-validation.json ]]; then
   printf 'changed-after-source-validation\n' >>"$destination"
 fi
 EOF
@@ -302,18 +311,21 @@ make_bundle() {
   printf 'media\n' >"$target/media-source/file"
   tar -C "$target/media-source" -cf "$target/media.tar" file
   printf 'master-key-fixture\000bytes' >"$target/agent-master-key"
+  printf '{"fixture":"source-validation"}\n' >"$target/source-validation.json"
   media_hash=$(sha256sum "$target/media.tar" | awk '{print $1}')
   tree_hash=$(cd "$target/media-source" && find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256sum "$file"; done | sha256sum | awk '{print $1}')
   key_hash=$(sha256sum "$target/agent-master-key" | awk '{print $1}')
   printf 'fitness_history_count=1\nagent_history_count=1\napplication_table_count=4\nkey_object_count=1\nmedia_sha256=%s\nmedia_tree_sha256=%s\nmaster_key_sha256=%s\n' \
     "$media_hash" "$tree_hash" "$key_hash" >"$target/metadata.env"
   rm -rf -- "$target/media-source"
-  (cd "$target" && sha256sum initial.dump media.tar agent-master-key metadata.env >SHA256SUMS)
+  (cd "$target" && sha256sum initial.dump media.tar agent-master-key metadata.env \
+    source-validation.json >SHA256SUMS)
 }
 
 refresh_bundle_manifest() {
   local bundle=$1
-  (cd "$bundle" && sha256sum initial.dump media.tar agent-master-key metadata.env >SHA256SUMS)
+  (cd "$bundle" && sha256sum initial.dump media.tar agent-master-key metadata.env \
+    source-validation.json >SHA256SUMS)
 }
 
 refresh_media_metadata() {
@@ -492,6 +504,12 @@ run_restore_preflight_tests() {
   setup_restore_root "$case_root"
   REJECT_ENV_ASSIGNMENT=FAKE_BUNDLE_COPY_TAMPER=1
   assert_restore_preflight_rejected source-bundle-toctou "$case_root" 20260813T020101Z "$bundle" --initial-empty-target
+
+  case_root="$TMP/preflight-source-validation-toctou/root"
+  setup_restore_root "$case_root"
+  REJECT_ENV_ASSIGNMENT=FAKE_SOURCE_VALIDATION_COPY_TAMPER=1
+  assert_restore_preflight_rejected source-validation-toctou "$case_root" 20260813T020102Z \
+    "$bundle" --initial-empty-target
   echo 'PASS: restore binding preflight rejection matrix'
 }
 
@@ -529,6 +547,10 @@ run_restore_transaction_test() {
   [ ! -e "$success_root/secrets/agent-master-key" ] || fail 'restore wrote a master key outside the generation'
   assert_no_pending_generation "$success_root"
   grep -Eq 'docker compose -p happy-agent-restore-[A-Za-z0-9_.-]+ ' "$FAKE_DOCKER_LOG" || fail 'restore did not use a unique temporary Compose project'
+  copy_line=$(grep -nF 'source-validation.json ->' "$FAKE_DOCKER_LOG" | head -n1 | cut -d: -f1)
+  restore_line=$(grep -nF ' pg_restore ' "$FAKE_DOCKER_LOG" | head -n1 | cut -d: -f1)
+  [ -n "$copy_line" ] && [ -n "$restore_line" ] && [ "$copy_line" -lt "$restore_line" ] \
+    || fail 'restore did not preserve and validate source-validation.json before pg_restore'
   grep -Fq ' down --volumes --remove-orphans' "$FAKE_DOCKER_LOG" || fail 'restore did not remove its temporary Compose project'
 
   setup_restore_root "$failed_root"

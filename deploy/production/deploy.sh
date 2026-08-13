@@ -554,8 +554,10 @@ run_migrate() {
   upload_directory release "http-$release_id" "$http_release"
   upload_directory migration "$migration_id" "$migration"
   remote_control prepare-staging smoke "$release_id"
-  scp "${SSH_OPTIONS[@]}" "$session_file" "$run_id_file" \
-    "$REMOTE:$REMOTE_ROOT/staging/.pending-smoke-$release_id/"
+  scp "${SSH_OPTIONS[@]}" "$session_file" \
+    "$REMOTE:$REMOTE_ROOT/staging/.pending-smoke-$release_id/public-smoke-session"
+  scp "${SSH_OPTIONS[@]}" "$run_id_file" \
+    "$REMOTE:$REMOTE_ROOT/staging/.pending-smoke-$release_id/public-smoke-run-id"
   remote_control install-smoke "$release_id"
   remote_control start-http-release "$release_id"
   remote_exec "$REMOTE_ROOT/current/scripts/restore-initial-data.sh" \

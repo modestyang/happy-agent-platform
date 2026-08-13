@@ -39,7 +39,7 @@ const ips = instance?.PublicIpAddress?.IpAddress;
 const groups = instance?.SecurityGroupIds?.SecurityGroupId;
 if (instance.InstanceId !== expectedId || instance.RegionId !== expectedRegion ||
     !Array.isArray(ips) || ips.length !== 1 || ips[0] !== expectedIp ||
-    !Array.isArray(groups) || !groups.includes(expectedGroup) ||
+    !Array.isArray(groups) || groups.length !== 1 || groups[0] !== expectedGroup ||
     typeof instance.DeletionProtection !== "boolean") process.exit(4);
 process.stdout.write(instance.DeletionProtection ? "true\n" : "false\n");
 ' "$INSTANCE_ID" "$REGION" "$PUBLIC_IP" "$SECURITY_GROUP_ID"

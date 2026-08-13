@@ -261,17 +261,29 @@ case "$action" in
   DescribeInstances)
     ip=$(cat "$FAKE_STATE/aliyun-ip")
     deletion=$(cat "$FAKE_STATE/aliyun-deletion")
-    printf '{"Instances":{"Instance":[{"InstanceId":"i-0jlfb8o4hqpjekoudg4x","RegionId":"cn-wulanchabu","PublicIpAddress":{"IpAddress":["%s"]},"SecurityGroupIds":{"SecurityGroupId":["sg-0jlb5v2njkb2jbzrvurr"]},"DeletionProtection":%s}]}}\n' "$ip" "$deletion"
+    group_json=''
+    while IFS= read -r group; do
+      [ -z "$group_json" ] || group_json="$group_json,"
+      group_json="$group_json\"$group\""
+    done <"$FAKE_STATE/aliyun-groups"
+    printf '{"Instances":{"Instance":[{"InstanceId":"i-0jlfb8o4hqpjekoudg4x","RegionId":"cn-wulanchabu","PublicIpAddress":{"IpAddress":["%s"]},"SecurityGroupIds":{"SecurityGroupId":[%s]},"DeletionProtection":%s}]}}\n' "$ip" "$group_json" "$deletion"
     ;;
   DescribeSecurityGroupAttribute)
+    group=''
+    args=("$@")
+    for ((i=0; i<${#args[@]}; i++)); do
+      [ "${args[$i]}" != --SecurityGroupId ] || { ((i+=1)); group=${args[$i]}; }
+    done
+    ports_file="$FAKE_STATE/aliyun-ports"
+    [ "$group" != sg-extra-public ] || ports_file="$FAKE_STATE/aliyun-extra-ports"
     first=1
-    printf '{"SecurityGroupId":"sg-0jlb5v2njkb2jbzrvurr","Permissions":{"Permission":['
+    printf '{"SecurityGroupId":"%s","Permissions":{"Permission":[' "$group"
     while IFS= read -r port; do
       [ -n "$port" ] || continue
       [ "$first" = 1 ] || printf ','
       first=0
       printf '{"IpProtocol":"tcp","PortRange":"%s/%s","SourceCidrIp":"0.0.0.0/0","Policy":"Accept"}' "$port" "$port"
-    done <"$FAKE_STATE/aliyun-ports"
+    done <"$ports_file"
     [ "$first" = 1 ] || printf ','
     printf '%s' '{"IpProtocol":"icmp","PortRange":"-1/-1","SourceCidrIp":"0.0.0.0/0","Policy":"Accept"},{"IpProtocol":"tcp","PortRange":"5432/5432","SourceCidrIp":"10.0.0.0/8","Policy":"Accept"}]}}'
     printf '\n'
@@ -373,7 +385,9 @@ setup_source_state() {
 reset_aliyun_state() {
   printf '39.101.65.254\n' >"$FAKE_STATE/aliyun-ip"
   printf 'false\n' >"$FAKE_STATE/aliyun-deletion"
+  printf 'sg-0jlb5v2njkb2jbzrvurr\n' >"$FAKE_STATE/aliyun-groups"
   printf '22\n3389\n' >"$FAKE_STATE/aliyun-ports"
+  : >"$FAKE_STATE/aliyun-extra-ports"
   /bin/rm -f -- "$FAKE_STATE/remote-migration-marker" "$FAKE_STATE/remote-migration-state-unsafe"
 }
 
@@ -517,6 +531,14 @@ run_cloud_tests() {
     "$FIXTURE_REPO/deploy/production/scripts/cloud-guardrails.sh"
   [ "$(grep -Ec 'aliyun ecs (AuthorizeSecurityGroup|RevokeSecurityGroup|ModifyInstanceAttribute)' "$BOUNDARY_LOG")" = 1 ] \
     || fail 'failed guardrail action did not halt later calls'
+
+  reset_aliyun_state
+  printf 'sg-0jlb5v2njkb2jbzrvurr\nsg-extra-public\n' >"$FAKE_STATE/aliyun-groups"
+  printf '5432\n8080\n' >"$FAKE_STATE/aliyun-extra-ports"
+  : >"$BOUNDARY_LOG"
+  expect_fail "$FIXTURE_REPO/deploy/production/scripts/cloud-guardrails.sh"
+  ! grep -Eq 'AuthorizeSecurityGroup|RevokeSecurityGroup|ModifyInstanceAttribute' "$BOUNDARY_LOG" \
+    || fail 'extra security group did not halt before mutation'
   echo 'PASS: cloud guardrails'
 }
 
@@ -536,6 +558,7 @@ assert_transport_options() {
 run_deploy_tests() {
   local identity known_hosts marker release_line upload_line backup_line activate_line
   local backup_timestamp activation_timestamp
+  local smoke_override session_override run_id_override
   setup_source_state
   reset_aliyun_state
   identity="$TMP/id_ed25519"
@@ -544,6 +567,13 @@ run_deploy_tests() {
   printf '39.101.65.254 ssh-ed25519 AAAAC3NzaFixture\n' >"$known_hosts"
   chmod 0600 "$identity" "$known_hosts"
   export SOURCE_STATE_ROOT="$SOURCE_ROOT" HAPPY_AGENT_SSH_IDENTITY="$identity"
+  smoke_override="$TMP/smoke-overrides"
+  session_override="$smoke_override/session.hex"
+  run_id_override="$smoke_override/run.uuid"
+  mkdir -m 0700 "$smoke_override"
+  cp "$SOURCE_ROOT/deploy/.local/production/public-smoke-session" "$session_override"
+  cp "$SOURCE_ROOT/deploy/.local/production/public-smoke-run-id" "$run_id_override"
+  chmod 0600 "$session_override" "$run_id_override"
 
   assert_exit_2 "$FIXTURE_REPO/deploy/production/deploy.sh"
   assert_exit_2 "$FIXTURE_REPO/deploy/production/deploy.sh" unknown
@@ -579,6 +609,7 @@ run_deploy_tests() {
 
   : >"$BOUNDARY_LOG"
   HAPPY_AGENT_BUILD_TIMESTAMP=20260813T123000Z HAPPY_AGENT_EXPORT_TIMESTAMP=20260813T123100Z \
+    PUBLIC_SMOKE_SESSION_FILE="$session_override" PUBLIC_SMOKE_RUN_ID_FILE="$run_id_override" \
     "$FIXTURE_REPO/deploy/production/deploy.sh" migrate
   marker="$FIXTURE_REPO/deploy/.local/production/migrations/first-migration.marker"
   [ -f "$marker" ] && [ ! -L "$marker" ] || fail 'local migration marker missing'
@@ -588,6 +619,8 @@ run_deploy_tests() {
   assert_contains "$BOUNDARY_LOG" 'issue-certificate.sh'
   assert_contains "$BOUNDARY_LOG" 'activate-release.sh 20260813T123000Z-abc1234'
   assert_contains "$BOUNDARY_LOG" 'write-migration-marker'
+  assert_contains "$BOUNDARY_LOG" "$session_override root@39.101.65.254:/opt/happy-agent/staging/.pending-smoke-20260813T123000Z-abc1234/public-smoke-session"
+  assert_contains "$BOUNDARY_LOG" "$run_id_override root@39.101.65.254:/opt/happy-agent/staging/.pending-smoke-20260813T123000Z-abc1234/public-smoke-run-id"
   assert_transport_options
   : >"$BOUNDARY_LOG"
   expect_fail env HAPPY_AGENT_BUILD_TIMESTAMP=20260813T123200Z HAPPY_AGENT_EXPORT_TIMESTAMP=20260813T123300Z \

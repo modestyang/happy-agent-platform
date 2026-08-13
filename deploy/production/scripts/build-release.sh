@@ -150,7 +150,7 @@ for script_name in common.sh bootstrap-host.sh issue-certificate.sh renew-certif
   install -m 0700 "$PRODUCTION_ROOT/scripts/$script_name" "$pending/scripts/$script_name"
 done
 for postgres_file in init-roles.sh init-roles.sql enforce-isolation.sql assert-initial-empty-target.sql; do
-  install -m 0600 "$PRODUCTION_ROOT/postgres/$postgres_file" "$pending/postgres/$postgres_file"
+  install -m 0644 "$PRODUCTION_ROOT/postgres/$postgres_file" "$pending/postgres/$postgres_file"
 done
 for unit_file in happy-agent-cert-renew.service happy-agent-cert-renew.timer; do
   install -m 0600 "$PRODUCTION_ROOT/systemd/$unit_file" "$pending/systemd/$unit_file"

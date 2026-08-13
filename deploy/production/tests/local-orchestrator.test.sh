@@ -431,6 +431,11 @@ run_build_tests() {
     [ -f "$file" ] || fail "missing release file: ${file#$release/}"
     assert_mode "$file" 600
   done
+  for file in "$release/postgres/init-roles.sh" "$release/postgres/init-roles.sql" \
+    "$release/postgres/enforce-isolation.sql" \
+    "$release/postgres/assert-initial-empty-target.sql"; do
+    assert_mode "$file" 644
+  done
   assert_contains "$release/.env" 'RELEASE_ID=20260813T120000Z-abc1234'
   assert_contains "$release/.env" 'APP_IMAGE=happy-agent-app:20260813T120000Z-abc1234'
   assert_contains "$release/.env" 'WEB_IMAGE=happy-agent-web:20260813T120000Z-abc1234'
